@@ -5,6 +5,7 @@ import {
   Drawer,
   IconButton,
   List,
+  ListItem,
   ListItemButton,
   ListItemText,
   Stack,
@@ -109,30 +110,30 @@ export function EventsPanel({
           const hostId = row.event.hosted_by_camp ?? row.event.located_at_art ?? ''
           const host = hosts.get(hostId)
           return (
-            <ListItemButton
-              key={`${row.event.uid}-${index}`}
-              disabled={!host}
-              onClick={() => host && onSelect(host)}
-            >
-              <ListItemText
-                primary={row.event.title}
-                secondary={[host?.name ?? row.event.other_location, formatWhen(row, now)]
-                  .filter(Boolean)
-                  .join(' · ')}
-                slotProps={{ primary: { variant: 'body2' } }}
-              />
-              {row.event.event_type && (
-                <Chip size="small" variant="outlined" label={row.event.event_type.abbr} />
-              )}
-            </ListItemButton>
+            // A plain <li> wrapping the button: putting role="button" on the
+            // <li> itself would strip its list semantics from the a11y tree.
+            <ListItem key={`${row.event.uid}-${index}`} disablePadding>
+              <ListItemButton disabled={!host} onClick={() => host && onSelect(host)}>
+                <ListItemText
+                  primary={row.event.title}
+                  secondary={[host?.name ?? row.event.other_location, formatWhen(row, now)]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  slotProps={{ primary: { variant: 'body2' } }}
+                />
+                {row.event.event_type && (
+                  <Chip size="small" variant="outlined" label={row.event.event_type.abbr} />
+                )}
+              </ListItemButton>
+            </ListItem>
           )
         })}
-        {rows.length === 0 && (
-          <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 3 }}>
-            Nothing scheduled in this window.
-          </Typography>
-        )}
       </List>
+      {rows.length === 0 && (
+        <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 3 }}>
+          Nothing scheduled in this window.
+        </Typography>
+      )}
     </Drawer>
   )
 }

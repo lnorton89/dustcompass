@@ -67,6 +67,9 @@ npm run dev
 - Toilets, medical, rangers and civic landmarks on a layer of their own
 - Events filtered to now / next 3h / today, jumping to the hosting camp
 - Favourites, and walk/bike estimates from your GPS fix or the Man
+- "Take me there" draws a line from where you are, with distance, walk and
+  bike estimates, and the direction as a clock position
+- Share any listing or dropped pin as a link that carries a playa address
 - Installs as an app and works with no connectivity at all
 
 ## Data and licensing
@@ -116,13 +119,15 @@ Two integration details worth knowing, both of which cost real debugging time:
 
 ## Testing
 
-Three layers, all runnable locally.
+Four layers, all runnable locally.
 
 ```sh
-npm test                                              # 37 unit tests
-npm run dev & npm run test:smoke http://127.0.0.1:5173/     # 12 browser assertions
+npm test                                                 # 52 unit + component tests
+npm run dev &
+npm run test:smoke  http://127.0.0.1:5173/               # 20 browser assertions
+npm run test:a11y   http://127.0.0.1:5173/               # axe, 7 UI states
 npm run build && npx vite preview --port 4173 &
-npm run test:offline http://127.0.0.1:4173/           # proves offline works
+npm run test:offline http://127.0.0.1:4173/              # proves offline works
 ```
 
 **Unit** — the geocoder is held against Burning Man's own surveyed GPS rather
@@ -137,6 +142,10 @@ could plot.
 clusters, toilets, services), toggles a filter and checks the layer actually
 empties and refills, drives a search, opens a listing, stars it and confirms it
 persisted.
+
+**Accessibility** — axe against WCAG 2.1 AA across the map, events panel,
+search suggestions, listing details, navigation, and the phone layout including
+its filter sheet.
 
 **Offline** — loads the app, waits for the service worker to finish precaching,
 disables the network, reloads, and requires the map to paint and addresses to

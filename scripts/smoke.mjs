@@ -143,6 +143,37 @@ await page.waitForTimeout(900)
 const pinned = new URL(page.url()).searchParams.get('at')
 assert(Boolean(pinned), `tapping playa puts an address in the URL (${pinned})`)
 
+// Saving a spot and getting back to it — the thing this app is for at 4am.
+await page.getByRole('button', { name: 'Save', exact: true }).click()
+await page.waitForTimeout(500)
+await page.getByRole('button', { name: 'My camp' }).click()
+await page.waitForTimeout(700)
+
+const savedJson = await page.evaluate(() => localStorage.getItem('playa-map.places.v1'))
+assert(Boolean(savedJson) && savedJson.includes('My camp'), 'saved spot persisted to the device')
+assert(
+  (await page.evaluate(() => window.__map.queryRenderedFeatures({ layers: ['saved-dot'] }).length)) > 0,
+  'saved spot is marked on the map',
+)
+
+// It has to be findable by name, and lead somewhere.
+await search.fill('')
+await search.fill('My camp')
+await page.waitForTimeout(700)
+await page.keyboard.press('ArrowDown')
+await page.keyboard.press('Enter')
+await page.waitForTimeout(1000)
+
+await page.getByLabel('Filters and saved spots').click()
+await page.waitForTimeout(700)
+await page.getByRole('button', { name: /^My camp/ }).click()
+await page.waitForTimeout(900)
+assert(
+  await page.locator('.MuiPaper-root').filter({ hasText: 'My camp' }).count() > 0,
+  'saved spot can be navigated back to',
+)
+
+
 // That URL, opened cold, must restore the same place.
 const shared = await context.newPage()
 await shared.goto(page.url(), { waitUntil: 'load' })

@@ -78,9 +78,21 @@ async function ready(page) {
   const page = await context.newPage()
   await ready(page)
   await audit(page, 'phone map')
-  await page.getByLabel('Filters and map options').click()
+  await page.getByLabel('Filters and saved spots').click()
   await page.waitForTimeout(800)
   await audit(page, 'phone filter sheet')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(500)
+
+  // The save dialog, reached by tapping bare playa.
+  await page.locator('canvas').click({ position: { x: 200, y: 400 } })
+  await page.waitForTimeout(900)
+  const save = page.getByRole('button', { name: 'Save', exact: true })
+  if (await save.count()) {
+    await save.click()
+    await page.waitForTimeout(600)
+    await audit(page, 'save spot dialog')
+  }
   await context.close()
 }
 

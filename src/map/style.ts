@@ -14,6 +14,7 @@ export interface PlayaPalette {
   medical: string
   ranger: string
   civic: string
+  saved: string
 }
 
 export const DARK: PlayaPalette = {
@@ -30,6 +31,7 @@ export const DARK: PlayaPalette = {
   medical: '#ef4444',
   ranger: '#22c55e',
   civic: '#cbb994',
+  saved: '#facc15',
 }
 
 export const LIGHT: PlayaPalette = {
@@ -46,6 +48,7 @@ export const LIGHT: PlayaPalette = {
   medical: '#b91c1c',
   ranger: '#15803d',
   civic: '#7a6a45',
+  saved: '#a16207',
 }
 
 /**

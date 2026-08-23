@@ -11,18 +11,20 @@ import SearchIcon from '@mui/icons-material/Search'
 import type { CityLayout } from '../brc/layout'
 import { geocode } from '../brc/geocode'
 import type { Poi } from '../data/types'
+import type { SavedPlace } from '../data/useSavedPlaces'
 import type { Position } from '../brc/geo'
 
 interface Props {
   layout: CityLayout
   pois: Poi[]
+  places: SavedPlace[]
   onGo: (position: Position, poi?: Poi) => void
 }
 
 interface Option {
   label: string
   detail: string
-  kind: 'address' | 'art' | 'camp'
+  kind: 'address' | 'art' | 'camp' | 'saved'
   position: Position
   poi?: Poi
 }
@@ -32,7 +34,7 @@ interface Option {
  * search term as often as the name is, so splitting them into two fields would
  * be wrong.
  */
-export function SearchPanel({ layout, pois, onGo }: Props) {
+export function SearchPanel({ layout, pois, places, onGo }: Props) {
   const [query, setQuery] = useState('')
 
   const options = useMemo<Option[]>(() => {
@@ -40,6 +42,18 @@ export function SearchPanel({ layout, pois, onGo }: Props) {
     if (term.length < 2) return []
 
     const results: Option[] = []
+
+    // Saved spots first: if you are searching at 4am, this is what you want.
+    for (const place of places) {
+      if (place.name.toLowerCase().includes(term)) {
+        results.push({
+          label: place.name,
+          detail: place.address,
+          kind: 'saved',
+          position: place.position,
+        })
+      }
+    }
 
     const located = geocode(query, layout)
     if (located) {
@@ -64,7 +78,7 @@ export function SearchPanel({ layout, pois, onGo }: Props) {
       }
     }
     return results
-  }, [query, layout, pois])
+  }, [query, layout, pois, places])
 
   return (
     <Autocomplete
@@ -85,7 +99,13 @@ export function SearchPanel({ layout, pois, onGo }: Props) {
             <Chip
               size="small"
               label={option.kind}
-              color={option.kind === 'address' ? 'default' : option.kind === 'art' ? 'primary' : 'secondary'}
+              color={
+                option.kind === 'art'
+                  ? 'primary'
+                  : option.kind === 'camp'
+                    ? 'secondary'
+                    : 'default'
+              }
               variant="outlined"
             />
           </ListItem>

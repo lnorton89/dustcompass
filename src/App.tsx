@@ -34,6 +34,8 @@ import { useEventsByHost, usePlayaData } from './data/usePlayaData'
 import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
 import { useGeolocation } from './data/useGeolocation'
+import { useSavedPlaces } from './data/useSavedPlaces'
+import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, useDeepLink } from './data/useDeepLink'
 import { travelBetween } from './brc/travel'
 import { bearingToClock, bearingBetween } from './brc/geo'
@@ -55,6 +57,8 @@ const FILTERS: { key: Filter; label: string; color: 'primary' | 'secondary' | 'd
 export default function App() {
   const { data, error } = usePlayaData()
   const { favorites, toggle: toggleFavorite } = useFavorites()
+  const { places, save: savePlace, remove: removePlace } = useSavedPlaces()
+  const [saving, setSaving] = useState<{ position: Position; address: string }>()
   const [mode, setMode] = useState<'dark' | 'light'>('dark')
   const [cityUp, setCityUp] = useState(true)
   const [active, setActive] = useState<Set<Filter>>(
@@ -198,7 +202,7 @@ export default function App() {
             )}
 
             <Box sx={{ flex: '1 1 auto', minWidth: 0, maxWidth: { md: 480 } }}>
-              {data && <SearchPanel layout={data.layout} pois={data.pois} onGo={flyTo} />}
+              {data && <SearchPanel layout={data.layout} pois={data.pois} places={places} onGo={flyTo} />}
             </Box>
 
             <Stack
@@ -217,15 +221,13 @@ export default function App() {
                     onClick={() => toggleFilter(filter.key)}
                   />
                 ))}
-              {compact && (
-                <IconButton
-                  size="small"
-                  onClick={() => setFiltersOpen(true)}
-                  aria-label="Filters and map options"
-                >
-                  <TuneIcon fontSize="small" />
-                </IconButton>
-              )}
+              <IconButton
+                size="small"
+                onClick={() => setFiltersOpen(true)}
+                aria-label="Filters and saved spots"
+              >
+                <TuneIcon fontSize="small" />
+              </IconButton>
               <Tooltip title="Events">
                 <ToggleButton
                   value="events"
@@ -294,6 +296,14 @@ export default function App() {
                   setPin({ position, address })
                 }}
                 onLocate={setManualHere}
+                savedPlaces={places}
+                onSelectPlace={(id) => {
+                  const place = places.find((p) => p.id === id)
+                  if (place) {
+                    setHeading({ name: place.name, position: place.position, address: place.address })
+                    location.start()
+                  }
+                }}
                 pin={pin}
                 initialTarget={initialTarget}
                 route={heading && origin ? { from: origin, to: heading.position } : undefined}
@@ -337,13 +347,31 @@ export default function App() {
         </Box>
       </Box>
 
+      <SavePlaceDialog
+        open={Boolean(saving)}
+        address={saving?.address ?? ''}
+        onSave={(name) => {
+          if (saving) savePlace(name, saving.position, saving.address)
+          setSaving(undefined)
+          setProbe(`Saved "${name}"`)
+        }}
+        onClose={() => setSaving(undefined)}
+      />
+
       <FilterSheet
         open={filtersOpen}
         options={FILTERS}
         active={active}
         cityUp={cityUp}
+        places={places}
         onToggle={toggleFilter}
         onToggleCityUp={toggleCityUp}
+        onGoToPlace={(place) => {
+          setFiltersOpen(false)
+          setHeading({ name: place.name, position: place.position, address: place.address })
+          location.start()
+        }}
+        onRemovePlace={removePlace}
         onClose={() => setFiltersOpen(false)}
       />
 
@@ -388,13 +416,18 @@ export default function App() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         action={
           pin && probe === pin.address ? (
-            <Button
-              color="secondary"
-              size="small"
-              onClick={() => void share({ at: pin.address }, `Meet me at ${pin.address}`)}
-            >
-              Share
-            </Button>
+            <>
+              <Button color="secondary" size="small" onClick={() => setSaving(pin)}>
+                Save
+              </Button>
+              <Button
+                color="secondary"
+                size="small"
+                onClick={() => void share({ at: pin.address }, `Meet me at ${pin.address}`)}
+              >
+                Share
+              </Button>
+            </>
           ) : undefined
         }
       />

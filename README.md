@@ -39,7 +39,12 @@ If you later want surrounding desert, `src/map/protocols.ts` registers
 backend.
 
 **Dark by default.** A white screen at 3am destroys night vision for everyone
-standing near you. Toilets and services stay on their own layer that survives
+standing near you.
+
+**Saved spots are the point at 4am.** Where the tent is, where the bike got
+left, where you agreed to meet. They live on the device, never touch the
+network, and survive a corrupted or truncated write — losing the file is
+acceptable, crashing the map on the one night it is needed is not. Toilets and services stay on their own layer that survives
 filtering camps and art away, for the same reason.
 
 **Time is playa time.** "What's on now" uses Black Rock City's clock, not the
@@ -92,6 +97,7 @@ renders an empty map. It also distinguishes "locations are still embargoed" from
 - Favourites, and walk/bike estimates from your GPS fix or the Man
 - "Take me there" draws a line from where you are, with distance, walk and
   bike estimates, and the direction as a clock position
+- Save where your camp, tent or bike is, and find your way back to it
 - Share any listing or dropped pin as a link that carries a playa address
 - Installs as an app and works with no connectivity at all
 
@@ -145,10 +151,10 @@ Two integration details worth knowing, both of which cost real debugging time:
 Four layers, all runnable locally.
 
 ```sh
-npm test                                                 # 52 unit + component tests
+npm test                                                 # 68 unit + component tests
 npm run dev &
-npm run test:smoke  http://127.0.0.1:5173/               # 20 browser assertions
-npm run test:a11y   http://127.0.0.1:5173/               # axe, 7 UI states
+npm run test:smoke  http://127.0.0.1:5173/               # 23 browser assertions
+npm run test:a11y   http://127.0.0.1:5173/               # axe, 8 UI states
 npm run build && npx vite preview --port 4173 &
 npm run test:offline http://127.0.0.1:4173/              # proves offline works
 ```
@@ -167,8 +173,8 @@ empties and refills, drives a search, opens a listing, stars it and confirms it
 persisted.
 
 **Accessibility** — axe against WCAG 2.1 AA across the map, events panel,
-search suggestions, listing details, navigation, and the phone layout including
-its filter sheet.
+search suggestions, listing details, navigation, the save dialog, and the phone
+layout including its filter sheet.
 
 **Offline** — loads the app, waits for the service worker to finish precaching,
 disables the network, reloads, and requires the map to paint and addresses to

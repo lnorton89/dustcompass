@@ -1,12 +1,20 @@
 import {
+  Box,
   Chip,
+  Divider,
   Drawer,
+  FormControlLabel,
+  IconButton,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
   Stack,
   Switch,
-  FormControlLabel,
   Typography,
-  Box,
 } from '@mui/material'
+import DeleteIcon from '@mui/icons-material/Delete'
+import type { SavedPlace } from '../data/useSavedPlaces'
 
 export interface FilterOption<T extends string> {
   key: T
@@ -19,8 +27,11 @@ interface Props<T extends string> {
   options: FilterOption<T>[]
   active: Set<T>
   cityUp: boolean
+  places: SavedPlace[]
   onToggle: (key: T) => void
   onToggleCityUp: () => void
+  onGoToPlace: (place: SavedPlace) => void
+  onRemovePlace: (id: string) => void
   onClose: () => void
 }
 
@@ -34,8 +45,11 @@ export function FilterSheet<T extends string>({
   options,
   active,
   cityUp,
+  places,
   onToggle,
   onToggleCityUp,
+  onGoToPlace,
+  onRemovePlace,
   onClose,
 }: Props<T>) {
   return (
@@ -65,6 +79,37 @@ export function FilterSheet<T extends string>({
           label="12:00 points up"
         />
       </Box>
+
+      <Divider sx={{ my: 1.5 }} />
+      <Typography variant="subtitle2">Saved spots</Typography>
+      {places.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
+          Tap anywhere on the map to save where your camp or bike is.
+        </Typography>
+      ) : (
+        <List dense disablePadding sx={{ maxHeight: 200, overflowY: 'auto' }}>
+          {places.map((place) => (
+            <ListItem
+              key={place.id}
+              disablePadding
+              secondaryAction={
+                <IconButton
+                  edge="end"
+                  size="small"
+                  aria-label={`Delete ${place.name}`}
+                  onClick={() => onRemovePlace(place.id)}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              }
+            >
+              <ListItemButton onClick={() => onGoToPlace(place)}>
+                <ListItemText primary={place.name} secondary={place.address} />
+              </ListItemButton>
+            </ListItem>
+          ))}
+        </List>
+      )}
     </Drawer>
   )
 }

@@ -11,12 +11,14 @@ import {
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { PlayaData } from '../data/usePlayaData'
 import type { Poi, PoiKind } from '../data/types'
+import type { SavedPlace } from '../data/useSavedPlaces'
 import { reverseGeocode } from '../brc/geocode'
 import type { Position } from '../brc/geo'
 import { cityOutlinePoints, frameFor } from '../brc/frame'
 import { CityLayers } from './CityLayers'
 import { POI_LAYER_ID, PoiLayers } from './PoiLayers'
 import { RouteLayer } from './RouteLayer'
+import { SAVED_LAYER_ID, SavedPlacesLayer } from './SavedPlacesLayer'
 import { ServiceLayers } from './ServiceLayers'
 import { baseStyle, DARK, LIGHT } from './style'
 
@@ -42,6 +44,8 @@ interface Props {
   initialTarget?: Position
   /** Straight line drawn to the place being navigated to. */
   route?: { from: Position; to: Position }
+  savedPlaces: SavedPlace[]
+  onSelectPlace: (id: string) => void
   mapRef: React.RefObject<MapRef | null>
 }
 
@@ -60,6 +64,8 @@ export function MapView({
   pin,
   initialTarget,
   route,
+  savedPlaces,
+  onSelectPlace,
   mapRef,
 }: Props) {
   const palette = mode === 'dark' ? DARK : LIGHT
@@ -77,6 +83,10 @@ export function MapView({
   const handleClick = useCallback(
     (event: MapLayerMouseEvent) => {
       const hit = event.features?.[0]
+      if (hit?.layer?.id === SAVED_LAYER_ID && hit.properties?.id) {
+        onSelectPlace(String(hit.properties.id))
+        return
+      }
       if (hit?.properties?.uid) {
         onSelect(poiIndex.get(String(hit.properties.uid)))
         return
@@ -102,7 +112,7 @@ export function MapView({
         bearing: cityUp ? data.layout.bearing : 0,
       }}
       mapStyle={style}
-      interactiveLayerIds={[POI_LAYER_ID]}
+      interactiveLayerIds={[POI_LAYER_ID, SAVED_LAYER_ID]}
       onClick={handleClick}
       onMouseEnter={() => setCursor('pointer')}
       onMouseLeave={() => setCursor(undefined)}
@@ -161,6 +171,7 @@ export function MapView({
 
       <CityLayers city={data.city} palette={palette} />
       <RouteLayer from={route?.from} to={route?.to} palette={palette} />
+      <SavedPlacesLayer places={savedPlaces} palette={palette} />
       <ServiceLayers
         services={data.services}
         toilets={data.toilets}

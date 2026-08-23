@@ -4,6 +4,8 @@ import type { PlayaPalette } from './style'
 
 interface Props {
   city: CityGeometry
+  /** Surveyed camp block footprints. */
+  campOutlines: GeoJSON.FeatureCollection
   palette: PlayaPalette
 }
 
@@ -11,7 +13,7 @@ interface Props {
  * The city itself: fence, plazas, streets, landmarks. All of it comes from
  * client-generated GeoJSON, so there is nothing to fetch and nothing to cache.
  */
-export function CityLayers({ city, palette }: Props) {
+export function CityLayers({ city, campOutlines, palette }: Props) {
   return (
     <>
       <Source id="fence" type="geojson" data={city.fence}>
@@ -23,6 +25,23 @@ export function CityLayers({ city, palette }: Props) {
             'line-width': 2,
             'line-dasharray': [3, 2],
             'line-opacity': 0.9,
+          }}
+        />
+      </Source>
+
+      {/*
+        The surveyed footprints of the camp blocks. Only from z15 up: below
+        that they are finer than a pixel and just muddy the streets.
+      */}
+      <Source id="camp-outlines" type="geojson" data={campOutlines}>
+        <Layer
+          id="camp-outline-line"
+          type="line"
+          minzoom={15}
+          paint={{
+            'line-color': palette.streetCasing,
+            'line-width': ['interpolate', ['linear'], ['zoom'], 15, 0.4, 19, 1.6],
+            'line-opacity': ['interpolate', ['linear'], ['zoom'], 15, 0, 16, 0.8],
           }}
         />
       </Source>

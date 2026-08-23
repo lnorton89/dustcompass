@@ -18,6 +18,8 @@ export interface PlayaData {
   range?: EventRange
   services: GeoJSON.FeatureCollection<GeoJSON.Point>
   toilets: GeoJSON.FeatureCollection<GeoJSON.Point>
+  /** Surveyed camp block footprints, drawn at high zoom. */
+  campOutlines: GeoJSON.FeatureCollection
   embargo: EmbargoState
 }
 
@@ -51,8 +53,9 @@ export function usePlayaData() {
       loadJson<{ rangeInfo?: EventRange }>(`${base}/dates_info.json`).catch<{
         rangeInfo?: EventRange
       }>(() => ({})),
+      loadJson<GeoJSON.FeatureCollection>(`${base}/camp_outlines.geojson`).catch(() => empty()),
     ])
-      .then(([layout, rawArt, rawCamps, events, serviceSpecs, rawToilets, dates]) => {
+      .then(([layout, rawArt, rawCamps, events, serviceSpecs, rawToilets, dates, outlines]) => {
         if (cancelled) return
         const embargo = embargoState(BRC_2026)
         const art = applyEmbargo(rawArt, embargo.artReleased)
@@ -67,6 +70,7 @@ export function usePlayaData() {
           range: dates.rangeInfo,
           services: buildServices(layout, serviceSpecs),
           toilets: toiletPoints(rawToilets),
+          campOutlines: outlines,
           embargo,
         })
       })

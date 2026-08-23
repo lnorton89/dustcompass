@@ -96,7 +96,8 @@ renders an empty map. It also distinguishes "locations are still embargoed" from
 
 ## What it does
 
-- Renders Black Rock City generated from its layout spec, rotated so 12:00 is up
+- Renders Black Rock City generated from its layout spec, rotated so 12:00 is up,
+  with surveyed camp footprints once you zoom in
 - Search by camp or art name, or by address — `D & 3:15`, `7:30 & Esplanade`,
   `9:00 B Plaza @ 4:45`, `12:00 2500'`
 - Tap bare playa to get its street address back
@@ -190,7 +191,7 @@ Four layers, all runnable locally.
 ```sh
 npm test                                                 # 68 unit + component tests
 npm run dev &
-npm run test:smoke  http://127.0.0.1:5173/               # 28 browser assertions
+npm run test:smoke  http://127.0.0.1:5173/               # 30 browser assertions
 npm run test:a11y   http://127.0.0.1:5173/               # axe, 9 UI states
 npm run build && npx vite preview --port 4173 &
 npm run test:offline http://127.0.0.1:4173/              # proves offline works

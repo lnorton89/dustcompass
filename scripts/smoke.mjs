@@ -130,6 +130,17 @@ assert(/\bmin\b|\bh\b/.test(drawerText), 'drawer shows travel time')
 await page.getByLabel('Close details').click()
 await page.waitForTimeout(500)
 
+// Surveyed camp footprints appear only when zoomed in enough to read them.
+await page.evaluate(() => window.__map.zoomTo(13.5, { duration: 0 }))
+await page.waitForTimeout(1500)
+assert(
+  (await count('camp-outline-line')) === 0,
+  'camp outlines stay hidden at city zoom, where they would just muddy the streets',
+)
+await page.evaluate(() => window.__map.zoomTo(16.5, { duration: 0 }))
+await page.waitForTimeout(1800)
+assert((await count('camp-outline-line')) > 10, `camp outlines appear up close (${await count('camp-outline-line')})`)
+
 // Themes cycle dark → light → red night, and the map restyles with them.
 await page.getByLabel('Switch to light mode').click()
 await page.waitForTimeout(1200)

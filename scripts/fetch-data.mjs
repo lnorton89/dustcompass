@@ -41,6 +41,7 @@ try {
       'set',
       `data/${YEAR}/layouts/*`,
       `data/${YEAR}/geo/toilets.geojson`,
+      `data/${YEAR}/Map/Map.bundle/camp_outlines.geojson`,
       `data/${YEAR}/APIData/APIData.bundle/*.json`,
       ...GLYPH_RANGES.map((r) => `data/${YEAR}/Map/Map.bundle/glyphs/Open Sans Regular/${r}.pbf`),
     ],
@@ -67,6 +68,12 @@ try {
   // than architectural consistency does.
   const toilets = join(src, 'geo', 'toilets.geojson')
   if (existsSync(toilets)) await cp(toilets, join(OUT, 'toilets.geojson'))
+
+  // Surveyed camp block footprints — what the city actually looks like on the
+  // ground, rather than a dot per camp. The sibling camp_labels file is 25MB of
+  // letterforms drawn as linework and is skipped: labels come from glyphs.
+  const outlines = join(src, 'Map', 'Map.bundle', 'camp_outlines.geojson')
+  if (existsSync(outlines)) await cp(outlines, join(OUT, 'camp_outlines.geojson'))
   for (const name of ['art', 'camp', 'event', 'points', 'dates_info']) {
     const from = join(src, 'APIData', 'APIData.bundle', `${name}.json`)
     if (existsSync(from)) await cp(from, join(OUT, `${name}.json`))

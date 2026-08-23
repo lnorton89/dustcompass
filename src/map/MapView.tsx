@@ -169,7 +169,7 @@ export function MapView({
         </Marker>
       )}
 
-      <CityLayers city={data.city} palette={palette} />
+      <CityLayers city={data.city} campOutlines={data.campOutlines} palette={palette} />
       <RouteLayer from={route?.from} to={route?.to} palette={palette} />
       <SavedPlacesLayer places={savedPlaces} palette={palette} />
       <ServiceLayers

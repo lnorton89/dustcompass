@@ -96,6 +96,32 @@ assert(Boolean(stored) && stored !== '[]', `favourite persisted (${stored})`)
 // Walk and bike estimates should both be present in the drawer.
 const drawerText = await page.locator('.MuiDrawer-root').last().innerText()
 assert(/\bmin\b|\bh\b/.test(drawerText), 'drawer shows travel time')
+
+// Close the listing so the map is clickable again.
+await page.getByLabel('Close details').click()
+await page.waitForTimeout(500)
+
+// Tapping bare playa drops a shareable pin and puts the address in the URL.
+await page.locator('canvas').click({ position: { x: 700, y: 420 } })
+await page.waitForTimeout(900)
+const pinned = new URL(page.url()).searchParams.get('at')
+assert(Boolean(pinned), `tapping playa puts an address in the URL (${pinned})`)
+
+// That URL, opened cold, must restore the same place.
+const shared = await context.newPage()
+await shared.goto(page.url(), { waitUntil: 'load' })
+await shared.waitForFunction(() => document.documentElement.dataset.mapReady === 'true', null, {
+  timeout: 30000,
+})
+await shared.waitForTimeout(2500)
+const restored = await shared.evaluate(() => ({
+  zoom: window.__map.getZoom(),
+  marked: document.querySelectorAll('.maplibregl-marker').length,
+}))
+assert(restored.marked > 0, `shared link restores the marker (${restored.marked})`)
+assert(restored.zoom > 15, `shared link restores the zoom (${restored.zoom.toFixed(1)})`)
+await shared.close()
+
 console.log(problems.length ? `\n${problems.length} problem(s):\n` + problems.join('\n') : '\nno console or network errors')
 await browser.close()
 process.exit(problems.length ? 1 : 0)

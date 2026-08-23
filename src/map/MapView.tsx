@@ -3,6 +3,7 @@ import {
   GeolocateControl,
   Map as MapGL,
   NavigationControl,
+  Marker,
   ScaleControl,
   type MapLayerMouseEvent,
   type MapRef,
@@ -12,6 +13,7 @@ import type { PlayaData } from '../data/usePlayaData'
 import type { Poi, PoiKind } from '../data/types'
 import { reverseGeocode } from '../brc/geocode'
 import type { Position } from '../brc/geo'
+import { cityOutlinePoints, frameFor } from '../brc/frame'
 import { CityLayers } from './CityLayers'
 import { POI_LAYER_ID, PoiLayers } from './PoiLayers'
 import { ServiceLayers } from './ServiceLayers'
@@ -29,6 +31,14 @@ interface Props {
   onProbe: (address: string, position: Position) => void
   /** Fires when the browser reports the user's position. */
   onLocate: (position: Position) => void
+  /** A dropped or shared location to mark, if any. */
+  pin?: { position: Position; address: string }
+  /**
+   * Where a shared link wants the camera. Framing the whole city on load would
+   * otherwise race this and win, dropping the visitor on the city view instead
+   * of the place they were sent to.
+   */
+  initialTarget?: Position
   mapRef: React.RefObject<MapRef | null>
 }
 
@@ -44,6 +54,8 @@ export function MapView({
   onSelect,
   onProbe,
   onLocate,
+  pin,
+  initialTarget,
   mapRef,
 }: Props) {
   const palette = mode === 'dark' ? DARK : LIGHT
@@ -54,7 +66,9 @@ export function MapView({
     [data.pois],
   )
 
-  const [lon, lat] = data.layout.center.geometry.coordinates
+  // Frame the whole city rather than guessing a zoom. A fixed zoom that suits a
+  // desktop window crops the city badly on a tall phone screen.
+  const outline = useMemo(() => cityOutlinePoints(data.city.streets), [data.city])
 
   const handleClick = useCallback(
     (event: MapLayerMouseEvent) => {
@@ -76,9 +90,9 @@ export function MapView({
     <MapGL
       ref={mapRef}
       initialViewState={{
-        longitude: lon,
-        latitude: lat,
-        zoom: 13.6,
+        longitude: data.layout.center.geometry.coordinates[0],
+        latitude: data.layout.center.geometry.coordinates[1],
+        zoom: 13,
         // 12:00 sits at compass bearing 45°, so rotating the map by that much
         // puts the Man at the centre with 12:00 straight up.
         bearing: cityUp ? data.layout.bearing : 0,
@@ -90,6 +104,22 @@ export function MapView({
       onMouseLeave={() => setCursor(undefined)}
       cursor={cursor}
       onLoad={(event) => {
+        const map = event.target
+        const bearing = cityUp ? data.layout.bearing : 0
+
+        if (initialTarget) {
+          map.jumpTo({ center: initialTarget, zoom: 16.5, bearing })
+        } else {
+          // Frame the city for the viewport actually in front of the user.
+          const canvas = map.getCanvas()
+          const frame = frameFor(
+            outline,
+            data.layout.center.geometry.coordinates as Position,
+            bearing,
+            { width: canvas.clientWidth, height: canvas.clientHeight, padding: 40 },
+          )
+          if (frame) map.jumpTo({ center: frame.center, zoom: frame.zoom, bearing })
+        }
         // A readiness flag end-to-end tests can wait on in any build. The map
         // handle itself is only exposed in development.
         document.documentElement.dataset.mapReady = 'true'
@@ -107,6 +137,24 @@ export function MapView({
         onGeolocate={(event) => onLocate([event.coords.longitude, event.coords.latitude])}
       />
       <ScaleControl position="bottom-left" unit="imperial" />
+      {pin && (
+        <Marker longitude={pin.position[0]} latitude={pin.position[1]} anchor="bottom">
+          <div
+            title={pin.address}
+            aria-label={`Marked location: ${pin.address}`}
+            style={{
+              width: 16,
+              height: 16,
+              borderRadius: '50% 50% 50% 0',
+              transform: 'rotate(-45deg)',
+              background: palette.art,
+              border: `2px solid ${palette.playa}`,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.6)',
+            }}
+          />
+        </Marker>
+      )}
+
       <CityLayers city={data.city} palette={palette} />
       <ServiceLayers
         services={data.services}

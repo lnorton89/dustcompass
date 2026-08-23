@@ -152,3 +152,25 @@ function fc<T extends GeoJSON.Geometry>(
 }
 
 export { clockToMinutes }
+
+/**
+ * Bounding box of the built city — the streets, not the trash fence. The fence
+ * sits roughly half again as far out as the outermost street, so framing it
+ * wastes most of a phone screen on empty playa.
+ */
+export function cityBounds(geometry: CityGeometry): [number, number, number, number] {
+  let west = Infinity
+  let south = Infinity
+  let east = -Infinity
+  let north = -Infinity
+
+  for (const street of geometry.streets.features) {
+    for (const [lon, lat] of street.geometry.coordinates) {
+      west = Math.min(west, lon)
+      east = Math.max(east, lon)
+      south = Math.min(south, lat)
+      north = Math.max(north, lat)
+    }
+  }
+  return [west, south, east, north]
+}

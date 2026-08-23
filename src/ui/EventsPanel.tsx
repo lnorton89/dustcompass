@@ -26,6 +26,8 @@ interface Props {
   preview: boolean
   onSelect: (poi: Poi) => void
   onClose: () => void
+  /** Phone layout: come up from the bottom instead of in from the side. */
+  compact?: boolean
 }
 
 const WINDOWS: { value: EventWindow; label: string }[] = [
@@ -40,7 +42,16 @@ const WINDOWS: { value: EventWindow; label: string }[] = [
  * answers. Events without a locatable host are still listed — plenty of the
  * good ones are at an unregistered camp — but they cannot be flown to.
  */
-export function EventsPanel({ open, events, hosts, now, preview, onSelect, onClose }: Props) {
+export function EventsPanel({
+  open,
+  events,
+  hosts,
+  now,
+  preview,
+  onSelect,
+  onClose,
+  compact,
+}: Props) {
   const [window, setWindow] = useState<EventWindow>('now')
 
   const rows = useMemo(
@@ -50,10 +61,16 @@ export function EventsPanel({ open, events, hosts, now, preview, onSelect, onClo
 
   return (
     <Drawer
-      anchor="left"
+      anchor={compact ? 'bottom' : "left"}
       open={open}
       onClose={onClose}
-      slotProps={{ paper: { sx: { width: { xs: '100%', sm: 380 } } } }}
+      slotProps={{
+        paper: {
+          sx: compact
+            ? { height: '70dvh', borderTopLeftRadius: 16, borderTopRightRadius: 16 }
+            : { width: 380 },
+        },
+      }}
     >
       <Box sx={{ p: 2, pb: 1 }}>
         <Stack

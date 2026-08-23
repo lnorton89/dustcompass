@@ -3,6 +3,7 @@ import {
   Alert,
   AppBar,
   Box,
+  Button,
   Chip,
   CircularProgress,
   CssBaseline,
@@ -10,11 +11,13 @@ import {
   Stack,
   ThemeProvider,
   ToggleButton,
-  ToggleButtonGroup,
   Toolbar,
   Tooltip,
   Typography,
 } from '@mui/material'
+import { useMediaQuery } from '@mui/material'
+import IconButton from '@mui/material/IconButton'
+import TuneIcon from '@mui/icons-material/Tune'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import ExploreIcon from '@mui/icons-material/Explore'
@@ -24,10 +27,13 @@ import { MapView } from './map/MapView'
 import { SearchPanel } from './ui/SearchPanel'
 import { DetailDrawer } from './ui/DetailDrawer'
 import { EventsPanel } from './ui/EventsPanel'
+import { FilterSheet } from './ui/FilterSheet'
 import { playaTheme } from './ui/theme'
 import { useEventsByHost, usePlayaData } from './data/usePlayaData'
 import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
+import { addressFor, deepLinkUrl, resolveDeepLink, useDeepLink } from './data/useDeepLink'
+import { shareLink } from './ui/share'
 import type { Poi, PoiKind } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
@@ -54,17 +60,56 @@ export default function App() {
   const [probe, setProbe] = useState<string>()
   const [here, setHere] = useState<Position>()
   const [eventsOpen, setEventsOpen] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [embargoNoticeSeen, setEmbargoNoticeSeen] = useState(false)
   const [realNow, setRealNow] = useState(() => new Date())
   const clock = useMemo(() => scheduleClock(data?.range, realNow), [data?.range, realNow])
   const mapRef = useRef<MapRef>(null)
   const theme = useMemo(() => playaTheme(mode), [mode])
+  // Phones are the real target here; the desktop layout is the special case.
+  const compact = useMediaQuery(theme.breakpoints.down('md'))
   const eventsByHost = useEventsByHost(data)
+  const { initial: deepLink, publish } = useDeepLink()
+  const [pin, setPin] = useState<{ position: Position; address: string }>()
 
   // "On now" has to stay true as time passes, or the panel quietly lies.
   useEffect(() => {
     const id = setInterval(() => setRealNow(new Date()), 60_000)
     return () => clearInterval(id)
   }, [])
+
+  /**
+   * A shared link names either a listing or an address. Resolve it to a
+   * position once and hand it to the map as its opening camera, so it is not
+   * competing with the initial city framing.
+   */
+  const initialTarget = useMemo(() => {
+    if (!data) return undefined
+    if (deepLink.poi) {
+      const target = data.pois.find((poi) => poi.uid === deepLink.poi)
+      if (target) return target.position
+    }
+    return resolveDeepLink(deepLink, data.layout)
+  }, [data, deepLink])
+
+  const restored = useRef(false)
+  useEffect(() => {
+    if (!data || restored.current || !initialTarget) return
+    restored.current = true
+
+    const target = data.pois.find((poi) => poi.uid === deepLink.poi)
+    if (target) setSelected(target)
+    else setPin({ position: initialTarget, address: deepLink.at ?? addressFor(initialTarget, data.layout) })
+  }, [data, deepLink, initialTarget])
+
+  // Keep the address bar in step with what is on screen, so the link in the
+  // browser is always the one worth sharing.
+  useEffect(() => {
+    if (!data) return
+    if (selected) publish({ poi: selected.uid })
+    else if (pin) publish({ at: pin.address })
+    else publish({})
+  }, [data, selected, pin, publish])
 
   const visiblePois = useMemo(() => {
     if (!data) return []
@@ -83,9 +128,19 @@ export default function App() {
       : 'you'
     : 'the Man'
 
-  const flyTo = useCallback((position: Position, poi?: Poi) => {
-    mapRef.current?.flyTo({ center: position, zoom: 16.5, duration: 900 })
-    setSelected(poi)
+  const flyTo = useCallback(
+    (position: Position, poi?: Poi) => {
+      mapRef.current?.flyTo({ center: position, zoom: 16.5, duration: 900 })
+      setSelected(poi)
+      if (!poi && data) setPin({ position, address: addressFor(position, data.layout) })
+    },
+    [data],
+  )
+
+  const share = useCallback(async (link: { poi?: string; at?: string }, title: string) => {
+    const result = await shareLink(deepLinkUrl(link), title)
+    if (result === 'copied') setProbe('Link copied')
+    else if (result === 'unavailable') setProbe('Could not copy the link')
   }, [])
 
   const toggleFilter = useCallback((key: Filter) => {
@@ -117,30 +172,42 @@ export default function App() {
       <CssBaseline />
       <Box sx={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
         <AppBar position="static" color="default" elevation={0} enableColorOnDark>
-          <Toolbar sx={{ gap: 2, flexWrap: 'wrap', minHeight: 64, py: 1 }}>
-            <Typography variant="h6" sx={{ whiteSpace: 'nowrap' }}>
-              Playa Map
-            </Typography>
+          <Toolbar sx={{ gap: 1, minHeight: { xs: 56, md: 64 }, py: 1 }}>
+            {!compact && (
+              <Typography variant="h6" sx={{ whiteSpace: 'nowrap' }}>
+                Playa Map
+              </Typography>
+            )}
 
-            <Box sx={{ flex: '1 1 240px', maxWidth: 480 }}>
+            <Box sx={{ flex: '1 1 auto', minWidth: 0, maxWidth: { md: 480 } }}>
               {data && <SearchPanel layout={data.layout} pois={data.pois} onGo={flyTo} />}
             </Box>
 
             <Stack
               direction="row"
               spacing={1}
-              sx={{ alignItems: 'center', ml: 'auto', flexWrap: 'wrap' }}
+              sx={{ alignItems: 'center', ml: 'auto', flexShrink: 0 }}
             >
-              {FILTERS.map((filter) => (
-                <Chip
-                  key={filter.key}
-                  label={filter.label}
+              {!compact &&
+                FILTERS.map((filter) => (
+                  <Chip
+                    key={filter.key}
+                    label={filter.label}
+                    size="small"
+                    color={filter.color}
+                    variant={active.has(filter.key) ? 'filled' : 'outlined'}
+                    onClick={() => toggleFilter(filter.key)}
+                  />
+                ))}
+              {compact && (
+                <IconButton
                   size="small"
-                  color={filter.color}
-                  variant={active.has(filter.key) ? 'filled' : 'outlined'}
-                  onClick={() => toggleFilter(filter.key)}
-                />
-              ))}
+                  onClick={() => setFiltersOpen(true)}
+                  aria-label="Filters and map options"
+                >
+                  <TuneIcon fontSize="small" />
+                </IconButton>
+              )}
               <Tooltip title="Events">
                 <ToggleButton
                   value="events"
@@ -152,30 +219,32 @@ export default function App() {
                   <EventIcon fontSize="small" />
                 </ToggleButton>
               </Tooltip>
-              <Tooltip title={cityUp ? '12:00 is up' : 'North is up'}>
-                <ToggleButton
-                  value="cityUp"
-                  size="small"
-                  selected={cityUp}
-                  onChange={toggleCityUp}
-                  aria-label="Orient the map so 12:00 points up"
-                >
-                  <ExploreIcon fontSize="small" />
-                </ToggleButton>
-              </Tooltip>
-              <ToggleButtonGroup
+              {!compact && (
+                <Tooltip title={cityUp ? '12:00 is up' : 'North is up'}>
+                  <ToggleButton
+                    value="cityUp"
+                    size="small"
+                    selected={cityUp}
+                    onChange={toggleCityUp}
+                    aria-label="Orient the map so 12:00 points up"
+                  >
+                    <ExploreIcon fontSize="small" />
+                  </ToggleButton>
+                </Tooltip>
+              )}
+              <ToggleButton
+                value="theme"
                 size="small"
-                exclusive
-                value={mode}
-                onChange={(_, value) => value && setMode(value)}
+                selected={false}
+                onChange={() => setMode((m) => (m === 'dark' ? 'light' : 'dark'))}
+                aria-label={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               >
-                <ToggleButton value="dark" aria-label="Dark mode">
+                {mode === 'dark' ? (
                   <DarkModeIcon fontSize="small" />
-                </ToggleButton>
-                <ToggleButton value="light" aria-label="Light mode">
+                ) : (
                   <LightModeIcon fontSize="small" />
-                </ToggleButton>
-              </ToggleButtonGroup>
+                )}
+              </ToggleButton>
             </Stack>
           </Toolbar>
         </AppBar>
@@ -202,22 +271,48 @@ export default function App() {
                 cityUp={cityUp}
                 mapRef={mapRef}
                 onSelect={setSelected}
-                onProbe={(address) => setProbe(address)}
+                onProbe={(address, position) => {
+                  setProbe(address)
+                  setPin({ position, address })
+                }}
                 onLocate={setHere}
+                pin={pin}
+                initialTarget={initialTarget}
               />
-              {!data.embargo.artReleased && (
+              {!data.embargo.artReleased && !embargoNoticeSeen && (
                 <Alert
                   severity="info"
-                  sx={{ position: 'absolute', top: 12, left: 12, maxWidth: 360 }}
+                  variant="filled"
+                  onClose={() => setEmbargoNoticeSeen(true)}
+                  sx={{
+                    position: 'absolute',
+                    top: 8,
+                    left: 8,
+                    right: { xs: 8, sm: 'auto' },
+                    maxWidth: { sm: 360 },
+                    py: 0.25,
+                    opacity: 0.95,
+                  }}
                 >
-                  Art locations are embargoed until Gates open. Listings are shown without
-                  positions.
+                  <Typography variant="body2">
+                    Art locations are embargoed until Gates open.
+                  </Typography>
                 </Alert>
               )}
             </>
           )}
         </Box>
       </Box>
+
+      <FilterSheet
+        open={filtersOpen}
+        options={FILTERS}
+        active={active}
+        cityUp={cityUp}
+        onToggle={toggleFilter}
+        onToggleCityUp={toggleCityUp}
+        onClose={() => setFiltersOpen(false)}
+      />
 
       {data && (
         <EventsPanel
@@ -231,6 +326,7 @@ export default function App() {
             flyTo(poi.position, poi)
           }}
           onClose={() => setEventsOpen(false)}
+          compact={compact}
         />
       )}
 
@@ -241,15 +337,28 @@ export default function App() {
         originLabel={originLabel}
         isFavorite={selected ? favorites.has(selected.uid) : false}
         onToggleFavorite={toggleFavorite}
+        onShare={(poi) => void share({ poi: poi.uid }, poi.name)}
         onClose={() => setSelected(undefined)}
+        compact={compact}
       />
 
       <Snackbar
         open={Boolean(probe)}
-        autoHideDuration={4000}
+        autoHideDuration={6000}
         onClose={() => setProbe(undefined)}
         message={probe}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        action={
+          pin && probe === pin.address ? (
+            <Button
+              color="secondary"
+              size="small"
+              onClick={() => void share({ at: pin.address }, `Meet me at ${pin.address}`)}
+            >
+              Share
+            </Button>
+          ) : undefined
+        }
       />
     </ThemeProvider>
   )

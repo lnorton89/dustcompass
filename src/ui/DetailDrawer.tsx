@@ -14,6 +14,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close'
 import StarIcon from '@mui/icons-material/Star'
 import StarBorderIcon from '@mui/icons-material/StarBorder'
+import IosShareIcon from '@mui/icons-material/IosShare'
 import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk'
 import DirectionsBikeIcon from '@mui/icons-material/DirectionsBike'
 import type { Position } from '../brc/geo'
@@ -28,7 +29,10 @@ interface Props {
   originLabel: string
   isFavorite: boolean
   onToggleFavorite: (uid: string) => void
+  onShare: (poi: Poi) => void
   onClose: () => void
+  /** Phone layout: come up from the bottom instead of in from the side. */
+  compact?: boolean
 }
 
 export function DetailDrawer({
@@ -38,7 +42,9 @@ export function DetailDrawer({
   originLabel,
   isFavorite,
   onToggleFavorite,
+  onShare,
   onClose,
+  compact,
 }: Props) {
   const travel = poi ? travelBetween(origin, poi.position) : undefined
   const [imageFailed, setImageFailed] = useState(false)
@@ -47,10 +53,16 @@ export function DetailDrawer({
   useEffect(() => setImageFailed(false), [poi?.uid])
   return (
     <Drawer
-      anchor="right"
+      anchor={compact ? 'bottom' : "right"}
       open={Boolean(poi)}
       onClose={onClose}
-      slotProps={{ paper: { sx: { width: { xs: '100%', sm: 400 } } } }}
+      slotProps={{
+        paper: {
+          sx: compact
+            ? { height: '70dvh', borderTopLeftRadius: 16, borderTopRightRadius: 16 }
+            : { width: 400 },
+        },
+      }}
     >
       {poi && (
         <Box sx={{ p: 2 }}>
@@ -64,6 +76,13 @@ export function DetailDrawer({
               )}
             </Box>
             <Stack direction="row" spacing={0.5}>
+              <IconButton
+                onClick={() => onShare(poi)}
+                size="small"
+                aria-label="Share this location"
+              >
+                <IosShareIcon fontSize="small" />
+              </IconButton>
               <IconButton
                 onClick={() => onToggleFavorite(poi.uid)}
                 size="small"

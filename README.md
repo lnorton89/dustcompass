@@ -58,6 +58,29 @@ npm run dev
 
 `npm run fetch-data 2024` pulls a different year.
 
+### Live listings
+
+`fetch-data` vendors iBurn's snapshot, which lags the current year. To pull
+camps, art and events straight from the source:
+
+```sh
+export BMORG_API_KEY=...            # https://api.burningman.org/api-key-request/
+npm run fetch-api 2026
+VITE_DATA_YEAR=2026 npm run dev
+```
+
+The city layout still comes from `fetch-data` — only the listings are replaced,
+which is the part published late each year. Records without coordinates are left
+alone rather than geocoded at fetch time: the app geocodes `location_string` at
+load using the same code that powers search, so doing it twice would be two
+places to get it wrong.
+
+The script validates every response against the fields the app reads and
+**refuses to overwrite good data with a shape it does not recognise** — the
+alternative failure mode is silent, producing a dataset that loads happily and
+renders an empty map. It also distinguishes "locations are still embargoed" from
+"your key cannot see locations", which look identical in the response.
+
 ## What it does
 
 - Renders Black Rock City generated from its layout spec, rotated so 12:00 is up

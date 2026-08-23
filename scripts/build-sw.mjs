@@ -8,9 +8,14 @@ const files = await walk(output)
 const assets = []
 const digest = createHash('sha256')
 
+// The social card is for crawlers, never for the user. Precaching it would
+// spend 120KB of a first-run download that has to finish before anyone reaches
+// a place with no cell service, on an image the app never displays.
+const NEVER_PRECACHE = new Set(['sw.js', 'og-image.png'])
+
 for (const file of files.sort()) {
   const pathname = relative(output, file).split(sep).join('/')
-  if (pathname === 'sw.js' || pathname.endsWith('.map')) continue
+  if (NEVER_PRECACHE.has(pathname) || pathname.endsWith('.map')) continue
   const bytes = await readFile(file)
   digest.update(pathname).update(bytes)
   const route = pathname === 'index.html' ? '' : pathname

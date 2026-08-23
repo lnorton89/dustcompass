@@ -59,6 +59,18 @@ can get there before it ends, so the events list sorts by distance as well as
 time. Choosing that sort is also when it asks for your location — offering it
 only once a fix exists means it is never there when it is first wanted.
 
+**The share image is built, not committed.** `scripts/lib/og-plate.mjs`
+describes the card once — palette, wordmark, compass rosette, the required
+non-affiliation line — and [metaplate](https://github.com/lnorton89/metaplate)
+renders it to `public/og-image.png` on every build, embedding real Inter bytes
+rather than trusting the build machine to have the font. The old pipeline
+screenshotted an SVG in headless Chromium, so the committed card was silently
+set in whatever the machine had installed. `metaplate verify` then checks the
+PNG header of both the source and exported copies, because a share image that
+404s or decodes wrong is invisible until someone posts the link. It is the one
+asset deliberately excluded from the offline precache: it is for crawlers, and
+the first-run download has to finish before the user reaches the desert.
+
 **Time is playa time.** "What's on now" uses Black Rock City's clock, not the
 device's — people arrive with phones still set to wherever they flew from. And
 outside the event week the wall clock makes every window empty, so the schedule
@@ -85,7 +97,7 @@ camps, art and events straight from the source:
 ```sh
 export BMORG_API_KEY=...            # https://api.burningman.org/api-key-request/
 npm run fetch-api 2026
-VITE_DATA_YEAR=2026 npm run dev
+NEXT_PUBLIC_DATA_YEAR=2026 npm run dev
 ```
 
 The city layout still comes from `fetch-data` — only the listings are replaced,
@@ -132,16 +144,16 @@ which serves the unbuilt `index.html` and a blank page.
 
 A Pages project site is served from a subpath, so the build takes the prefix
 from the repo name via `BASE_PATH`. Everything that loads data, fonts or icons
-goes through `import.meta.env.BASE_URL`, and the service worker's scope and
+goes through `NEXT_PUBLIC_BASE_PATH`, and the service worker's scope and
 `start_url` follow it, so the offline install works from the subpath too — the
 offline test passes against a production `/dustcompass/` Next.js export.
 
 To deploy anywhere else, build with the prefix that host serves from and publish
-`dist/`:
+`out/`:
 
 ```sh
 npm run fetch-data 2025
-BASE_PATH=/ npm run build      # a root domain, e.g. Netlify or Cloudflare Pages
+NEXT_PUBLIC_BASE_PATH= npm run build   # a root domain, e.g. Netlify or Cloudflare Pages
 ```
 
 HTTPS is required, not optional: service workers and geolocation both refuse to
@@ -161,7 +173,7 @@ The fetch and deploy pipeline intentionally does not copy Event Data from
 iBurn-Data. The current historical build uses Burning Man's no-key 2025 JSON
 archive. A current-year build obtains listings from the official API using the
 key issued for this app, stored only as the masked `BMORG_API_KEY` GitHub Actions
-secret; the key is never exposed to Vite or shipped to browsers. The app is
+secret; the key is never inlined into the client bundle or shipped to browsers. The app is
 free, contains no advertising, uses an original name and compass mark, and
 includes the required non-affiliation disclaimer in the live interface and share image.
 See the current [API and dataset terms](https://innovate.burningman.org/terms-of-service-for-burning-man-apis-and-datasets/).
@@ -175,7 +187,7 @@ UI filter. Both stages strip the address string as well as the coordinates — a
 playa address geocodes back to within a metre of the published GPS, so leaving
 it in place would hand back exactly the position the embargo exists to withhold.
 
-For 2026, drop in the published `layout.json` and point `VITE_DATA_YEAR` at it.
+For 2026, drop in the published `layout.json` and point `NEXT_PUBLIC_DATA_YEAR` at it.
 
 ## Stack notes
 
@@ -186,9 +198,9 @@ For 2026, drop in the published `layout.json` and point `VITE_DATA_YEAR` at it.
 | `@mui/material` | 9.3.1 | v9 realigned majors with MUI X |
 | `pmtiles` | 4.5.0 | optional basemap, single static archive |
 | `react` | 19.2 | |
-| `vite` | 8.2 | |
+| `next` | 16.3 | App Router, `output: 'export'` — no server anywhere |
+| `metaplate` | 0.1.2 | renders and verifies the share image at build time |
 | `vitest` | 4.1 | |
-| `vite-plugin-pwa` | 1.3 | precaches the app for offline use |
 
 Two integration details worth knowing, both of which cost real debugging time:
 
@@ -196,9 +208,9 @@ Two integration details worth knowing, both of which cost real debugging time:
   emits the library as a hashed chunk, the sibling `maplibre-gl-worker.mjs` no
   longer exists and 404s. Because every GeoJSON source is parsed in the worker,
   the map paints its background and then *silently never fires `load`* — no
-  error. `src/map/worker.ts` fixes it with `setWorkerUrl` and Vite's
-  `?worker&url`, which bundles the worker together with the shared chunk it
-  imports.
+  error. `scripts/copy-map-worker.mjs` copies the official module worker and
+  its shared runtime into `public/`, and `src/map/worker.ts` points
+  `setWorkerUrl` at that fixed path — which also survives a strict CSP.
 - **MUI 9 `Stack` dropped `alignItems`/`justifyContent`/`gap` as direct props**
   (use `spacing` and `sx`), and `Autocomplete`'s `renderInput` params now expose
   `slotProps` rather than `InputProps`. Spread `params.slotProps` when you
@@ -209,12 +221,11 @@ Two integration details worth knowing, both of which cost real debugging time:
 Four layers, all runnable locally.
 
 ```sh
-npm test                                                 # 68 unit + component tests
-npm run dev &
-npm run test:smoke  http://127.0.0.1:5173/               # 30 browser assertions
-npm run test:a11y   http://127.0.0.1:5173/               # axe, 9 UI states
-npm run build && npx vite preview --port 4173 &
-npm run test:offline http://127.0.0.1:4173/              # proves offline works
+npm test                                                 # 74 unit + component tests
+NEXT_PUBLIC_E2E=1 npm run build && npm run preview &
+npm run test:smoke  http://127.0.0.1:4173/dustcompass/   # browser assertions
+npm run test:a11y   http://127.0.0.1:4173/dustcompass/   # axe, 8 UI states
+npm run test:offline http://127.0.0.1:4173/dustcompass/  # proves offline works
 ```
 
 **Unit** — the geocoder is held against Burning Man's own surveyed GPS rather

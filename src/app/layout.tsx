@@ -5,6 +5,9 @@ import { BASE_PATH, SITE_URL } from '../config'
 import './globals.css'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
+// The card is a real file under the deployment prefix, not a Next
+// `opengraph-image` route: that convention emits an extension-free file and a
+// URL without `basePath`, which GitHub Pages cannot serve.
 const social = socialImageMetadata(
   '/',
   `${BRAND.name} — ${BRAND.tagline}`,

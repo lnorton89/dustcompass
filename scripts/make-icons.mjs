@@ -3,6 +3,10 @@
  * Uses the Chromium that Playwright already provides rather than adding an
  * image toolchain for four files.
  *
+ * Icons are pure geometry, so a browser rasterises them identically anywhere.
+ * The social card is not — it is type — so it lives in scripts/make-og.mjs,
+ * where Metaplate renders it from embedded font bytes instead.
+ *
  *   node scripts/make-icons.mjs
  */
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -14,7 +18,6 @@ const ICO_SIZES = [16, 32, 48]
 // a normal checkout) Playwright resolves its own download.
 const CHROME = process.env.CHROME_PATH || undefined
 const svg = readFileSync('public/favicon.svg', 'utf8')
-const ogSvg = readFileSync('public/og-image.svg', 'utf8')
 
 const browser = await chromium.launch({
   ...(CHROME ? { executablePath: CHROME } : {}),
@@ -45,12 +48,6 @@ for (const size of ICO_SIZES) {
 writeFileSync('public/favicon.ico', makeIco(icoImages))
 console.log('public/favicon.ico')
 
-await page.setViewportSize({ width: 1200, height: 630 })
-await page.setContent(
-  `<body style="margin:0;width:1200px;height:630px;overflow:hidden">${ogSvg}</body>`,
-)
-await page.screenshot({ path: 'public/og-image.png', omitBackground: false })
-console.log('public/og-image.png')
 await browser.close()
 
 /** ICO supports PNG-compressed frames, keeping small icon edges crisp. */

@@ -8,9 +8,17 @@ out
 smoke.png
 smoke-next.png
 offline-next.png
+# Rendered by `npm run og` on every build.
+/public/og-image.png
+
 /public/maplibre-worker.mjs
 /public/maplibre-gl-shared.mjs
 
 # Vendored from iBurn-Data by `npm run fetch-data` — not ours to redistribute.
 /public/data
 /public/fonts
+
+# Local secrets: BURNING_MAN_API_KEY and friends.
+.env
+.env.*
+!.env.example

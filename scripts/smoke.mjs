@@ -43,6 +43,19 @@ await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
 await page.waitForTimeout(3500)
 
 assert((await page.title()).startsWith('Dust Compass'), 'branded document title is present')
+const faviconUrls = await page
+  .locator('link[rel~="icon"]')
+  .evaluateAll((links) => links.map((link) => link.href))
+assert(
+  ['favicon.svg', 'favicon-32.png', 'favicon.ico'].every((name) =>
+    faviconUrls.some((url) => new URL(url).pathname.endsWith(name)),
+  ),
+  'SVG, PNG, and ICO favicons are declared',
+)
+for (const faviconUrl of faviconUrls) {
+  const response = await context.request.get(faviconUrl)
+  assert(response.ok(), `favicon loads (${new URL(faviconUrl).pathname})`)
+}
 assert(
   (await page.locator('meta[property="og:image"]').getAttribute('content'))?.endsWith('/og-image.png'),
   'Open Graph share image is configured',

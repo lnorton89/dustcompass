@@ -13,7 +13,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.svg', 'favicon-32.png', 'favicon.ico', 'apple-touch-icon.png'],
       manifest: {
         name: 'Dust Compass',
         short_name: 'Dust Compass',

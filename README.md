@@ -3,6 +3,8 @@
 A modern, offline-first web map of Black Rock City. React 19 + MUI 9 +
 MapLibre GL JS 6.
 
+**Live: https://lnorton89.github.io/burningman/**
+
 iBurn is mobile-only and has no web map; this is that map. It borrows iBurn's
 excellent open data (MPL-2.0) but none of its 2017-era tile pipeline.
 
@@ -118,9 +120,11 @@ Pushing to the default branch builds and publishes to GitHub Pages
 (`.github/workflows/deploy.yml`). The site lands at
 `https://<owner>.github.io/<repo>/`.
 
-**One-time setup:** turn Pages on under *Settings → Pages → Source: GitHub
-Actions*. The workflow cannot do this itself — creating a Pages site needs a
-permission the default `GITHUB_TOKEN` does not carry.
+**Setup:** Pages must be on, with *Settings → Pages → Source* set to **GitHub
+Actions** rather than "Deploy from a branch". The workflow cannot enable Pages
+itself — creating the site needs a permission the default `GITHUB_TOKEN` does
+not carry. Left on the branch source, Pages publishes the repository as-is,
+which serves the unbuilt `index.html` and a blank page.
 
 A Pages project site is served from a subpath, so the build takes the prefix
 from the repo name via `BASE_PATH`. Everything that loads data, fonts or icons

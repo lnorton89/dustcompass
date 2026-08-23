@@ -96,7 +96,7 @@ export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
         layout={{
           'text-field': ['get', 'name'],
           'text-font': ['Open Sans Regular'],
-          'text-size': 11,
+          'text-size': 13,
           'text-offset': [0, 0.9],
           'text-anchor': 'top',
           'text-optional': true,
@@ -104,7 +104,7 @@ export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
         paint={{
           'text-color': palette.label,
           'text-halo-color': palette.labelHalo,
-          'text-halo-width': 1.2,
+          'text-halo-width': 1.8,
         }}
       />
     </Source>

@@ -16,7 +16,9 @@ export interface DeepLink {
  * means the link is still useful when it is pasted into a message and read by a
  * human, or typed off someone else's screen.
  */
-export function readDeepLink(search = window.location.search): DeepLink {
+export function readDeepLink(
+  search = typeof window === 'undefined' ? '' : window.location.search,
+): DeepLink {
   const params = new URLSearchParams(search)
   const link: DeepLink = {}
   const poi = params.get('poi')
@@ -26,7 +28,10 @@ export function readDeepLink(search = window.location.search): DeepLink {
   return link
 }
 
-export function deepLinkUrl(link: DeepLink, base = window.location.href): string {
+export function deepLinkUrl(
+  link: DeepLink,
+  base = typeof window === 'undefined' ? 'https://lnorton89.github.io/dustcompass/' : window.location.href,
+): string {
   const url = new URL(base)
   url.search = ''
   if (link.poi) url.searchParams.set('poi', link.poi)

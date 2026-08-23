@@ -30,7 +30,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - run: npm ci
@@ -44,7 +44,11 @@ jobs:
       - name: Build
         # A GitHub Pages project site is served from /<repo>/, so the app has to
         # be built with that prefix.
-        run: BASE_PATH="/${GITHUB_REPOSITORY#*/}/" VITE_DATA_YEAR=2025 npm run build
+        run: |
+          NEXT_PUBLIC_BASE_PATH="/${GITHUB_REPOSITORY#*/}" \
+          NEXT_PUBLIC_SITE_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/" \
+          NEXT_PUBLIC_DATA_YEAR=2025 \
+          npm run build
 
       # Pages must already be switched on for the repo (Settings → Pages →
       # Source: GitHub Actions). Enabling it from here needs a token permission
@@ -53,7 +57,7 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: dist
+          path: out
 
   deploy:
     needs: build
@@ -64,3 +68,14 @@ jobs:
     steps:
       - id: deploy
         uses: actions/deploy-pages@v5
+
+      - name: Verify deployed shell and branded assets
+        env:
+          PAGE_URL: ${{ steps.deploy.outputs.page_url }}
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          curl --fail --silent --show-error --retry 8 --retry-delay 5 "$PAGE_URL" > page.html
+          grep -q "/${REPO_NAME}/_next/" page.html
+          ! grep -q '/burningman/' page.html
+          curl --fail --silent --show-error --head "${PAGE_URL}og-image.png" | grep -qi 'content-type: image/png'
+          curl --fail --silent --show-error "${PAGE_URL}manifest.webmanifest" | grep -q "\"start_url\":\"/${REPO_NAME}/\""

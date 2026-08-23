@@ -7,23 +7,24 @@ interface Props {
   name: string
   address?: string
   navigating?: boolean
+  approximate?: boolean
 }
 
 /** A high-contrast, labeled target that remains legible over every map theme. */
-export function FocusMarker({ position, name, address, navigating = false }: Props) {
+export function FocusMarker({ position, name, address, navigating = false, approximate = false }: Props) {
   const color = navigating ? '#5ec8d8' : '#ff8a4c'
   const label = `${navigating ? 'Navigation destination' : 'Selected location'}: ${name}${address ? `, ${address}` : ''}`
 
   return (
-    <Marker longitude={position[0]} latitude={position[1]} anchor="center">
+    <Marker longitude={position[0]} latitude={position[1]} anchor="center" style={{ zIndex: 10 }}>
       <Box
         role="img"
         aria-label={label}
         data-testid={navigating ? 'navigation-target' : 'selection-target'}
         sx={{
           position: 'relative',
-          width: 48,
-          height: 48,
+          width: 64,
+          height: 64,
           pointerEvents: 'none',
           '@keyframes target-pulse': {
             '0%': { transform: 'scale(.65)', opacity: 0.95 },
@@ -34,8 +35,8 @@ export function FocusMarker({ position, name, address, navigating = false }: Pro
         <Box
           sx={{
             position: 'absolute',
-            inset: 3,
-            border: `3px solid ${color}`,
+            inset: 5,
+            border: `4px solid ${color}`,
             borderRadius: '50%',
             boxShadow: '0 2px 10px rgba(0,0,0,.8), inset 0 0 0 2px #12100e',
           }}
@@ -43,7 +44,7 @@ export function FocusMarker({ position, name, address, navigating = false }: Pro
         <Box
           sx={{
             position: 'absolute',
-            inset: 3,
+            inset: 5,
             border: `3px solid ${color}`,
             borderRadius: '50%',
             animation: 'target-pulse 1.8s ease-out infinite',
@@ -66,7 +67,7 @@ export function FocusMarker({ position, name, address, navigating = false }: Pro
         <Box
           sx={{
             position: 'absolute',
-            top: 49,
+            top: 65,
             left: '50%',
             transform: 'translateX(-50%)',
             minWidth: navigating ? 190 : 0,
@@ -86,18 +87,20 @@ export function FocusMarker({ position, name, address, navigating = false }: Pro
               component="span"
               sx={{ display: 'block', color, fontSize: 10, fontWeight: 900, letterSpacing: '.12em', lineHeight: 1.1 }}
             >
-              DESTINATION
+              {approximate ? 'DESTINATION AREA' : 'DESTINATION'}
             </Typography>
           )}
           <Typography
             component="span"
             sx={{
-              display: 'block',
               maxWidth: 220,
               fontSize: navigating ? 14 : 12,
               fontWeight: 800,
               lineHeight: 1.2,
-              whiteSpace: 'nowrap',
+              whiteSpace: 'normal',
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: 2,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
             }}
@@ -107,6 +110,11 @@ export function FocusMarker({ position, name, address, navigating = false }: Pro
           {navigating && address && (
             <Typography component="span" sx={{ display: 'block', color: '#d8d0c2', fontSize: 11, lineHeight: 1.2 }}>
               {address}
+            </Typography>
+          )}
+          {navigating && approximate && (
+            <Typography component="span" sx={{ display: 'block', color, fontSize: 10, fontWeight: 700, mt: 0.35 }}>
+              Approximate street address
             </Typography>
           )}
         </Box>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CityLayout } from '../brc/layout'
 import { buildCity, type CityGeometry } from '../brc/city'
 import { buildServices, toiletPoints, type ServiceSpec } from '../brc/services'
@@ -6,6 +6,7 @@ import { geocode } from '../brc/geocode'
 import type { ArtItem, CampItem, EventItem, Poi } from './types'
 import { applyEmbargo, embargoState, embargoWindowForYear, type EmbargoState } from './embargo'
 import type { EventRange } from './events'
+import { DATA_YEAR, assetUrl } from '../config'
 
 export interface PlayaData {
   layout: CityLayout
@@ -23,8 +24,6 @@ export interface PlayaData {
   embargo: EmbargoState
 }
 
-const DATA_YEAR = import.meta.env.VITE_DATA_YEAR ?? '2025'
-
 function empty(): GeoJSON.FeatureCollection {
   return { type: 'FeatureCollection', features: [] }
 }
@@ -38,10 +37,16 @@ async function loadJson<T>(path: string): Promise<T> {
 export function usePlayaData() {
   const [data, setData] = useState<PlayaData>()
   const [error, setError] = useState<Error>()
+  const [attempt, setAttempt] = useState(0)
+  const retry = useCallback(() => {
+    setError(undefined)
+    setData(undefined)
+    setAttempt((current) => current + 1)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
-    const base = `${import.meta.env.BASE_URL}data/${DATA_YEAR}`
+    const base = assetUrl(`data/${DATA_YEAR}`)
 
     Promise.all([
       loadJson<CityLayout>(`${base}/layout.json`),
@@ -79,9 +84,9 @@ export function usePlayaData() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [attempt])
 
-  return { data, error }
+  return { data, error, retry }
 }
 
 /**
@@ -103,6 +108,7 @@ function toPois(layout: CityLayout, art: ArtItem[], camps: CampItem[]): Poi[] {
         description: item.description,
         address: item.location_string,
         position,
+        positionSource: hasGps(item.location) ? 'gps' : 'address',
         thumbnail: item.images?.[0]?.thumbnail_url,
       })
     }
@@ -119,12 +125,17 @@ function toPois(layout: CityLayout, art: ArtItem[], camps: CampItem[]): Poi[] {
         description: item.description,
         address: item.location_string,
         position,
+        positionSource: hasGps(item.location) ? 'gps' : 'address',
         thumbnail: item.images?.[0]?.thumbnail_url,
       })
     }
   }
 
   return out
+}
+
+function hasGps(location: { gps_latitude?: number; gps_longitude?: number } | undefined) {
+  return location?.gps_latitude != null && location.gps_longitude != null
 }
 
 function resolve(

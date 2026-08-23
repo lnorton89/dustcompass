@@ -1,9 +1,15 @@
 node_modules
 dist
+.next
+out
 *.tsbuildinfo
 .DS_Store
 *.local
 smoke.png
+smoke-next.png
+offline-next.png
+/public/maplibre-worker.mjs
+/public/maplibre-gl-shared.mjs
 
 # Vendored from iBurn-Data by `npm run fetch-data` — not ours to redistribute.
 /public/data

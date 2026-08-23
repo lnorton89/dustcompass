@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import './map/worker'
 import {
   Alert,
   AppBar,
@@ -52,6 +53,7 @@ import type { Position } from './brc/geo'
 import type { ThemeMode } from './map/style'
 import { BRAND } from './brand'
 import { BrandMark } from './ui/BrandMark'
+import { PwaStatus } from './ui/PwaStatus'
 
 type Filter = PoiKind | 'toilets' | 'services' | 'favorites'
 
@@ -80,9 +82,9 @@ const FILTERS: {
 ]
 
 export default function App() {
-  const { data, error } = usePlayaData()
+  const { data, error, retry } = usePlayaData()
   const { favorites, toggle: toggleFavorite } = useFavorites()
-  const { places, save: savePlace, remove: removePlace } = useSavedPlaces()
+  const { places, save: savePlace, remove: removePlace, restore: restorePlace } = useSavedPlaces()
   const [saving, setSaving] = useState<{ position: Position; address: string }>()
   const [mode, setMode] = useState<ThemeMode>('dark')
   const [cityUp, setCityUp] = useState(true)
@@ -91,6 +93,7 @@ export default function App() {
   )
   const [selected, setSelected] = useState<Poi>()
   const [probe, setProbe] = useState<string>()
+  const [deletedPlace, setDeletedPlace] = useState<(typeof places)[number]>()
   // The map's own locate button and the "take me there" flow feed the same
   // watch, so a heading stays live however it was started.
   const location = useGeolocation()
@@ -108,7 +111,12 @@ export default function App() {
   const eventsByHost = useEventsByHost(data)
   const { initial: deepLink, publish } = useDeepLink()
   const [pin, setPin] = useState<{ position: Position; address: string }>()
-  const [heading, setHeading] = useState<{ name: string; position: Position; address?: string }>()
+  const [heading, setHeading] = useState<{
+    name: string
+    position: Position
+    address?: string
+    approximate?: boolean
+  }>()
 
   // "On now" has to stay true as time passes, or the panel quietly lies.
   useEffect(() => {
@@ -208,8 +216,8 @@ export default function App() {
   )
 
   const navigateTo = useCallback(
-    (target: { name: string; position: Position; address?: string }) => {
-      setHeading(target)
+    (target: { name: string; position: Position; address?: string; positionSource?: 'gps' | 'address' }) => {
+      setHeading({ ...target, approximate: target.positionSource === 'address' })
       setSelected(undefined)
       mapRef.current?.flyTo({
         center: target.position,
@@ -304,6 +312,7 @@ export default function App() {
               spacing={1}
               sx={{ alignItems: 'center', ml: 'auto', flexShrink: 0 }}
             >
+              <PwaStatus compact={compact} />
               {!compact &&
                 FILTERS.map((filter) => (
                   <Chip
@@ -368,10 +377,27 @@ export default function App() {
           </Toolbar>
         </AppBar>
 
-        <Box sx={{ position: 'relative', flex: 1 }}>
+        <Box
+          sx={{
+            position: 'relative',
+            flex: 1,
+            '& .maplibregl-ctrl-bottom-right': {
+              transition: 'bottom 180ms ease',
+              bottom: heading ? { xs: 118, sm: 100 } : 0,
+            },
+            '& .maplibregl-ctrl-bottom-left': {
+              transition: 'bottom 180ms ease',
+              bottom: heading ? { xs: 118, sm: 100 } : 0,
+            },
+          }}
+        >
           {error && (
-            <Alert severity="error" sx={{ m: 2 }}>
-              {error.message} — run <code>npm run fetch-data</code> first.
+            <Alert
+              severity="error"
+              action={<Button color="inherit" size="small" onClick={retry}>Retry</Button>}
+              sx={{ m: 2 }}
+            >
+              The map data could not be opened. Check your connection once, then retry; saved spots are safe.
             </Alert>
           )}
           {!data && !error && (
@@ -414,7 +440,7 @@ export default function App() {
                 sx={{
                   position: 'absolute',
                   left: 8,
-                  bottom: { xs: heading ? 104 : 72, sm: heading ? 92 : 34 },
+                  bottom: { xs: heading ? 172 : 72, sm: heading ? 112 : 34 },
                   zIndex: 2,
                   maxWidth: { xs: 'calc(100% - 88px)', sm: 430 },
                   px: 1,
@@ -438,6 +464,9 @@ export default function App() {
                   heading={navigation.clock}
                   located={Boolean(here)}
                   status={location.status}
+                  accuracy={location.accuracy}
+                  approximate={heading.approximate}
+                  onRetryLocation={location.start}
                   onClear={() => {
                     setHeading(undefined)
                     location.stop()
@@ -492,7 +521,13 @@ export default function App() {
           setFiltersOpen(false)
           navigateTo(place)
         }}
-        onRemovePlace={removePlace}
+        onRemovePlace={(id) => {
+          const place = places.find((item) => item.id === id)
+          if (!place) return
+          removePlace(id)
+          setDeletedPlace(place)
+          setProbe(`Removed “${place.name}”`)
+        }}
         onClose={() => setFiltersOpen(false)}
       />
 
@@ -534,7 +569,19 @@ export default function App() {
         message={probe}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         action={
-          pin && probe === pin.address ? (
+          deletedPlace && probe === `Removed “${deletedPlace.name}”` ? (
+            <Button
+              color="secondary"
+              size="small"
+              onClick={() => {
+                restorePlace(deletedPlace)
+                setProbe(`Restored “${deletedPlace.name}”`)
+                setDeletedPlace(undefined)
+              }}
+            >
+              Undo
+            </Button>
+          ) : pin && probe === pin.address ? (
             <>
               <Button color="secondary" size="small" onClick={() => setSaving(pin)}>
                 Save

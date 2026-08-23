@@ -1,11 +1,10 @@
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist', 'dev-dist', 'public/data', 'public/fonts', 'coverage'] },
+  { ignores: ['dist', 'dev-dist', '.next', 'out', 'public/data', 'public/fonts', 'coverage'] },
 
   // Application source: type-aware rules, browser globals.
   {
@@ -16,10 +15,9 @@ export default tseslint.config(
       globals: globals.browser,
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
-    plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh },
+    plugins: { 'react-hooks': reactHooks },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       // Underscore-prefixed arguments are a deliberate "unused on purpose".
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },

@@ -4,10 +4,15 @@ import {
   Chip,
   InputAdornment,
   ListItem,
+  ListItemIcon,
   ListItemText,
   TextField,
 } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import GroupsIcon from '@mui/icons-material/Groups'
+import PlaceIcon from '@mui/icons-material/Place'
+import StarIcon from '@mui/icons-material/Star'
 import type { CityLayout } from '../brc/layout'
 import { geocode } from '../brc/geocode'
 import type { Poi } from '../data/types'
@@ -28,6 +33,7 @@ interface Option {
   kind: 'address' | 'art' | 'camp' | 'saved'
   position: Position
   poi?: Poi
+  score: number
 }
 
 /**
@@ -39,19 +45,21 @@ export function SearchPanel({ layout, pois, places, onGo, compact = false }: Pro
   const [query, setQuery] = useState('')
 
   const options = useMemo<Option[]>(() => {
-    const term = query.trim().toLowerCase()
+    const term = normalize(query)
     if (term.length < 2) return []
 
     const results: Option[] = []
 
     // Saved spots first: if you are searching at 4am, this is what you want.
     for (const place of places) {
-      if (place.name.toLowerCase().includes(term)) {
+      const score = matchScore(place.name, term)
+      if (score > 0) {
         results.push({
           label: place.name,
           detail: place.address,
           kind: 'saved',
           position: place.position,
+          score: score + 50,
         })
       }
     }
@@ -63,22 +71,24 @@ export function SearchPanel({ layout, pois, places, onGo, compact = false }: Pro
         detail: `${Math.round(located.distanceFeet)} ft from the Man`,
         kind: 'address',
         position: located.position,
+        score: 85,
       })
     }
 
     for (const poi of pois) {
-      if (results.length > 40) break
-      if (poi.name.toLowerCase().includes(term)) {
+      const score = Math.max(matchScore(poi.name, term), matchScore(poi.address ?? '', term) - 20)
+      if (score > 0) {
         results.push({
           label: poi.name,
           detail: poi.address ?? '',
           kind: poi.kind === 'art' ? 'art' : 'camp',
           position: poi.position,
           poi,
+          score,
         })
       }
     }
-    return results
+    return results.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label)).slice(0, 40)
   }, [query, layout, pois, places])
 
   return (
@@ -96,6 +106,9 @@ export function SearchPanel({ layout, pois, places, onGo, compact = false }: Pro
         const { key, ...rest } = props as typeof props & { key: string }
         return (
           <ListItem key={key} {...rest} dense>
+            <ListItemIcon sx={{ minWidth: 36, color: option.kind === 'art' ? 'primary.main' : option.kind === 'camp' ? 'secondary.main' : 'text.secondary' }}>
+              {optionIcon(option.kind)}
+            </ListItemIcon>
             <ListItemText primary={option.label} secondary={option.detail} />
             <Chip
               size="small"
@@ -133,4 +146,25 @@ export function SearchPanel({ layout, pois, places, onGo, compact = false }: Pro
       sx={{ width: '100%' }}
     />
   )
+}
+
+function normalize(value: string) {
+  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+}
+
+function matchScore(value: string, term: string) {
+  const candidate = normalize(value)
+  if (!candidate || !term) return 0
+  if (candidate === term) return 120
+  if (candidate.startsWith(term)) return 105
+  if (candidate.split(/\s+/).some((word) => word.startsWith(term))) return 92
+  if (candidate.includes(term)) return 70
+  return 0
+}
+
+function optionIcon(kind: Option['kind']) {
+  if (kind === 'art') return <AutoAwesomeIcon fontSize="small" />
+  if (kind === 'camp') return <GroupsIcon fontSize="small" />
+  if (kind === 'saved') return <StarIcon fontSize="small" />
+  return <PlaceIcon fontSize="small" />
 }

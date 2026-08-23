@@ -76,5 +76,7 @@ export interface Poi {
   description?: string
   address?: string
   position: [number, number]
+  /** GPS is a surveyed point; address means the pin is the shared street intersection. */
+  positionSource: 'gps' | 'address'
   thumbnail?: string
 }

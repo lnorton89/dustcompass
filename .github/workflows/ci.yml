@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - run: npm ci
@@ -31,29 +31,30 @@ jobs:
         run: npm run fetch-archive -- 2025
 
       - name: Typecheck
-        run: npx tsc -b --force
+        run: npm run typecheck
 
       - name: Unit tests
         run: npm test
 
       - name: Build
+        env:
+          NEXT_PUBLIC_BASE_PATH: /dustcompass
+          NEXT_PUBLIC_DATA_YEAR: '2025'
+          NEXT_PUBLIC_E2E: '1'
         run: npm run build
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Browser tests
+      - name: Production browser, accessibility, and offline tests
+        env:
+          NEXT_PUBLIC_BASE_PATH: /dustcompass
         run: |
-          npx vite --host 127.0.0.1 --port 5173 --strictPort &
-          npx wait-on -t 60000 http://127.0.0.1:5173/
-          npm run test:smoke http://127.0.0.1:5173/
-          npm run test:a11y  http://127.0.0.1:5173/
-
-      - name: Offline test
-        run: |
-          npx vite preview --host 127.0.0.1 --port 4173 --strictPort &
-          npx wait-on -t 60000 http://127.0.0.1:4173/
-          npm run test:offline http://127.0.0.1:4173/
+          node scripts/serve-export.mjs &
+          npx wait-on -t 60000 http://127.0.0.1:4173/dustcompass/
+          npm run test:smoke http://127.0.0.1:4173/dustcompass/
+          npm run test:a11y http://127.0.0.1:4173/dustcompass/
+          npm run test:offline http://127.0.0.1:4173/dustcompass/
 
       - name: Upload failure screenshots
         if: failure()

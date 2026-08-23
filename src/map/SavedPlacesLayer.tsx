@@ -40,10 +40,11 @@ export function SavedPlacesLayer({ places, palette }: Props) {
       <Layer
         id="saved-label"
         type="symbol"
+        minzoom={14}
         layout={{
           'text-field': ['get', 'name'],
           'text-font': ['Open Sans Regular'],
-          'text-size': 12,
+          'text-size': 13,
           'text-offset': [0, 1],
           'text-anchor': 'top',
           'text-allow-overlap': false,

@@ -57,7 +57,7 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>,
     )
     expect(screen.getByRole('button', { name: 'Reload' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Reset saved settings' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Reset saved settings' })).toBeNull()
     expect(screen.getByText(/stored on this device/)).toBeDefined()
   })
 })

@@ -30,13 +30,20 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
           }}
         />
         <Layer
+          id="toilet-icon"
+          type="symbol"
+          minzoom={14}
+          layout={{ 'text-field': 'T', 'text-font': ['Open Sans Regular'], 'text-size': 10 }}
+          paint={{ 'text-color': palette.playa }}
+        />
+        <Layer
           id="toilet-label"
           type="symbol"
           minzoom={15}
           layout={{
             'text-field': 'Toilets',
             'text-font': ['Open Sans Regular'],
-            'text-size': 10,
+            'text-size': 12,
             'text-offset': [0, 0.8],
             'text-anchor': 'top',
             'text-optional': true,
@@ -46,6 +53,16 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
             'text-halo-color': palette.labelHalo,
             'text-halo-width': 1.2,
           }}
+        />
+        <Layer
+          id="service-icon"
+          type="symbol"
+          layout={{
+            'text-field': ['match', ['get', 'category'], 'medical', '+', 'ranger', 'R', 'i'],
+            'text-font': ['Open Sans Regular'],
+            'text-size': 11,
+          }}
+          paint={{ 'text-color': palette.playa }}
         />
       </Source>
 
@@ -75,7 +92,7 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
           layout={{
             'text-field': ['get', 'name'],
             'text-font': ['Open Sans Regular'],
-            'text-size': 11,
+            'text-size': 13,
             'text-offset': [0, 0.9],
             'text-anchor': 'top',
           }}

@@ -5,7 +5,7 @@ React 19 + MUI 9 + MapLibre GL JS 6.
 
 > This app is not affiliated, endorsed, or verified by Burning Man Project.
 
-**Live: https://lnorton89.github.io/burningman/**
+**Live: https://lnorton89.github.io/dustcompass/**
 
 iBurn is mobile-only and has no web map; this is that map. It borrows iBurn's
 excellent open data (MPL-2.0) but none of its 2017-era tile pipeline.
@@ -134,7 +134,7 @@ A Pages project site is served from a subpath, so the build takes the prefix
 from the repo name via `BASE_PATH`. Everything that loads data, fonts or icons
 goes through `import.meta.env.BASE_URL`, and the service worker's scope and
 `start_url` follow it, so the offline install works from the subpath too — the
-offline test passes against a `/burningman/` build.
+offline test passes against a production `/dustcompass/` Next.js export.
 
 To deploy anywhere else, build with the prefix that host serves from and publish
 `dist/`:

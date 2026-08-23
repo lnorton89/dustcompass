@@ -26,14 +26,7 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error('Dust Compass crashed:', error, info.componentStack)
   }
 
-  private reset = (clearStorage: boolean) => {
-    if (clearStorage) {
-      try {
-        localStorage.clear()
-      } catch {
-        /* blocked site data — nothing to clear */
-      }
-    }
+  private reset = () => {
     window.location.reload()
   }
 
@@ -72,11 +65,8 @@ export class ErrorBoundary extends Component<Props, State> {
             {error.message}
           </Typography>
           <Stack direction="row" spacing={1} sx={{ justifyContent: 'center' }}>
-            <Button variant="contained" onClick={() => this.reset(false)}>
+            <Button variant="contained" onClick={this.reset}>
               Reload
-            </Button>
-            <Button variant="outlined" onClick={() => this.reset(true)}>
-              Reset saved settings
             </Button>
           </Stack>
         </Stack>

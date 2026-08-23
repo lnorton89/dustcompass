@@ -81,9 +81,13 @@ export function useSavedPlaces() {
     setPlaces((current) => current.filter((place) => place.id !== id))
   }, [])
 
+  const restore = useCallback((place: SavedPlace) => {
+    setPlaces((current) => current.some((item) => item.id === place.id) ? current : [place, ...current])
+  }, [])
+
   const rename = useCallback((id: string, name: string) => {
     setPlaces((current) => current.map((place) => (place.id === id ? { ...place, name } : place)))
   }, [])
 
-  return { places, save, remove, rename }
+  return { places, save, remove, restore, rename }
 }

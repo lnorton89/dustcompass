@@ -6,6 +6,7 @@ export type LocationStatus = 'idle' | 'locating' | 'tracking' | 'denied' | 'unav
 export interface Geolocation {
   position?: Position
   accuracy?: number
+  lastFixAt?: number
   status: LocationStatus
   /** Begin watching. Safe to call repeatedly. */
   start: () => void
@@ -22,6 +23,7 @@ export function useGeolocation(): Geolocation {
   const [position, setPosition] = useState<Position>()
   const [accuracy, setAccuracy] = useState<number>()
   const [status, setStatus] = useState<LocationStatus>('idle')
+  const [lastFixAt, setLastFixAt] = useState<number>()
   const watchId = useRef<number>(undefined)
 
   const stop = useCallback(() => {
@@ -43,6 +45,7 @@ export function useGeolocation(): Geolocation {
       (fix) => {
         setPosition([fix.coords.longitude, fix.coords.latitude])
         setAccuracy(fix.coords.accuracy)
+        setLastFixAt(fix.timestamp)
         setStatus('tracking')
       },
       (error) => {
@@ -55,5 +58,5 @@ export function useGeolocation(): Geolocation {
 
   useEffect(() => stop, [stop])
 
-  return { position, accuracy, status, start, stop }
+  return { position, accuracy, lastFixAt, status, start, stop }
 }

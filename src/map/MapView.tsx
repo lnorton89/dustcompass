@@ -8,7 +8,6 @@ import {
   type MapLayerMouseEvent,
   type MapRef,
 } from '@vis.gl/react-maplibre'
-import 'maplibre-gl/dist/maplibre-gl.css'
 import type { GeoJSONSource } from 'maplibre-gl'
 import type { PlayaData } from '../data/usePlayaData'
 import type { Poi, PoiKind } from '../data/types'
@@ -23,6 +22,7 @@ import { SAVED_LAYER_ID, SavedPlacesLayer } from './SavedPlacesLayer'
 import { ServiceLayers } from './ServiceLayers'
 import { baseStyle, paletteFor, type ThemeMode } from './style'
 import { FocusMarker } from './FocusMarker'
+import { assetUrl } from '../config'
 
 interface Props {
   data: PlayaData
@@ -49,13 +49,13 @@ interface Props {
   /** The listing whose detail drawer is open. */
   selected?: Poi
   /** Kept visible after the detail drawer closes and navigation begins. */
-  destination?: { name: string; position: Position; address?: string }
+  destination?: { name: string; position: Position; address?: string; approximate?: boolean }
   savedPlaces: SavedPlace[]
   onSelectPlace: (id: string) => void
   mapRef: React.RefObject<MapRef | null>
 }
 
-const GLYPHS = `${import.meta.env.BASE_URL}fonts/{fontstack}/{range}.pbf`
+const GLYPHS = assetUrl('fonts/{fontstack}/{range}.pbf')
 
 export function MapView({
   data,
@@ -130,7 +130,8 @@ export function MapView({
       mapStyle={style}
       interactiveLayerIds={[POI_CLUSTER_LAYER_ID, POI_LAYER_ID, SAVED_LAYER_ID]}
       onClick={handleClick}
-      onMouseEnter={() => setCursor('pointer')}
+      onError={(event) => console.error('Map rendering error:', event.error)}
+      onMouseMove={(event) => setCursor(event.features?.length ? 'pointer' : undefined)}
       onMouseLeave={() => setCursor(undefined)}
       cursor={cursor}
       onLoad={(event) => {
@@ -153,7 +154,9 @@ export function MapView({
         // A readiness flag end-to-end tests can wait on in any build. The map
         // handle itself is only exposed in development.
         document.documentElement.dataset.mapReady = 'true'
-        if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__map = event.target
+        if (process.env.NEXT_PUBLIC_E2E === '1') {
+          ;(window as unknown as Record<string, unknown>).__map = event.target
+        }
       }}
       maxPitch={60}
       attributionControl={{ compact: true, customAttribution: 'Layout & listings: iBurn (MPL-2.0), Burning Man Project' }}
@@ -194,6 +197,7 @@ export function MapView({
           name={destination.name}
           address={destination.address}
           navigating
+          approximate={destination.approximate}
         />
       )}
 

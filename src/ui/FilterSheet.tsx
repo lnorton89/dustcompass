@@ -60,7 +60,7 @@ export function FilterSheet<T extends string>({
       anchor="bottom"
       open={open}
       onClose={onClose}
-      slotProps={{ paper: { sx: { borderTopLeftRadius: 16, borderTopRightRadius: 16, p: 2 } } }}
+      slotProps={{ paper: { sx: { maxHeight: '90dvh', borderTopLeftRadius: 16, borderTopRightRadius: 16, p: 2 } } }}
     >
       <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
         <Typography variant="subtitle2">Show on the map</Typography>

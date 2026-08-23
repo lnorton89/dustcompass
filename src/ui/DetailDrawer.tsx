@@ -68,7 +68,12 @@ export function DetailDrawer({
       slotProps={{
         paper: {
           sx: compact
-            ? { height: '70dvh', borderTopLeftRadius: 16, borderTopRightRadius: 16 }
+            ? {
+                maxHeight: 'min(82dvh, calc(100dvh - env(safe-area-inset-top) - 16px))',
+                borderTopLeftRadius: 16,
+                borderTopRightRadius: 16,
+                overflowY: 'auto',
+              }
             : { width: 400 },
         },
       }}
@@ -144,8 +149,13 @@ export function DetailDrawer({
             sx={{ mt: 2 }}
             fullWidth
           >
-            Take me there
+            {poi.positionSource === 'address' ? 'Take me there · address area' : 'Take me there'}
           </Button>
+          {poi.positionSource === 'address' && (
+            <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 0.75, fontWeight: 650 }}>
+              Approximate pin at {poi.address ?? 'the listed address'}. Nearby camps can share this same map point.
+            </Typography>
+          )}
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
             Uses your device location only while navigation is active. Your position stays on this device.
           </Typography>

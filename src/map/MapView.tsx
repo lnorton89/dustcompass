@@ -20,11 +20,11 @@ import { POI_LAYER_ID, PoiLayers } from './PoiLayers'
 import { RouteLayer } from './RouteLayer'
 import { SAVED_LAYER_ID, SavedPlacesLayer } from './SavedPlacesLayer'
 import { ServiceLayers } from './ServiceLayers'
-import { baseStyle, DARK, LIGHT } from './style'
+import { baseStyle, paletteFor, type ThemeMode } from './style'
 
 interface Props {
   data: PlayaData
-  mode: 'dark' | 'light'
+  mode: ThemeMode
   visible: Set<PoiKind>
   showServices: boolean
   showToilets: boolean
@@ -68,7 +68,7 @@ export function MapView({
   onSelectPlace,
   mapRef,
 }: Props) {
-  const palette = mode === 'dark' ? DARK : LIGHT
+  const palette = paletteFor(mode)
   const style = useMemo(() => baseStyle(palette, GLYPHS), [palette])
   const [cursor, setCursor] = useState<string>()
   const poiIndex = useMemo(

@@ -109,6 +109,27 @@ assert(/\bmin\b|\bh\b/.test(drawerText), 'drawer shows travel time')
 await page.getByLabel('Close details').click()
 await page.waitForTimeout(500)
 
+// Themes cycle dark → light → red night, and the map restyles with them.
+await page.getByLabel('Switch to light mode').click()
+await page.waitForTimeout(1200)
+assert(
+  (await page.evaluate(() => window.__map.getStyle().layers[0].paint['background-color'])) ===
+    '#e8e0cf',
+  'light mode restyles the map',
+)
+await page.getByLabel('Switch to red night mode').click()
+await page.waitForTimeout(1500)
+const nightBg = await page.evaluate(
+  () => window.__map.getStyle().layers[0].paint['background-color'],
+)
+assert(nightBg === '#0a0000', `night mode restyles the map (${nightBg})`)
+assert(
+  (await page.evaluate(() => window.__map.queryRenderedFeatures({ layers: ['street-fill'] }).length)) > 20,
+  'the city still renders after a restyle',
+)
+await page.getByLabel('Switch to dark mode').click()
+await page.waitForTimeout(1200)
+
 // Navigation: pick a camp, head for it, and require a live line and estimate.
 await search.fill('')
 await search.fill('Pink Fuzzy Monkey')

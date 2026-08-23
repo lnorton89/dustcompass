@@ -38,8 +38,11 @@ If you later want surrounding desert, `src/map/protocols.ts` registers
 `pmtiles://` — a single static archive read with HTTP range requests, no
 backend.
 
-**Dark by default.** A white screen at 3am destroys night vision for everyone
-standing near you.
+**Dark by default, with a red night mode.** A white screen at 3am destroys
+night vision for everyone standing near you; red preserves it, which is why red
+headlamps are the convention out here. Night mode puts the whole interface on a
+single low-luminance red, not just the map — a bright white dialog would undo
+the point of it.
 
 **Saved spots are the point at 4am.** Where the tent is, where the bike got
 left, where you agreed to meet. They live on the device, never touch the
@@ -98,15 +101,19 @@ renders an empty map. It also distinguishes "locations are still embargoed" from
 - "Take me there" draws a line from where you are, with distance, walk and
   bike estimates, and the direction as a clock position
 - Save where your camp, tent or bike is, and find your way back to it
+- Dark, light, and a red night mode that preserves night vision
 - Share any listing or dropped pin as a link that carries a playa address
 - Installs as an app and works with no connectivity at all
 
 ## Deploying
 
 Pushing to the default branch builds and publishes to GitHub Pages
-(`.github/workflows/deploy.yml`). The first run turns Pages on for the repo
-itself, so there is no setting to remember; the site lands at
+(`.github/workflows/deploy.yml`). The site lands at
 `https://<owner>.github.io/<repo>/`.
+
+**One-time setup:** turn Pages on under *Settings → Pages → Source: GitHub
+Actions*. The workflow cannot do this itself — creating a Pages site needs a
+permission the default `GITHUB_TOKEN` does not carry.
 
 A Pages project site is served from a subpath, so the build takes the prefix
 from the repo name via `BASE_PATH`. Everything that loads data, fonts or icons
@@ -177,8 +184,8 @@ Four layers, all runnable locally.
 ```sh
 npm test                                                 # 68 unit + component tests
 npm run dev &
-npm run test:smoke  http://127.0.0.1:5173/               # 23 browser assertions
-npm run test:a11y   http://127.0.0.1:5173/               # axe, 8 UI states
+npm run test:smoke  http://127.0.0.1:5173/               # 26 browser assertions
+npm run test:a11y   http://127.0.0.1:5173/               # axe, 9 UI states
 npm run build && npx vite preview --port 4173 &
 npm run test:offline http://127.0.0.1:4173/              # proves offline works
 ```
@@ -197,8 +204,10 @@ empties and refills, drives a search, opens a listing, stars it and confirms it
 persisted.
 
 **Accessibility** — axe against WCAG 2.1 AA across the map, events panel,
-search suggestions, listing details, navigation, the save dialog, and the phone
-layout including its filter sheet.
+search suggestions, listing details, navigation, the save dialog, red night mode
+and the phone layout including its filter sheet. Night mode drops contrast
+deliberately and still has to pass — it caught a 4.37:1 chip that would
+otherwise have shipped.
 
 **Offline** — loads the app, waits for the service worker to finish precaching,
 disables the network, reloads, and requires the map to paint and addresses to

@@ -1,5 +1,7 @@
 import type { StyleSpecification } from 'maplibre-gl'
 
+export type ThemeMode = 'dark' | 'light' | 'night'
+
 export interface PlayaPalette {
   playa: string
   street: string
@@ -34,6 +36,28 @@ export const DARK: PlayaPalette = {
   saved: '#facc15',
 }
 
+/**
+ * Red preserves night vision, which is why red headlamps are the convention out
+ * here. Everything is a single hue at low luminance so the screen stops being a
+ * flashlight pointed at your own eyes — and at everyone standing near you.
+ */
+export const NIGHT: PlayaPalette = {
+  playa: '#0a0000',
+  street: '#5c1212',
+  streetCasing: '#1f0505',
+  plaza: '#2a0808',
+  fence: '#7a2020',
+  label: '#ff6b6b',
+  labelHalo: '#0a0000',
+  art: '#ff4d4d',
+  camp: '#c94040',
+  toilet: '#8f3030',
+  medical: '#ff8080',
+  ranger: '#d95555',
+  civic: '#a03535',
+  saved: '#ff9b9b',
+}
+
 export const LIGHT: PlayaPalette = {
   playa: '#e8e0cf',
   street: '#ffffff',
@@ -59,6 +83,11 @@ export const LIGHT: PlayaPalette = {
  * There is no tile source here on purpose: the city is generated locally and
  * glyphs are bundled, so the map renders with the network switched off.
  */
+export function paletteFor(mode: ThemeMode): PlayaPalette {
+  if (mode === 'light') return LIGHT
+  return mode === 'night' ? NIGHT : DARK
+}
+
 export function baseStyle(palette: PlayaPalette, glyphs: string): StyleSpecification {
   return {
     version: 8,

@@ -19,6 +19,7 @@ import { useMediaQuery } from '@mui/material'
 import IconButton from '@mui/material/IconButton'
 import TuneIcon from '@mui/icons-material/Tune'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
+import NightlightIcon from '@mui/icons-material/Nightlight'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import ExploreIcon from '@mui/icons-material/Explore'
 import EventIcon from '@mui/icons-material/Event'
@@ -43,8 +44,20 @@ import { shareLink } from './ui/share'
 import type { Poi, PoiKind } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
+import type { ThemeMode } from './map/style'
 
 type Filter = PoiKind | 'toilets' | 'services' | 'favorites'
+
+/**
+ * Dark → light → night red. Red is last because it is the deliberate choice,
+ * not somewhere to land by accident.
+ */
+const NEXT_MODE: Record<ThemeMode, ThemeMode> = { dark: 'light', light: 'night', night: 'dark' }
+const THEME_LABEL: Record<ThemeMode, string> = {
+  dark: 'Switch to light mode',
+  light: 'Switch to red night mode',
+  night: 'Switch to dark mode',
+}
 
 const FILTERS: { key: Filter; label: string; color: 'primary' | 'secondary' | 'default' }[] = [
   { key: 'art', label: 'Art', color: 'primary' },
@@ -59,7 +72,7 @@ export default function App() {
   const { favorites, toggle: toggleFavorite } = useFavorites()
   const { places, save: savePlace, remove: removePlace } = useSavedPlaces()
   const [saving, setSaving] = useState<{ position: Position; address: string }>()
-  const [mode, setMode] = useState<'dark' | 'light'>('dark')
+  const [mode, setMode] = useState<ThemeMode>('dark')
   const [cityUp, setCityUp] = useState(true)
   const [active, setActive] = useState<Set<Filter>>(
     () => new Set<Filter>(['art', 'camp', 'toilets', 'services']),
@@ -198,7 +211,7 @@ export default function App() {
   }, [active])
 
   return (
-    <ThemeProvider theme={theme} defaultMode={mode}>
+    <ThemeProvider theme={theme} defaultMode={mode === 'light' ? 'light' : 'dark'}>
       <CssBaseline />
       <Box sx={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
         <AppBar position="static" color="default" elevation={0} enableColorOnDark>
@@ -260,19 +273,23 @@ export default function App() {
                   </ToggleButton>
                 </Tooltip>
               )}
-              <ToggleButton
-                value="theme"
-                size="small"
-                selected={false}
-                onChange={() => setMode((m) => (m === 'dark' ? 'light' : 'dark'))}
-                aria-label={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              >
-                {mode === 'dark' ? (
-                  <DarkModeIcon fontSize="small" />
-                ) : (
-                  <LightModeIcon fontSize="small" />
-                )}
-              </ToggleButton>
+              <Tooltip title={THEME_LABEL[mode]}>
+                <ToggleButton
+                  value="theme"
+                  size="small"
+                  selected={mode === 'night'}
+                  onChange={() => setMode(NEXT_MODE[mode])}
+                  aria-label={THEME_LABEL[mode]}
+                >
+                  {mode === 'dark' ? (
+                    <DarkModeIcon fontSize="small" />
+                  ) : mode === 'light' ? (
+                    <LightModeIcon fontSize="small" />
+                  ) : (
+                    <NightlightIcon fontSize="small" />
+                  )}
+                </ToggleButton>
+              </Tooltip>
             </Stack>
           </Toolbar>
         </AppBar>

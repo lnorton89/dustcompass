@@ -45,11 +45,10 @@ jobs:
         # be built with that prefix.
         run: BASE_PATH="/${GITHUB_REPOSITORY#*/}/" npm run build
 
-      # enablement turns Pages on for the repo the first time this runs, so
-      # there is no manual setting to remember. It is a no-op afterwards.
+      # Pages must already be switched on for the repo (Settings → Pages →
+      # Source: GitHub Actions). Enabling it from here needs a token permission
+      # the default GITHUB_TOKEN does not carry, so this only reads the config.
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -53,6 +53,15 @@ async function ready(page) {
   await ready(page)
   await audit(page, 'map')
 
+  // Red night mode drops contrast deliberately; it still has to pass.
+  await page.getByLabel('Switch to light mode').click()
+  await page.waitForTimeout(900)
+  await page.getByLabel('Switch to red night mode').click()
+  await page.waitForTimeout(1200)
+  await audit(page, 'red night mode')
+  await page.getByLabel('Switch to dark mode').click()
+  await page.waitForTimeout(900)
+
   await page.getByLabel('Show events').click()
   await page.waitForTimeout(800)
   await audit(page, 'events panel')

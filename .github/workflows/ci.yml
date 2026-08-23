@@ -44,14 +44,14 @@ jobs:
 
       - name: Browser tests
         run: |
-          npx vite --port 5173 &
+          npx vite --host 127.0.0.1 --port 5173 --strictPort &
           npx wait-on -t 60000 http://127.0.0.1:5173/
           npm run test:smoke http://127.0.0.1:5173/
           npm run test:a11y  http://127.0.0.1:5173/
 
       - name: Offline test
         run: |
-          npx vite preview --port 4173 &
+          npx vite preview --host 127.0.0.1 --port 4173 --strictPort &
           npx wait-on -t 60000 http://127.0.0.1:4173/
           npm run test:offline http://127.0.0.1:4173/
 

@@ -50,6 +50,11 @@ network, and survive a corrupted or truncated write — losing the file is
 acceptable, crashing the map on the one night it is needed is not. Toilets and services stay on their own layer that survives
 filtering camps and art away, for the same reason.
 
+**"What's on now" is only half the question.** The other half is whether you
+can get there before it ends, so the events list sorts by distance as well as
+time. Choosing that sort is also when it asks for your location — offering it
+only once a fix exists means it is never there when it is first wanted.
+
 **Time is playa time.** "What's on now" uses Black Rock City's clock, not the
 device's — people arrive with phones still set to wherever they flew from. And
 outside the event week the wall clock makes every window empty, so the schedule
@@ -96,7 +101,8 @@ renders an empty map. It also distinguishes "locations are still embargoed" from
   `9:00 B Plaza @ 4:45`, `12:00 2500'`
 - Tap bare playa to get its street address back
 - Toilets, medical, rangers and civic landmarks on a layer of their own
-- Events filtered to now / next 3h / today, jumping to the hosting camp
+- Events filtered to now / next 3h / today, sorted by time or by how close they
+  are, jumping to the hosting camp
 - Favourites, and walk/bike estimates from your GPS fix or the Man
 - "Take me there" draws a line from where you are, with distance, walk and
   bike estimates, and the direction as a clock position
@@ -184,7 +190,7 @@ Four layers, all runnable locally.
 ```sh
 npm test                                                 # 68 unit + component tests
 npm run dev &
-npm run test:smoke  http://127.0.0.1:5173/               # 26 browser assertions
+npm run test:smoke  http://127.0.0.1:5173/               # 28 browser assertions
 npm run test:a11y   http://127.0.0.1:5173/               # axe, 9 UI states
 npm run build && npx vite preview --port 4173 &
 npm run test:offline http://127.0.0.1:4173/              # proves offline works

@@ -16,6 +16,8 @@ import {
 import CloseIcon from '@mui/icons-material/Close'
 import type { EventItem, Poi } from '../data/types'
 import { formatWhen, occurrencesInWindow, type EventWindow } from '../data/events'
+import { formatDistance, travelBetween } from '../brc/travel'
+import type { Position } from '../brc/geo'
 
 interface Props {
   open: boolean
@@ -25,6 +27,10 @@ interface Props {
   now: Date
   /** True when `now` has been scrubbed to the start of the burn. */
   preview: boolean
+  /** Where to measure from when sorting by distance. */
+  origin?: Position
+  /** Asked for when someone chooses "Closest" without a fix yet. */
+  onNeedLocation: () => void
   onSelect: (poi: Poi) => void
   onClose: () => void
   /** Phone layout: come up from the bottom instead of in from the side. */
@@ -49,16 +55,34 @@ export function EventsPanel({
   hosts,
   now,
   preview,
+  origin,
+  onNeedLocation,
   onSelect,
   onClose,
   compact,
 }: Props) {
   const [window, setWindow] = useState<EventWindow>('now')
+  const [sort, setSort] = useState<'time' | 'distance'>('time')
 
-  const rows = useMemo(
-    () => occurrencesInWindow(events, window, now).slice(0, 300),
-    [events, window, now],
-  )
+  /**
+   * "What is on now" is only half the question — the other half is whether you
+   * can get there before it ends. Sorting by distance answers both at once, and
+   * only makes sense once there is somewhere to measure from.
+   */
+  const rows = useMemo(() => {
+    const found = occurrencesInWindow(events, window, now)
+    const located = found.map((row) => {
+      const hostId = row.event.hosted_by_camp ?? row.event.located_at_art ?? ''
+      const host = hosts.get(hostId)
+      const travel = host && origin ? travelBetween(origin, host.position) : undefined
+      return { ...row, host, travel }
+    })
+
+    if (sort === 'distance' && origin) {
+      located.sort((a, b) => (a.travel?.meters ?? Infinity) - (b.travel?.meters ?? Infinity))
+    }
+    return located.slice(0, 300)
+  }, [events, window, now, sort, origin, hosts])
 
   return (
     <Drawer
@@ -98,8 +122,27 @@ export function EventsPanel({
             </ToggleButton>
           ))}
         </ToggleButtonGroup>
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          fullWidth
+          value={sort}
+          onChange={(_, value: 'time' | 'distance' | null) => {
+            if (!value) return
+            setSort(value)
+            // Choosing "Closest" is the moment asking for location makes
+            // sense — offering the sort only after a fix exists means it is
+            // never there when it is first wanted.
+            if (value === 'distance' && !origin) onNeedLocation()
+          }}
+          sx={{ mt: 1 }}
+        >
+          <ToggleButton value="time">By time</ToggleButton>
+          <ToggleButton value="distance">Closest</ToggleButton>
+        </ToggleButtonGroup>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
           {rows.length === 300 ? 'showing first 300' : `${rows.length} showing`}
+          {sort === 'distance' && !origin && ' · finding you…'}
           {preview &&
             ` · previewing from ${now.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}`}
         </Typography>
@@ -107,8 +150,7 @@ export function EventsPanel({
 
       <List dense sx={{ overflowY: 'auto' }}>
         {rows.map((row, index) => {
-          const hostId = row.event.hosted_by_camp ?? row.event.located_at_art ?? ''
-          const host = hosts.get(hostId)
+          const host = row.host
           return (
             // A plain <li> wrapping the button: putting role="button" on the
             // <li> itself would strip its list semantics from the a11y tree.
@@ -116,7 +158,11 @@ export function EventsPanel({
               <ListItemButton disabled={!host} onClick={() => host && onSelect(host)}>
                 <ListItemText
                   primary={row.event.title}
-                  secondary={[host?.name ?? row.event.other_location, formatWhen(row, now)]
+                  secondary={[
+                    host?.name ?? row.event.other_location,
+                    formatWhen(row, now),
+                    row.travel && formatDistance(row.travel),
+                  ]
                     .filter(Boolean)
                     .join(' · ')}
                   slotProps={{ primary: { variant: 'body2' } }}

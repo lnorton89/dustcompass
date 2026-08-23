@@ -83,6 +83,27 @@ await page.waitForTimeout(900)
 const eventRows = await page.locator('.MuiDrawer-root .MuiListItemButton-root').count()
 assert(eventRows > 0, `events listed in the Now window (${eventRows})`)
 
+// With a fix available, events can be ordered by how far away they are.
+const closest = page.getByRole('button', { name: 'Closest' })
+if (await closest.count()) {
+  await closest.click()
+  await page.waitForTimeout(700)
+  const distances = await page
+    .locator('.MuiDrawer-root .MuiListItemText-secondary')
+    .allInnerTexts()
+  const miles = distances
+    .map((text) => /([\d.]+) mi/.exec(text)?.[1])
+    .filter(Boolean)
+    .map(Number)
+  assert(miles.length > 2, `events show a distance when located (${miles.length} of them)`)
+  assert(
+    miles.every((value, i) => i === 0 || value >= miles[i - 1] - 0.05),
+    `closest-first ordering holds (${miles.slice(0, 5).join(' → ')})`,
+  )
+} else {
+  assert(false, 'distance sort offered when a fix is available')
+}
+
 await page.screenshot({ path: shot })
 await page.getByLabel('Close events').click()
 await page.waitForTimeout(500)

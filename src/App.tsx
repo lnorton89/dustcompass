@@ -407,6 +407,8 @@ export default function App() {
           hosts={hostsByUid}
           now={clock.now}
           preview={clock.preview}
+          origin={here}
+          onNeedLocation={location.start}
           onSelect={(poi) => {
             setEventsOpen(false)
             flyTo(poi.position, poi)

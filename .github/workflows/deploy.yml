@@ -35,15 +35,16 @@ jobs:
 
       - run: npm ci
 
-      # The city data is vendored rather than committed, so it has to be
-      # fetched before the build has anything to precache.
-      - name: Fetch city data
-        run: npm run fetch-data 2025
+      - name: Fetch city geometry
+        run: npm run fetch-data -- 2025
+
+      - name: Fetch official archived listings
+        run: npm run fetch-archive -- 2025
 
       - name: Build
         # A GitHub Pages project site is served from /<repo>/, so the app has to
         # be built with that prefix.
-        run: BASE_PATH="/${GITHUB_REPOSITORY#*/}/" npm run build
+        run: BASE_PATH="/${GITHUB_REPOSITORY#*/}/" VITE_DATA_YEAR=2025 npm run build
 
       # Pages must already be switched on for the repo (Settings → Pages →
       # Source: GitHub Actions). Enabling it from here needs a token permission

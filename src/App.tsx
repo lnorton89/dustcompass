@@ -45,6 +45,8 @@ import type { Poi, PoiKind } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
 import type { ThemeMode } from './map/style'
+import { BRAND } from './brand'
+import { BrandMark } from './ui/BrandMark'
 
 type Filter = PoiKind | 'toilets' | 'services' | 'favorites'
 
@@ -118,13 +120,12 @@ export default function App() {
     return resolveDeepLink(deepLink, data.layout)
   }, [data, deepLink])
 
-  // Applied during render rather than in an effect: React re-runs the component
-  // before committing, so the restored selection is painted once instead of
-  // flashing the unrestored view first.
   const [restoredLink, setRestoredLink] = useState<string | null>(null)
   const linkKey = deepLink.poi ?? deepLink.at ?? null
+  // Apply restoration during render so the selection/pin and its guard commit
+  // together. This also prevents the URL-mirroring effect from erasing a cold
+  // deep link while the dataset is arriving.
   if (data && initialTarget && linkKey && restoredLink !== linkKey) {
-    setRestoredLink(linkKey)
     const target = data.pois.find((poi) => poi.uid === deepLink.poi)
     if (target) {
       setSelected(target)
@@ -134,16 +135,21 @@ export default function App() {
         address: deepLink.at ?? addressFor(initialTarget, data.layout),
       })
     }
+    setRestoredLink(linkKey)
   }
 
   // Keep the address bar in step with what is on screen, so the link in the
   // browser is always the one worth sharing.
   useEffect(() => {
     if (!data) return
+    // Do not erase a cold deep link during the render in which its data first
+    // arrives. Restoration commits first; only then does normal URL mirroring
+    // take over.
+    if (linkKey && restoredLink !== linkKey) return
     if (selected) publish({ poi: selected.uid })
     else if (pin) publish({ at: pin.address })
     else publish({})
-  }, [data, selected, pin, publish])
+  }, [data, selected, pin, publish, linkKey, restoredLink])
 
   const visiblePois = useMemo(() => {
     if (!data) return []
@@ -171,13 +177,30 @@ export default function App() {
   }, [heading, origin, data])
 
 
+  const focusPadding = useCallback(() => {
+    if (compact) {
+      return {
+        top: 24,
+        right: 24,
+        bottom: Math.round(window.innerHeight * 0.7) + 24,
+        left: 24,
+      }
+    }
+    return { top: 32, right: 432, bottom: 32, left: 32 }
+  }, [compact])
+
   const flyTo = useCallback(
     (position: Position, poi?: Poi) => {
-      mapRef.current?.flyTo({ center: position, zoom: 16.5, duration: 900 })
+      mapRef.current?.flyTo({
+        center: position,
+        zoom: 16.5,
+        duration: 900,
+        padding: poi ? focusPadding() : { top: 0, right: 0, bottom: 0, left: 0 },
+      })
       setSelected(poi)
       if (!poi && data) setPin({ position, address: addressFor(position, data.layout) })
     },
-    [data],
+    [data, focusPadding],
   )
 
   const share = useCallback(async (link: { poi?: string; at?: string }, title: string) => {
@@ -217,9 +240,17 @@ export default function App() {
         <AppBar position="static" color="default" elevation={0} enableColorOnDark>
           <Toolbar sx={{ gap: 1, minHeight: { xs: 56, md: 64 }, py: 1 }}>
             {!compact && (
-              <Typography variant="h6" sx={{ whiteSpace: 'nowrap' }}>
-                Playa Map
-              </Typography>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mr: 1 }}>
+                <BrandMark size={34} sx={{ flexShrink: 0 }} />
+                <Box>
+                  <Typography variant="h6" sx={{ whiteSpace: 'nowrap', lineHeight: 1.05 }}>
+                    {BRAND.name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                    {BRAND.tagline}
+                  </Typography>
+                </Box>
+              </Stack>
             )}
 
             <Box sx={{ flex: '1 1 auto', minWidth: 0, maxWidth: { md: 480 } }}>
@@ -315,7 +346,10 @@ export default function App() {
                 showToilets={active.has('toilets')}
                 cityUp={cityUp}
                 mapRef={mapRef}
-                onSelect={setSelected}
+                onSelect={(poi) => {
+                  if (poi) flyTo(poi.position, poi)
+                  else setSelected(undefined)
+                }}
                 onProbe={(address, position) => {
                   setProbe(address)
                   setPin({ position, address })
@@ -332,7 +366,30 @@ export default function App() {
                 pin={pin}
                 initialTarget={initialTarget}
                 route={heading && origin ? { from: origin, to: heading.position } : undefined}
+                selected={selected}
+                destination={heading}
               />
+              <Box
+                data-testid="api-disclaimer"
+                sx={{
+                  position: 'absolute',
+                  left: 8,
+                  bottom: 34,
+                  zIndex: 2,
+                  maxWidth: { xs: 'calc(100% - 88px)', sm: 430 },
+                  px: 1,
+                  py: 0.5,
+                  bgcolor: 'rgba(18,16,14,.9)',
+                  color: '#e8e0cf',
+                  border: '1px solid rgba(232,224,207,.35)',
+                  borderRadius: 1,
+                  backdropFilter: 'blur(4px)',
+                }}
+              >
+                <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.25 }}>
+                  {BRAND.disclaimer}
+                </Typography>
+              </Box>
               {heading && navigation && (
                 <NavBar
                   name={heading.name}

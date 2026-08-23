@@ -146,6 +146,9 @@ export function DetailDrawer({
           >
             Take me there
           </Button>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+            Uses your device location only while navigation is active. Your position stays on this device.
+          </Typography>
 
           {poi.thumbnail && !imageFailed && (
             <Box

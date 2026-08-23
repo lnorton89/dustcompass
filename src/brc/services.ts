@@ -63,10 +63,30 @@ export function toiletPoints(
   return {
     type: 'FeatureCollection',
     features: toilets.features
-      .filter((f): f is GeoJSON.Feature<GeoJSON.Point> => f.geometry?.type === 'Point')
-      .map((f) => ({
-        ...f,
-        properties: { kind: 'service', category: 'toilet' as const, name: 'Toilets' },
-      })),
+      .map((feature): GeoJSON.Feature<GeoJSON.Point> | undefined => {
+        let coordinates: GeoJSON.Position | undefined
+        if (feature.geometry?.type === 'Point') {
+          coordinates = feature.geometry.coordinates
+        } else if (feature.geometry?.type === 'Polygon') {
+          coordinates = ringCentre(feature.geometry.coordinates[0])
+        } else if (feature.geometry?.type === 'MultiPolygon') {
+          coordinates = ringCentre(feature.geometry.coordinates[0]?.[0] ?? [])
+        }
+        if (!coordinates) return undefined
+        return {
+          type: 'Feature',
+          properties: { kind: 'service', category: 'toilet' as const, name: 'Toilets' },
+          geometry: { type: 'Point', coordinates },
+        }
+      })
+      .filter((feature): feature is GeoJSON.Feature<GeoJSON.Point> => Boolean(feature)),
   }
+}
+
+function ringCentre(ring: GeoJSON.Position[]): GeoJSON.Position | undefined {
+  if (!ring.length) return undefined
+  // The final coordinate closes a GeoJSON ring and duplicates the first.
+  const points = ring.length > 1 ? ring.slice(0, -1) : ring
+  const sum = points.reduce(([x, y], [lng, lat]) => [x + lng, y + lat], [0, 0])
+  return [sum[0] / points.length, sum[1] / points.length]
 }

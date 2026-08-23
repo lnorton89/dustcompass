@@ -21,6 +21,7 @@ import { RouteLayer } from './RouteLayer'
 import { SAVED_LAYER_ID, SavedPlacesLayer } from './SavedPlacesLayer'
 import { ServiceLayers } from './ServiceLayers'
 import { baseStyle, paletteFor, type ThemeMode } from './style'
+import { FocusMarker } from './FocusMarker'
 
 interface Props {
   data: PlayaData
@@ -44,6 +45,10 @@ interface Props {
   initialTarget?: Position
   /** Straight line drawn to the place being navigated to. */
   route?: { from: Position; to: Position }
+  /** The listing whose detail drawer is open. */
+  selected?: Poi
+  /** Kept visible after the detail drawer closes and navigation begins. */
+  destination?: { name: string; position: Position }
   savedPlaces: SavedPlace[]
   onSelectPlace: (id: string) => void
   mapRef: React.RefObject<MapRef | null>
@@ -64,6 +69,8 @@ export function MapView({
   pin,
   initialTarget,
   route,
+  selected,
+  destination,
   savedPlaces,
   onSelectPlace,
   mapRef,
@@ -167,6 +174,13 @@ export function MapView({
             }}
           />
         </Marker>
+      )}
+
+      {selected && !destination && (
+        <FocusMarker position={selected.position} name={selected.name} />
+      )}
+      {destination && (
+        <FocusMarker position={destination.position} name={destination.name} navigating />
       )}
 
       <CityLayers city={data.city} campOutlines={data.campOutlines} palette={palette} />

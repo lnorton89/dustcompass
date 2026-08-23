@@ -20,6 +20,17 @@ export const BRC_2026: EmbargoWindow = {
   gatesOpen: new Date('2026-08-30T00:01:00-07:00'),
 }
 
+export const BRC_2025: EmbargoWindow = {
+  campRelease: new Date('2025-08-17T00:00:00-07:00'),
+  gatesOpen: new Date('2025-08-24T00:01:00-07:00'),
+}
+
+export function embargoWindowForYear(year: string): EmbargoWindow {
+  if (year === '2025') return BRC_2025
+  if (year === '2026') return BRC_2026
+  throw new Error(`No reviewed location-release schedule is configured for ${year}.`)
+}
+
 export interface EmbargoState {
   campsReleased: boolean
   artReleased: boolean

@@ -23,7 +23,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Playa Map crashed:', error, info.componentStack)
+    console.error('Dust Compass crashed:', error, info.componentStack)
   }
 
   private reset = (clearStorage: boolean) => {

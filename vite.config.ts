@@ -15,9 +15,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Playa Map — Black Rock City',
-        short_name: 'Playa Map',
-        description: 'Offline map and guide for Black Rock City',
+        name: 'Dust Compass',
+        short_name: 'Dust Compass',
+        description: 'A free, offline-first map, event guide, and compass for the playa.',
         theme_color: '#12100e',
         background_color: '#12100e',
         display: 'standalone',

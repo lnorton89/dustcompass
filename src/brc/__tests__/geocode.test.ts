@@ -17,6 +17,7 @@ const camps = JSON.parse(readFileSync('public/data/2025/camp.json', 'utf8')) as 
   location_string?: string
   location?: { gps_latitude?: number; gps_longitude?: number }
 }[]
+const art = JSON.parse(readFileSync('public/data/2025/art.json', 'utf8')) as typeof camps
 
 describe('clock positions', () => {
   it('puts 12:00 on the city bearing', () => {
@@ -57,6 +58,7 @@ describe('address parsing', () => {
 
   it('accepts full street names', () => {
     expect(geocode('7:30 & Esplanade', layout)?.label).toBe('Esplanade & 7:30')
+    expect(geocode('Atwood & 7:45', layout)?.street).toBe('a')
     expect(geocode('Cherryh & 4:00', layout)?.street).toBe('c')
   })
 
@@ -95,11 +97,12 @@ describe('address forms on plazas and portals', () => {
 })
 
 /**
- * Burning Man publishes surveyed GPS for every placed camp, so the geocoder can
- * be held against ~1,400 independent answers rather than a handful of fixtures.
+ * The official archive publishes addresses for camps and surveyed GPS for art,
+ * so the parser and coordinate math can be held against real public data rather
+ * than a handful of hand-written fixtures.
  */
-describe('against surveyed camp GPS', () => {
-  const placed = camps.filter(
+describe('against official archived locations', () => {
+  const placed = art.filter(
     (c) => c.location_string && c.location?.gps_latitude != null && c.location.gps_longitude != null,
   )
 
@@ -112,37 +115,26 @@ describe('against surveyed camp GPS', () => {
     ])
   }
 
-  // A portal is a gap in the street ring spanning an arc, so "6:00 Portal" is a
-  // stretch of city rather than a point. Those are held to a looser bound.
-  const isPortal = (address: string) => /portal/i.test(address)
-
-  it('has a real corpus to check against', () => {
-    expect(placed.length).toBeGreaterThan(1000)
+  it('parses the public camp-address corpus', () => {
+    const addressed = camps.filter((camp) => camp.location_string)
+    expect(addressed.length).toBeGreaterThan(1300)
+    const unparsed = addressed.filter((camp) => !parseAddress(camp.location_string!, layout))
+    expect(unparsed.map((camp) => camp.location_string)).toEqual([])
   })
 
-  it('parses every published address', () => {
+  it('has a surveyed art corpus and parses every published address', () => {
+    expect(placed.length).toBeGreaterThan(300)
     const unparsed = placed.filter((c) => !parseAddress(c.location_string!, layout))
     expect(unparsed.map((c) => c.location_string)).toEqual([])
   })
 
-  it('lands within a metre for streets and plaza rims', () => {
+  it('lands within three metres of surveyed art GPS', () => {
     const errors = placed
-      .filter((c) => !isPortal(c.location_string!))
       .map(errorFor)
       .filter((e): e is number => e !== undefined)
 
-    expect(errors.length).toBeGreaterThan(1000)
-    expect(Math.max(...errors)).toBeLessThan(1)
-  })
-
-  it('puts portal addresses inside the portal, if not on a point', () => {
-    const errors = placed
-      .filter((c) => isPortal(c.location_string!))
-      .map(errorFor)
-      .filter((e): e is number => e !== undefined)
-
-    expect(errors.length).toBeGreaterThan(0)
-    expect(Math.max(...errors)).toBeLessThan(200)
+    expect(errors.length).toBeGreaterThan(300)
+    expect(Math.max(...errors)).toBeLessThan(3)
   })
 })
 

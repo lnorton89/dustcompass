@@ -4,7 +4,7 @@ import { buildCity, type CityGeometry } from '../brc/city'
 import { buildServices, toiletPoints, type ServiceSpec } from '../brc/services'
 import { geocode } from '../brc/geocode'
 import type { ArtItem, CampItem, EventItem, Poi } from './types'
-import { applyEmbargo, BRC_2026, embargoState, type EmbargoState } from './embargo'
+import { applyEmbargo, embargoState, embargoWindowForYear, type EmbargoState } from './embargo'
 import type { EventRange } from './events'
 
 export interface PlayaData {
@@ -57,7 +57,7 @@ export function usePlayaData() {
     ])
       .then(([layout, rawArt, rawCamps, events, serviceSpecs, rawToilets, dates, outlines]) => {
         if (cancelled) return
-        const embargo = embargoState(BRC_2026)
+        const embargo = embargoState(embargoWindowForYear(DATA_YEAR))
         const art = applyEmbargo(rawArt, embargo.artReleased)
         const camps = applyEmbargo(rawCamps, embargo.campsReleased)
         setData({

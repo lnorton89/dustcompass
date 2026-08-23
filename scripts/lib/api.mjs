@@ -75,7 +75,38 @@ export function embargoNote(kind, { located, total }, now = new Date(), release 
     : `${kind}: locations are still embargoed, so listings arrive without positions`
 }
 
+/**
+ * Confidential coordinates must never enter the public build or service-worker
+ * cache. Client-side hiding remains useful, but it cannot make a downloaded
+ * JSON response confidential.
+ */
+export function redactEmbargoedLocations(kind, records, now, release) {
+  if (kind === 'event') return records
+  const released = now >= (kind === 'art' ? release.art : release.camp)
+  if (released) return records
+  return records.map((record) => {
+    const safe = { ...record }
+    delete safe.location
+    delete safe.location_string
+    return safe
+  })
+}
+
+export function releaseForYear(year) {
+  const release = RELEASES[year]
+  if (!release) throw new Error(`No reviewed location-release schedule is configured for ${year}.`)
+  return release
+}
+
 export const RELEASE_2026 = {
   camp: new Date('2026-08-23T00:00:00-07:00'),
   art: new Date('2026-08-30T00:01:00-07:00'),
+}
+
+export const RELEASES = {
+  2025: {
+    camp: new Date('2025-08-17T00:00:00-07:00'),
+    art: new Date('2025-08-24T00:01:00-07:00'),
+  },
+  2026: RELEASE_2026,
 }

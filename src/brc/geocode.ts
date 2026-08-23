@@ -107,7 +107,7 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
   }
 
   // "<clock> <feet>" — open playa, the form art listings use.
-  const open = new RegExp(String.raw`^(${CLOCK})\s*[,&@]?\s*(\d{2,5})\s*(?:'|ft|feet)?`, 'i').exec(raw)
+  const open = new RegExp(String.raw`^(${CLOCK})\s*[,&@]?\s*(\d{1,5})\s*(?:'|ft|feet)?`, 'i').exec(raw)
   if (open) {
     const clock = normaliseClock(open[1])
     return {
@@ -119,7 +119,10 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
 
   // "<clock> & <street>" or "<street> & <clock>", in either order.
   const parts = raw
-    .split(/\s*(?:&|and|at|\/)\s*/i)
+    // `and` and `at` are separators only as words. Without the boundaries,
+    // "Atwood & 7:45" splits inside the street name and shared pins cannot be
+    // restored after a reload.
+    .split(/\s*(?:&|\/|\band\b|\bat\b)\s*/i)
     .filter(Boolean)
     // "3:00 Portal & A" is the 3:00 radial meeting A — the portal is a gap in
     // the ring at that clock, not a separate place.

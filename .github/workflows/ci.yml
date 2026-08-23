@@ -24,11 +24,11 @@ jobs:
 
       - run: npm ci
 
-      # The city layout and listings are vendored from iBurn-Data rather than
-      # committed, so tests that hold the geocoder against surveyed GPS need
-      # them fetched first.
-      - name: Fetch city data
-        run: npm run fetch-data 2025
+      - name: Fetch city geometry
+        run: npm run fetch-data -- 2025
+
+      - name: Fetch official archived listings
+        run: npm run fetch-archive -- 2025
 
       - name: Typecheck
         run: npx tsc -b --force

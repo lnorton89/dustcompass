@@ -15,12 +15,20 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { embargoNote, ENDPOINTS, summarize, validateDataset } from './lib/api.mjs'
+import {
+  embargoNote,
+  ENDPOINTS,
+  redactEmbargoedLocations,
+  releaseForYear,
+  summarize,
+  validateDataset,
+} from './lib/api.mjs'
 
 const YEAR = process.argv[2] ?? String(new Date().getFullYear())
 const KEY = process.env.BMORG_API_KEY
 const BASE = process.env.BMORG_API_BASE ?? 'https://api.burningman.org/api'
 const OUT = resolve(import.meta.dirname, '..', 'public', 'data', YEAR)
+const RELEASE = releaseForYear(YEAR)
 
 if (!KEY) {
   console.error(
@@ -64,17 +72,19 @@ for (const kind of ENDPOINTS) {
     console.error(`  ! ${problem}`)
     refused = true
   }
-  const note = embargoNote(kind, result, new Date())
+  const now = new Date()
+  const note = embargoNote(kind, result, now, RELEASE)
   if (note) console.warn(`  · ${note}`)
 
   if (result.problems.length === 0) {
-    await writeFile(`${OUT}/${kind}.json`, JSON.stringify(records))
+    const publishable = redactEmbargoedLocations(kind, records, now, RELEASE)
+    await writeFile(`${OUT}/${kind}.json`, JSON.stringify(publishable))
     console.log(`  ✓ ${summarize(kind, result)}`)
   }
 }
 
 await writeFile(
-  `${OUT}/ATTRIBUTION.md`,
+  `${OUT}/LISTINGS-ATTRIBUTION.md`,
   [
     `# ${YEAR} listings`,
     '',

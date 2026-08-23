@@ -1,7 +1,9 @@
-# Playa Map
+# Dust Compass
 
-A modern, offline-first web map of Black Rock City. React 19 + MUI 9 +
-MapLibre GL JS 6.
+A free, modern, offline-first map, event guide, and compass for the playa.
+React 19 + MUI 9 + MapLibre GL JS 6.
+
+> This app is not affiliated, endorsed, or verified by Burning Man Project.
 
 **Live: https://lnorton89.github.io/burningman/**
 
@@ -67,7 +69,9 @@ an empty list that reads as a broken app.
 
 ```sh
 npm install
-npm run fetch-data      # vendors iBurn-Data 2025 into public/ (defaults to 2025)
+npm run fetch-data      # vendors geometry only (defaults to 2025)
+npm run fetch-archive -- 2025                # official historical listings
+BMORG_API_KEY=... npm run fetch-api -- 2026  # keyed current-year listings
 npm run dev
 ```
 
@@ -145,19 +149,31 @@ run without it, and those are the two things this app is for.
 
 ## Data and licensing
 
-City layout, geometry and listings come from
-[iBurn-Data](https://github.com/iburnapp/iBurn-Data) (MPL-2.0). Camp, art and
-event listings originate from the [Burning Man public
-API](https://innovate.burningman.org/apis-page/), which requires a key and
-carries terms of service.
+The compact runtime layout adapter and offline glyphs come from
+[iBurn-Data](https://github.com/iburnapp/iBurn-Data) (MPL-2.0); publishable GIS
+geometry comes from Burning Man's official no-key dataset. Camp, art and
+event listings are fetched directly from Burning Man's official public
+[dataset archive](https://innovate.burningman.org/dataset/) for completed years,
+or from the [Burning Man public API](https://innovate.burningman.org/apis-page/)
+for the current year.
+
+The fetch and deploy pipeline intentionally does not copy Event Data from
+iBurn-Data. The current historical build uses Burning Man's no-key 2025 JSON
+archive. A current-year build obtains listings from the official API using the
+key issued for this app, stored only as the masked `BMORG_API_KEY` GitHub Actions
+secret; the key is never exposed to Vite or shipped to browsers. The app is
+free, contains no advertising, uses an original name and compass mark, and
+includes the required non-affiliation disclaimer in the live interface and share image.
+See the current [API and dataset terms](https://innovate.burningman.org/terms-of-service-for-burning-man-apis-and-datasets/).
 
 Those terms embargo location data: **camp locations may not be shown before the
 Sunday preceding the event, and art locations not until Gates open.** That is a
-licence condition, so it is enforced on the data as it loads
-(`src/data/embargo.ts`), not as a UI filter. The embargo strips the address
-string as well as the coordinates — a playa address geocodes back to within a
-metre of the published GPS, so leaving it in place would hand back exactly the
-position the embargo exists to withhold.
+licence condition, so `scripts/fetch-api.mjs` removes confidential locations
+before writing anything into `public/` or the offline cache. The client repeats
+the check in `src/data/embargo.ts` as defense in depth; this is never merely a
+UI filter. Both stages strip the address string as well as the coordinates — a
+playa address geocodes back to within a metre of the published GPS, so leaving
+it in place would hand back exactly the position the embargo exists to withhold.
 
 For 2026, drop in the published `layout.json` and point `VITE_DATA_YEAR` at it.
 

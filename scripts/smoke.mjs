@@ -42,6 +42,13 @@ await page.goto(url, { waitUntil: 'load' })
 await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
 await page.waitForTimeout(3500)
 
+assert((await page.title()).startsWith('Dust Compass'), 'branded document title is present')
+assert(
+  (await page.locator('meta[property="og:image"]').getAttribute('content'))?.endsWith('/og-image.png'),
+  'Open Graph share image is configured',
+)
+assert(await page.getByTestId('api-disclaimer').isVisible(), 'required API disclaimer is prominent')
+
 const count = (id) =>
   page.evaluate((layer) => window.__map.queryRenderedFeatures({ layers: [layer] }).length, id)
 
@@ -117,6 +124,12 @@ await page.keyboard.press('ArrowDown')
 await page.keyboard.press('Enter')
 await page.waitForTimeout(1200)
 assert(await page.getByLabel('Add to favourites').count() > 0, 'detail drawer opened for a camp')
+assert(await page.getByTestId('selection-target').isVisible(), 'selected camp has a visible map target')
+const selectionBox = await page.getByTestId('selection-target').boundingBox()
+assert(
+  selectionBox && selectionBox.x < 1040 && selectionBox.y < 760,
+  `selected camp is framed outside the detail drawer (${Math.round(selectionBox?.x ?? -1)}, ${Math.round(selectionBox?.y ?? -1)})`,
+)
 await page.getByLabel('Add to favourites').click()
 await page.waitForTimeout(300)
 const stored = await page.evaluate(() => localStorage.getItem('playa-map.favorites.v1'))
@@ -171,6 +184,9 @@ await page.keyboard.press('Enter')
 await page.waitForTimeout(1200)
 await page.getByRole('button', { name: /Take me there/i }).click()
 await page.waitForTimeout(900)
+
+assert(await page.getByTestId('navigation-target').isVisible(), 'navigation keeps a labeled destination target')
+assert((await page.getByTestId('selection-target').count()) === 0, 'selection target becomes the navigation target')
 
 const nav = await page.evaluate(() => {
   const route = window.__map.queryRenderedFeatures({ layers: ['route-line'] })

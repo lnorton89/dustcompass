@@ -1,6 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { embargoNote, RELEASE_2026, summarize, validateDataset } from '../api.mjs'
+import {
+  embargoNote,
+  redactEmbargoedLocations,
+  RELEASE_2026,
+  releaseForYear,
+  summarize,
+  validateDataset,
+} from '../api.mjs'
 
 /**
  * The 2025 listings in public/data came from this same API, so they are a real
@@ -76,5 +83,30 @@ describe('telling an embargo apart from a broken key', () => {
 
   it('has nothing to say about events, which carry no location', () => {
     expect(embargoNote('event', unlocated)).toBeUndefined()
+  })
+})
+
+describe('redacting confidential location data before publishing', () => {
+  const record = { uid: 'a', name: 'Placed', location_string: 'D & 3:15', location: { gps_latitude: 1 } }
+
+  it('removes GPS and the geocodable address before release', () => {
+    const [safe] = redactEmbargoedLocations(
+      'art',
+      [record],
+      new Date('2026-08-20T12:00:00-07:00'),
+      RELEASE_2026,
+    )
+    expect(safe).toEqual({ uid: 'a', name: 'Placed' })
+  })
+
+  it('does not alter released or event records', () => {
+    expect(
+      redactEmbargoedLocations('camp', [record], new Date('2026-08-24T12:00:00-07:00'), RELEASE_2026),
+    ).toEqual([record])
+    expect(redactEmbargoedLocations('event', [record], new Date(0), RELEASE_2026)).toEqual([record])
+  })
+
+  it('refuses an unreviewed year instead of guessing an embargo date', () => {
+    expect(() => releaseForYear('2027')).toThrow(/No reviewed location-release schedule/)
   })
 })

@@ -1,0 +1,10 @@
+node_modules
+dist
+*.tsbuildinfo
+.DS_Store
+*.local
+smoke.png
+
+# Vendored from iBurn-Data by `npm run fetch-data` — not ours to redistribute.
+/public/data
+/public/fonts

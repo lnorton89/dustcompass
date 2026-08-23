@@ -19,6 +19,7 @@ interface Props {
   pois: Poi[]
   places: SavedPlace[]
   onGo: (position: Position, poi?: Poi) => void
+  compact?: boolean
 }
 
 interface Option {
@@ -34,7 +35,7 @@ interface Option {
  * search term as often as the name is, so splitting them into two fields would
  * be wrong.
  */
-export function SearchPanel({ layout, pois, places, onGo }: Props) {
+export function SearchPanel({ layout, pois, places, onGo, compact = false }: Props) {
   const [query, setQuery] = useState('')
 
   const options = useMemo<Option[]>(() => {
@@ -114,7 +115,7 @@ export function SearchPanel({ layout, pois, places, onGo }: Props) {
       renderInput={(params) => (
         <TextField
           {...params}
-          placeholder="Camp, art, or an address like 7:30 & Esplanade"
+          placeholder={compact ? 'Search the playa' : 'Camp, art, or an address like 7:30 & Esplanade'}
           size="small"
           slotProps={{
             ...params.slotProps,

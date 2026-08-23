@@ -9,6 +9,7 @@ import {
   type MapRef,
 } from '@vis.gl/react-maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import type { GeoJSONSource } from 'maplibre-gl'
 import type { PlayaData } from '../data/usePlayaData'
 import type { Poi, PoiKind } from '../data/types'
 import type { SavedPlace } from '../data/useSavedPlaces'
@@ -16,7 +17,7 @@ import { reverseGeocode } from '../brc/geocode'
 import type { Position } from '../brc/geo'
 import { cityOutlinePoints, frameFor } from '../brc/frame'
 import { CityLayers } from './CityLayers'
-import { POI_LAYER_ID, PoiLayers } from './PoiLayers'
+import { POI_CLUSTER_LAYER_ID, POI_LAYER_ID, PoiLayers } from './PoiLayers'
 import { RouteLayer } from './RouteLayer'
 import { SAVED_LAYER_ID, SavedPlacesLayer } from './SavedPlacesLayer'
 import { ServiceLayers } from './ServiceLayers'
@@ -94,6 +95,14 @@ export function MapView({
         onSelectPlace(String(hit.properties.id))
         return
       }
+      if (hit?.layer?.id === POI_CLUSTER_LAYER_ID && hit.properties?.cluster_id) {
+        const source = event.target.getSource('pois') as GeoJSONSource
+        const center = (hit.geometry as GeoJSON.Point).coordinates as Position
+        void source.getClusterExpansionZoom(Number(hit.properties.cluster_id)).then((zoom) => {
+          event.target.easeTo({ center, zoom: Math.max(zoom, event.target.getZoom() + 1), duration: 500 })
+        })
+        return
+      }
       if (hit?.properties?.uid) {
         onSelect(poiIndex.get(String(hit.properties.uid)))
         return
@@ -119,7 +128,7 @@ export function MapView({
         bearing: cityUp ? data.layout.bearing : 0,
       }}
       mapStyle={style}
-      interactiveLayerIds={[POI_LAYER_ID, SAVED_LAYER_ID]}
+      interactiveLayerIds={[POI_CLUSTER_LAYER_ID, POI_LAYER_ID, SAVED_LAYER_ID]}
       onClick={handleClick}
       onMouseEnter={() => setCursor('pointer')}
       onMouseLeave={() => setCursor(undefined)}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import {
   Alert,
   AppBar,
@@ -23,6 +23,11 @@ import NightlightIcon from '@mui/icons-material/Nightlight'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import ExploreIcon from '@mui/icons-material/Explore'
 import EventIcon from '@mui/icons-material/Event'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import GroupsIcon from '@mui/icons-material/Groups'
+import WcIcon from '@mui/icons-material/Wc'
+import LocalHospitalIcon from '@mui/icons-material/LocalHospital'
+import StarIcon from '@mui/icons-material/Star'
 import type { MapRef } from '@vis.gl/react-maplibre'
 import { MapView } from './map/MapView'
 import { SearchPanel } from './ui/SearchPanel'
@@ -61,12 +66,17 @@ const THEME_LABEL: Record<ThemeMode, string> = {
   night: 'Switch to dark mode',
 }
 
-const FILTERS: { key: Filter; label: string; color: 'primary' | 'secondary' | 'default' }[] = [
-  { key: 'art', label: 'Art', color: 'primary' },
-  { key: 'camp', label: 'Camps', color: 'secondary' },
-  { key: 'toilets', label: 'Toilets', color: 'default' },
-  { key: 'services', label: 'Services', color: 'default' },
-  { key: 'favorites', label: '★', color: 'primary' },
+const FILTERS: {
+  key: Filter
+  label: string
+  color: 'primary' | 'secondary' | 'default'
+  icon: ReactElement
+}[] = [
+  { key: 'art', label: 'Art', color: 'primary', icon: <AutoAwesomeIcon /> },
+  { key: 'camp', label: 'Camps', color: 'secondary', icon: <GroupsIcon /> },
+  { key: 'toilets', label: 'Toilets', color: 'default', icon: <WcIcon /> },
+  { key: 'services', label: 'Services', color: 'default', icon: <LocalHospitalIcon /> },
+  { key: 'favorites', label: 'Saved', color: 'primary', icon: <StarIcon /> },
 ]
 
 export default function App() {
@@ -197,6 +207,21 @@ export default function App() {
     [compact],
   )
 
+  const navigateTo = useCallback(
+    (target: { name: string; position: Position; address?: string }) => {
+      setHeading(target)
+      setSelected(undefined)
+      mapRef.current?.flyTo({
+        center: target.position,
+        zoom: 16.5,
+        duration: 900,
+        padding: navigationPadding(),
+      })
+      location.start()
+    },
+    [location, navigationPadding],
+  )
+
   const flyTo = useCallback(
     (position: Position, poi?: Poi) => {
       mapRef.current?.flyTo({
@@ -247,6 +272,7 @@ export default function App() {
       <Box sx={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
         <AppBar position="static" color="default" elevation={0} enableColorOnDark>
           <Toolbar sx={{ gap: 1, minHeight: { xs: 56, md: 64 }, py: 1 }}>
+            {compact && <BrandMark size={32} sx={{ flexShrink: 0 }} />}
             {!compact && (
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mr: 1 }}>
                 <BrandMark size={34} sx={{ flexShrink: 0 }} />
@@ -262,7 +288,15 @@ export default function App() {
             )}
 
             <Box sx={{ flex: '1 1 auto', minWidth: 0, maxWidth: { md: 480 } }}>
-              {data && <SearchPanel layout={data.layout} pois={data.pois} places={places} onGo={flyTo} />}
+              {data && (
+                <SearchPanel
+                  layout={data.layout}
+                  pois={data.pois}
+                  places={places}
+                  onGo={flyTo}
+                  compact={compact}
+                />
+              )}
             </Box>
 
             <Stack
@@ -274,6 +308,7 @@ export default function App() {
                 FILTERS.map((filter) => (
                   <Chip
                     key={filter.key}
+                    icon={filter.icon}
                     label={filter.label}
                     size="small"
                     color={filter.color}
@@ -366,10 +401,7 @@ export default function App() {
                 savedPlaces={places}
                 onSelectPlace={(id) => {
                   const place = places.find((p) => p.id === id)
-                  if (place) {
-                    setHeading({ name: place.name, position: place.position, address: place.address })
-                    location.start()
-                  }
+                  if (place) navigateTo(place)
                 }}
                 pin={pin}
                 initialTarget={initialTarget}
@@ -382,7 +414,7 @@ export default function App() {
                 sx={{
                   position: 'absolute',
                   left: 8,
-                  bottom: 34,
+                  bottom: { xs: heading ? 104 : 72, sm: heading ? 92 : 34 },
                   zIndex: 2,
                   maxWidth: { xs: 'calc(100% - 88px)', sm: 430 },
                   px: 1,
@@ -458,8 +490,7 @@ export default function App() {
         onToggleCityUp={toggleCityUp}
         onGoToPlace={(place) => {
           setFiltersOpen(false)
-          setHeading({ name: place.name, position: place.position, address: place.address })
-          location.start()
+          navigateTo(place)
         }}
         onRemovePlace={removePlace}
         onClose={() => setFiltersOpen(false)}
@@ -491,17 +522,7 @@ export default function App() {
         isFavorite={selected ? favorites.has(selected.uid) : false}
         onToggleFavorite={toggleFavorite}
         onShare={(poi) => void share({ poi: poi.uid }, poi.name)}
-        onNavigate={(poi) => {
-          setHeading({ name: poi.name, position: poi.position, address: poi.address })
-          setSelected(undefined)
-          mapRef.current?.flyTo({
-            center: poi.position,
-            zoom: 16.5,
-            duration: 900,
-            padding: navigationPadding(),
-          })
-          location.start()
-        }}
+        onNavigate={navigateTo}
         onClose={() => setSelected(undefined)}
         compact={compact}
       />

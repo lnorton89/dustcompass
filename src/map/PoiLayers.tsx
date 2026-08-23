@@ -13,6 +13,7 @@ interface Props {
 }
 
 export const POI_LAYER_ID = 'poi-dot'
+export const POI_CLUSTER_LAYER_ID = 'poi-cluster'
 
 /**
  * Camps and art as a single clustered source. ~1,700 points is well inside what
@@ -50,7 +51,7 @@ export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
   return (
     <Source id="pois" type="geojson" data={data} cluster clusterRadius={44} clusterMaxZoom={15}>
       <Layer
-        id="poi-cluster"
+        id={POI_CLUSTER_LAYER_ID}
         type="circle"
         filter={['has', 'point_count']}
         paint={{

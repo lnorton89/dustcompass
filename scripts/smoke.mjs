@@ -61,6 +61,7 @@ assert(
   'Open Graph share image is configured',
 )
 assert(await page.getByTestId('api-disclaimer').isVisible(), 'required API disclaimer is prominent')
+assert(await page.getByRole('button', { name: 'Saved', exact: true }).isVisible(), 'saved layer has a clear labeled control')
 
 const count = (id) =>
   page.evaluate((layer) => window.__map.queryRenderedFeatures({ layers: [layer] }).length, id)
@@ -85,6 +86,25 @@ assert((await count('toilet-dot')) === 0, 'toilet filter clears the layer')
 await page.getByRole('button', { name: 'Toilets', exact: true }).click()
 await page.waitForTimeout(800)
 assert((await count('toilet-dot')) > 5, 'toilet filter restores the layer')
+
+// Numbered clusters are controls, not decoration: tapping one should reveal
+// its individual camps/art without making the user hunt for zoom buttons.
+const cluster = await page.evaluate(() => {
+  const feature = window.__map.queryRenderedFeatures({ layers: ['poi-cluster'] })[0]
+  if (!feature || feature.geometry.type !== 'Point') return undefined
+  const point = window.__map.project(feature.geometry.coordinates)
+  return { x: point.x, y: point.y, zoom: window.__map.getZoom() }
+})
+assert(Boolean(cluster), 'a visible cluster is available to expand')
+if (cluster) {
+  await page.locator('canvas').click({ position: { x: cluster.x, y: cluster.y } })
+  await page.waitForTimeout(900)
+  const expandedZoom = await page.evaluate(() => window.__map.getZoom())
+  assert(
+    expandedZoom > cluster.zoom + 0.5,
+    `tapping a cluster zooms in (${cluster.zoom.toFixed(1)} → ${expandedZoom.toFixed(1)})`,
+  )
+}
 
 // Geocode an address through the UI and confirm the camera flew to it.
 const before = await page.evaluate(() => window.__map.getCenter())
@@ -270,6 +290,11 @@ assert(
   await page.locator('.MuiPaper-root').filter({ hasText: 'My camp' }).count() > 0,
   'saved spot can be navigated back to',
 )
+assert(await page.getByTestId('navigation-target').isVisible(), 'saved-spot navigation shows a destination target')
+assert(
+  (await page.getByTestId('navigation-target').innerText()).includes('My camp'),
+  'saved-spot destination is named on the map',
+)
 
 
 // That URL, opened cold, must restore the same place.
@@ -289,7 +314,7 @@ await shared.close()
 
 console.log(problems.length ? `\n${problems.length} problem(s):\n` + problems.join('\n') : '\nno console or network errors')
 await browser.close()
-process.exit(problems.length ? 1 : 0)
+process.exit(problems.length || process.exitCode ? 1 : 0)
 
 function assert(ok, label) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`)

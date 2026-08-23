@@ -14,12 +14,15 @@ import {
   Typography,
 } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
+import CloseIcon from '@mui/icons-material/Close'
+import type { ReactElement } from 'react'
 import type { SavedPlace } from '../data/useSavedPlaces'
 
 export interface FilterOption<T extends string> {
   key: T
   label: string
   color: 'primary' | 'secondary' | 'default'
+  icon?: ReactElement
 }
 
 interface Props<T extends string> {
@@ -59,13 +62,17 @@ export function FilterSheet<T extends string>({
       onClose={onClose}
       slotProps={{ paper: { sx: { borderTopLeftRadius: 16, borderTopRightRadius: 16, p: 2 } } }}
     >
-      <Typography variant="subtitle2" gutterBottom>
-        Show on the map
-      </Typography>
+      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+        <Typography variant="subtitle2">Show on the map</Typography>
+        <IconButton size="small" onClick={onClose} aria-label="Close filters">
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </Stack>
       <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mb: 1 }}>
         {options.map((option) => (
           <Chip
             key={option.key}
+            icon={option.icon}
             label={option.label}
             color={option.color}
             variant={active.has(option.key) ? 'filled' : 'outlined'}

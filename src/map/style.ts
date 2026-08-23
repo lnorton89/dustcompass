@@ -21,10 +21,10 @@ export interface PlayaPalette {
 
 export const DARK: PlayaPalette = {
   playa: '#12100e',
-  street: '#3a352e',
-  streetCasing: '#221f1b',
-  plaza: '#2a2620',
-  fence: '#6b5b3e',
+  street: '#625b50',
+  streetCasing: '#302c27',
+  plaza: '#39342d',
+  fence: '#9a8055',
   label: '#e8e0d0',
   labelHalo: '#12100e',
   art: '#ff8a4c',

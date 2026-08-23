@@ -69,12 +69,12 @@ export function CityLayers({ city, campOutlines, palette }: Props) {
         <Layer
           id="street-label"
           type="symbol"
-          minzoom={13.5}
+          minzoom={12.75}
           layout={{
             'symbol-placement': 'line',
             'text-field': ['get', 'name'],
             'text-font': ['Open Sans Regular'],
-            'text-size': 11,
+            'text-size': ['interpolate', ['linear'], ['zoom'], 12.75, 9, 15, 11] as unknown as number,
             'text-letter-spacing': 0.08,
             'text-max-angle': 30,
           }}
@@ -128,7 +128,7 @@ function roadWidth(multiplier: number) {
     ['exponential', 2],
     ['zoom'],
     12,
-    0.4 * multiplier,
+    0.7 * multiplier,
     16,
     3 * multiplier,
     19,

@@ -28,11 +28,15 @@ import { SearchPanel } from './ui/SearchPanel'
 import { DetailDrawer } from './ui/DetailDrawer'
 import { EventsPanel } from './ui/EventsPanel'
 import { FilterSheet } from './ui/FilterSheet'
+import { NavBar } from './ui/NavBar'
 import { playaTheme } from './ui/theme'
 import { useEventsByHost, usePlayaData } from './data/usePlayaData'
 import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
+import { useGeolocation } from './data/useGeolocation'
 import { addressFor, deepLinkUrl, resolveDeepLink, useDeepLink } from './data/useDeepLink'
+import { travelBetween } from './brc/travel'
+import { bearingToClock, bearingBetween } from './brc/geo'
 import { shareLink } from './ui/share'
 import type { Poi, PoiKind } from './data/types'
 import { reverseGeocode } from './brc/geocode'
@@ -58,7 +62,11 @@ export default function App() {
   )
   const [selected, setSelected] = useState<Poi>()
   const [probe, setProbe] = useState<string>()
-  const [here, setHere] = useState<Position>()
+  // The map's own locate button and the "take me there" flow feed the same
+  // watch, so a heading stays live however it was started.
+  const location = useGeolocation()
+  const [manualHere, setManualHere] = useState<Position>()
+  const here = location.position ?? manualHere
   const [eventsOpen, setEventsOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [embargoNoticeSeen, setEmbargoNoticeSeen] = useState(false)
@@ -71,6 +79,7 @@ export default function App() {
   const eventsByHost = useEventsByHost(data)
   const { initial: deepLink, publish } = useDeepLink()
   const [pin, setPin] = useState<{ position: Position; address: string }>()
+  const [heading, setHeading] = useState<{ name: string; position: Position; address?: string }>()
 
   // "On now" has to stay true as time passes, or the panel quietly lies.
   useEffect(() => {
@@ -127,6 +136,15 @@ export default function App() {
       ? `you (${reverseGeocode(here, data.layout).label})`
       : 'you'
     : 'the Man'
+
+  const navigation = useMemo(() => {
+    if (!heading || !origin || !data) return undefined
+    return {
+      travel: travelBetween(origin, heading.position),
+      clock: bearingToClock(data.layout, bearingBetween(origin, heading.position)),
+    }
+  }, [heading, origin, data])
+
 
   const flyTo = useCallback(
     (position: Position, poi?: Poi) => {
@@ -275,10 +293,25 @@ export default function App() {
                   setProbe(address)
                   setPin({ position, address })
                 }}
-                onLocate={setHere}
+                onLocate={setManualHere}
                 pin={pin}
                 initialTarget={initialTarget}
+                route={heading && origin ? { from: origin, to: heading.position } : undefined}
               />
+              {heading && navigation && (
+                <NavBar
+                  name={heading.name}
+                  address={heading.address}
+                  travel={navigation.travel}
+                  heading={navigation.clock}
+                  located={Boolean(here)}
+                  status={location.status}
+                  onClear={() => {
+                    setHeading(undefined)
+                    location.stop()
+                  }}
+                />
+              )}
               {!data.embargo.artReleased && !embargoNoticeSeen && (
                 <Alert
                   severity="info"
@@ -338,6 +371,11 @@ export default function App() {
         isFavorite={selected ? favorites.has(selected.uid) : false}
         onToggleFavorite={toggleFavorite}
         onShare={(poi) => void share({ poi: poi.uid }, poi.name)}
+        onNavigate={(poi) => {
+          setHeading({ name: poi.name, position: poi.position, address: poi.address })
+          setSelected(undefined)
+          location.start()
+        }}
         onClose={() => setSelected(undefined)}
         compact={compact}
       />

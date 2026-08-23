@@ -14,7 +14,13 @@ const browser = await chromium.launch({
   executablePath: CHROME,
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-proxy-server', '--no-sandbox'],
 })
-const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+const context = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  // A fix out at 4:00 and E, so travel estimates are measured from a real
+  // position rather than falling back to the Man.
+  geolocation: { latitude: 40.7772, longitude: -119.1893 },
+  permissions: ['geolocation'],
+})
 const problems = []
 // Listing thumbnails are hosted off-playa and are expected to fail here (and on
 // playa). The app collapses them; they are not a smoke-test failure.
@@ -100,6 +106,36 @@ assert(/\bmin\b|\bh\b/.test(drawerText), 'drawer shows travel time')
 // Close the listing so the map is clickable again.
 await page.getByLabel('Close details').click()
 await page.waitForTimeout(500)
+
+// Navigation: pick a camp, head for it, and require a live line and estimate.
+await search.fill('')
+await search.fill('Pink Fuzzy Monkey')
+await page.waitForTimeout(700)
+await page.keyboard.press('ArrowDown')
+await page.keyboard.press('Enter')
+await page.waitForTimeout(1200)
+await page.getByRole('button', { name: /Take me there/i }).click()
+await page.waitForTimeout(900)
+
+const nav = await page.evaluate(() => {
+  const route = window.__map.queryRenderedFeatures({ layers: ['route-line'] })
+  return { segments: route.length, bar: document.body.innerText.includes('Pink Fuzzy Monkey') }
+})
+assert(nav.segments > 0, `route line drawn (${nav.segments} segment)`)
+assert(nav.bar, 'navigation bar names the destination')
+
+const navText = await page.locator('.MuiPaper-root').filter({ hasText: 'Pink Fuzzy Monkey' }).first().innerText()
+assert(/\d/.test(navText) && /min/.test(navText), `navigation shows distance and time (${navText.replace(/\n/g, ' · ')})`)
+// Asking to be taken somewhere should start locating, so the heading is
+// measured from the user rather than falling back to the Man.
+assert(/toward \d{1,2}:\d{2}/.test(navText), 'heading is measured from the GPS fix, as a clock direction')
+
+await page.getByLabel('Stop navigating').click()
+await page.waitForTimeout(600)
+assert(
+  (await page.evaluate(() => window.__map.queryRenderedFeatures({ layers: ['route-line'] }).length)) === 0,
+  'clearing navigation removes the route',
+)
 
 // Tapping bare playa drops a shareable pin and puts the address in the URL.
 await page.locator('canvas').click({ position: { x: 700, y: 420 } })

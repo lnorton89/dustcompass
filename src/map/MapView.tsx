@@ -16,6 +16,7 @@ import type { Position } from '../brc/geo'
 import { cityOutlinePoints, frameFor } from '../brc/frame'
 import { CityLayers } from './CityLayers'
 import { POI_LAYER_ID, PoiLayers } from './PoiLayers'
+import { RouteLayer } from './RouteLayer'
 import { ServiceLayers } from './ServiceLayers'
 import { baseStyle, DARK, LIGHT } from './style'
 
@@ -39,6 +40,8 @@ interface Props {
    * of the place they were sent to.
    */
   initialTarget?: Position
+  /** Straight line drawn to the place being navigated to. */
+  route?: { from: Position; to: Position }
   mapRef: React.RefObject<MapRef | null>
 }
 
@@ -56,6 +59,7 @@ export function MapView({
   onLocate,
   pin,
   initialTarget,
+  route,
   mapRef,
 }: Props) {
   const palette = mode === 'dark' ? DARK : LIGHT
@@ -156,6 +160,7 @@ export function MapView({
       )}
 
       <CityLayers city={data.city} palette={palette} />
+      <RouteLayer from={route?.from} to={route?.to} palette={palette} />
       <ServiceLayers
         services={data.services}
         toilets={data.toilets}

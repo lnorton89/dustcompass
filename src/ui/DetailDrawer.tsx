@@ -15,6 +15,8 @@ import CloseIcon from '@mui/icons-material/Close'
 import StarIcon from '@mui/icons-material/Star'
 import StarBorderIcon from '@mui/icons-material/StarBorder'
 import IosShareIcon from '@mui/icons-material/IosShare'
+import NearMeIcon from '@mui/icons-material/NearMe'
+import Button from '@mui/material/Button'
 import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk'
 import DirectionsBikeIcon from '@mui/icons-material/DirectionsBike'
 import type { Position } from '../brc/geo'
@@ -30,6 +32,7 @@ interface Props {
   isFavorite: boolean
   onToggleFavorite: (uid: string) => void
   onShare: (poi: Poi) => void
+  onNavigate: (poi: Poi) => void
   onClose: () => void
   /** Phone layout: come up from the bottom instead of in from the side. */
   compact?: boolean
@@ -43,6 +46,7 @@ export function DetailDrawer({
   isFavorite,
   onToggleFavorite,
   onShare,
+  onNavigate,
   onClose,
   compact,
 }: Props) {
@@ -126,6 +130,17 @@ export function DetailDrawer({
           <Typography variant="caption" color="text.secondary">
             from {originLabel}
           </Typography>
+
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<NearMeIcon />}
+            onClick={() => onNavigate(poi)}
+            sx={{ mt: 2 }}
+            fullWidth
+          >
+            Take me there
+          </Button>
 
           {poi.thumbnail && !imageFailed && (
             <Box

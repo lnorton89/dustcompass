@@ -9,10 +9,12 @@
 import { chromium } from 'playwright'
 
 const url = process.argv[2] ?? 'http://127.0.0.1:4173/'
-const CHROME = process.env.CHROME_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
+// CHROME_PATH points at a pinned build in some sandboxes; elsewhere (CI,
+// a normal checkout) Playwright resolves its own download.
+const CHROME = process.env.CHROME_PATH || undefined
 
 const browser = await chromium.launch({
-  executablePath: CHROME,
+  ...(CHROME ? { executablePath: CHROME } : {}),
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-proxy-server', '--no-sandbox'],
 })
 const context = await browser.newContext({ viewport: { width: 1200, height: 800 } })

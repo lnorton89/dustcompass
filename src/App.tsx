@@ -105,15 +105,23 @@ export default function App() {
     return resolveDeepLink(deepLink, data.layout)
   }, [data, deepLink])
 
-  const restored = useRef(false)
-  useEffect(() => {
-    if (!data || restored.current || !initialTarget) return
-    restored.current = true
-
+  // Applied during render rather than in an effect: React re-runs the component
+  // before committing, so the restored selection is painted once instead of
+  // flashing the unrestored view first.
+  const [restoredLink, setRestoredLink] = useState<string | null>(null)
+  const linkKey = deepLink.poi ?? deepLink.at ?? null
+  if (data && initialTarget && linkKey && restoredLink !== linkKey) {
+    setRestoredLink(linkKey)
     const target = data.pois.find((poi) => poi.uid === deepLink.poi)
-    if (target) setSelected(target)
-    else setPin({ position: initialTarget, address: deepLink.at ?? addressFor(initialTarget, data.layout) })
-  }, [data, deepLink, initialTarget])
+    if (target) {
+      setSelected(target)
+    } else {
+      setPin({
+        position: initialTarget,
+        address: deepLink.at ?? addressFor(initialTarget, data.layout),
+      })
+    }
+  }
 
   // Keep the address bar in step with what is on screen, so the link in the
   // browser is always the one worth sharing.

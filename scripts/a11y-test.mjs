@@ -8,11 +8,13 @@ import { chromium, devices } from 'playwright'
 import AxeBuilder from '@axe-core/playwright'
 
 const url = process.argv[2] ?? 'http://127.0.0.1:5173/'
-const CHROME = process.env.CHROME_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
+// CHROME_PATH points at a pinned build in some sandboxes; elsewhere (CI,
+// a normal checkout) Playwright resolves its own download.
+const CHROME = process.env.CHROME_PATH || undefined
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 
 const browser = await chromium.launch({
-  executablePath: CHROME,
+  ...(CHROME ? { executablePath: CHROME } : {}),
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-proxy-server', '--no-sandbox'],
 })
 

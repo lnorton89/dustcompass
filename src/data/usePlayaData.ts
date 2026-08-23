@@ -46,9 +46,11 @@ export function usePlayaData() {
       loadJson<ArtItem[]>(`${base}/art.json`),
       loadJson<CampItem[]>(`${base}/camp.json`),
       loadJson<EventItem[]>(`${base}/event.json`),
-      loadJson<ServiceSpec[]>(`${base}/services.json`).catch(() => [] as ServiceSpec[]),
+      loadJson<ServiceSpec[]>(`${base}/services.json`).catch<ServiceSpec[]>(() => []),
       loadJson<GeoJSON.FeatureCollection>(`${base}/toilets.geojson`).catch(() => empty()),
-      loadJson<{ rangeInfo?: EventRange }>(`${base}/dates_info.json`).catch(() => ({}) as { rangeInfo?: EventRange }),
+      loadJson<{ rangeInfo?: EventRange }>(`${base}/dates_info.json`).catch<{
+        rangeInfo?: EventRange
+      }>(() => ({})),
     ])
       .then(([layout, rawArt, rawCamps, events, serviceSpecs, rawToilets, dates]) => {
         if (cancelled) return

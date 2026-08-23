@@ -9,11 +9,13 @@ import { readFileSync } from 'node:fs'
 import { chromium } from 'playwright'
 
 const SIZES = [180, 192, 512]
-const CHROME = process.env.CHROME_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
+// CHROME_PATH points at a pinned build in some sandboxes; elsewhere (CI,
+// a normal checkout) Playwright resolves its own download.
+const CHROME = process.env.CHROME_PATH || undefined
 const svg = readFileSync('public/favicon.svg', 'utf8')
 
 const browser = await chromium.launch({
-  executablePath: CHROME,
+  ...(CHROME ? { executablePath: CHROME } : {}),
   args: ['--no-sandbox', '--no-proxy-server'],
 })
 const page = await browser.newPage()

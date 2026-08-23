@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Button,
   Dialog,
@@ -27,17 +27,25 @@ const SUGGESTIONS = ['My camp', 'My bike', 'My tent', 'Meeting point', 'Art car'
 export function SavePlaceDialog({ open, address, onSave, onClose }: Props) {
   const [name, setName] = useState('')
 
-  useEffect(() => {
-    if (open) setName('')
-  }, [open])
+  // Clearing on the way out, rather than in an effect on the way in: same
+  // result, one render fewer, and no state cascade.
+  const close = () => {
+    setName('')
+    onClose()
+  }
+
+  const save = (value: string) => {
+    setName('')
+    onSave(value)
+  }
 
   const commit = () => {
     const trimmed = name.trim()
-    if (trimmed) onSave(trimmed)
+    if (trimmed) save(trimmed)
   }
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
+    <Dialog open={open} onClose={close} fullWidth maxWidth="xs">
       <DialogTitle>Save this spot</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" gutterBottom>
@@ -60,13 +68,13 @@ export function SavePlaceDialog({ open, address, onSave, onClose }: Props) {
               label={suggestion}
               size="small"
               variant="outlined"
-              onClick={() => onSave(suggestion)}
+              onClick={() => save(suggestion)}
             />
           ))}
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={close}>Cancel</Button>
         <Button variant="contained" onClick={commit} disabled={!name.trim()}>
           Save
         </Button>

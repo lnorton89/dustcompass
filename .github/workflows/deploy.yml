@@ -1,0 +1,66 @@
+name: Deploy
+
+on:
+  push:
+    # Filtered to the default branch by the job's `if` rather than a hardcoded
+    # name, so this keeps working if the branch is ever renamed or merged.
+    branches: ['**']
+  # Lets you publish by hand without pushing.
+  workflow_dispatch:
+
+# Pages needs these; nothing else in this workflow writes to the repo.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deploys at once, but let a queued one finish rather than
+# cancelling it — a half-published site is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The city data is vendored rather than committed, so it has to be
+      # fetched before the build has anything to precache.
+      - name: Fetch city data
+        run: npm run fetch-data 2025
+
+      - name: Build
+        # A GitHub Pages project site is served from /<repo>/, so the app has to
+        # be built with that prefix.
+        run: BASE_PATH="/${GITHUB_REPOSITORY#*/}/" npm run build
+
+      # enablement turns Pages on for the repo the first time this runs, so
+      # there is no manual setting to remember. It is a no-op afterwards.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

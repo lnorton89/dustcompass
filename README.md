@@ -101,6 +101,30 @@ renders an empty map. It also distinguishes "locations are still embargoed" from
 - Share any listing or dropped pin as a link that carries a playa address
 - Installs as an app and works with no connectivity at all
 
+## Deploying
+
+Pushing to the default branch builds and publishes to GitHub Pages
+(`.github/workflows/deploy.yml`). The first run turns Pages on for the repo
+itself, so there is no setting to remember; the site lands at
+`https://<owner>.github.io/<repo>/`.
+
+A Pages project site is served from a subpath, so the build takes the prefix
+from the repo name via `BASE_PATH`. Everything that loads data, fonts or icons
+goes through `import.meta.env.BASE_URL`, and the service worker's scope and
+`start_url` follow it, so the offline install works from the subpath too — the
+offline test passes against a `/burningman/` build.
+
+To deploy anywhere else, build with the prefix that host serves from and publish
+`dist/`:
+
+```sh
+npm run fetch-data 2025
+BASE_PATH=/ npm run build      # a root domain, e.g. Netlify or Cloudflare Pages
+```
+
+HTTPS is required, not optional: service workers and geolocation both refuse to
+run without it, and those are the two things this app is for.
+
 ## Data and licensing
 
 City layout, geometry and listings come from

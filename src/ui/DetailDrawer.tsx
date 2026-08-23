@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Box,
   Chip,
@@ -51,10 +51,15 @@ export function DetailDrawer({
   compact,
 }: Props) {
   const travel = poi ? travelBetween(origin, poi.position) : undefined
-  const [imageFailed, setImageFailed] = useState(false)
+  const [imageState, setImageState] = useState<{ uid?: string; failed: boolean }>({
+    failed: false,
+  })
 
-  // A new listing gets a fresh attempt at its image.
-  useEffect(() => setImageFailed(false), [poi?.uid])
+  // A new listing gets a fresh attempt at its image. Adjusting during render
+  // rather than in an effect: React re-runs the component before committing, so
+  // the stale "failed" state is never painted.
+  if (poi && imageState.uid !== poi.uid) setImageState({ uid: poi.uid, failed: false })
+  const imageFailed = imageState.failed
   return (
     <Drawer
       anchor={compact ? 'bottom' : "right"}
@@ -151,7 +156,7 @@ export function DetailDrawer({
               // Thumbnails are hosted off-playa, so they simply will not load
               // out there. Collapse the element rather than leaving a broken
               // image icon in the middle of the listing.
-              onError={() => setImageFailed(true)}
+              onError={() => setImageState((current) => ({ ...current, failed: true }))}
               sx={{ width: '100%', borderRadius: 2, mt: 2, display: 'block' }}
             />
           )}

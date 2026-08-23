@@ -97,7 +97,7 @@ export function MapView({
       onProbe(reverseGeocode(position, data.layout).label, position)
       onSelect(undefined)
     },
-    [data.layout, onProbe, onSelect, poiIndex],
+    [data.layout, onProbe, onSelect, onSelectPlace, poiIndex],
   )
 
   return (

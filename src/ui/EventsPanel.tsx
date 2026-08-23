@@ -89,7 +89,7 @@ export function EventsPanel({
           exclusive
           fullWidth
           value={window}
-          onChange={(_, value) => value && setWindow(value as EventWindow)}
+          onChange={(_, value: EventWindow | null) => value && setWindow(value)}
           sx={{ mt: 1.5 }}
         >
           {WINDOWS.map((w) => (

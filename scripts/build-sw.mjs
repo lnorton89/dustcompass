@@ -34,16 +34,60 @@ async function notify(message) {
   for (const client of windows) client.postMessage(message);
 }
 
+// A precache that gives up on the first hiccup is the failure mode that matters
+// here: the download happens on whatever connection someone has before they
+// drive out, and there is no second chance once they are on playa. Each asset
+// gets three attempts with backoff, and several are in flight at once so a
+// 7.9MB install is not 60 serial round trips over a tethered phone.
+const ATTEMPTS = 3;
+const PARALLEL = 6;
+
+async function store(cache, url) {
+  let failure;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 300 * Math.pow(2, attempt - 1)));
+    try {
+      const response = await fetch(new Request(url, { cache: 'reload' }));
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      await cache.put(url, response);
+      return;
+    } catch (error) {
+      failure = error;
+    }
+  }
+  throw failure;
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
+    const queue = PRECACHE.slice();
     let completed = 0;
-    for (const url of PRECACHE) {
-      const response = await fetch(new Request(url, { cache: 'reload' }));
-      if (!response.ok) throw new Error('Could not cache ' + url + ': ' + response.status);
-      await cache.put(url, response);
-      completed += 1;
-      await notify({ type: 'CACHE_PROGRESS', completed, total: PRECACHE.length });
+    let failed = null;
+
+    // Install still fails as a whole if anything is unreachable. A partial
+    // cache that reported success would be a lie told at the worst moment.
+    async function drain() {
+      while (queue.length > 0 && failed === null) {
+        const url = queue.shift();
+        try {
+          await store(cache, url);
+        } catch (error) {
+          failed = { url: url, reason: String((error && error.message) || error) };
+          return;
+        }
+        completed += 1;
+        await notify({ type: 'CACHE_PROGRESS', completed, total: PRECACHE.length });
+      }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(PARALLEL, queue.length) }, drain));
+
+    if (failed !== null) {
+      // Tell the tab before throwing, or the user watches a progress count
+      // stall forever and drives to the desert believing the map is saved.
+      await notify({ type: 'CACHE_FAILED', completed, total: PRECACHE.length, url: failed.url });
+      throw new Error('Could not cache ' + failed.url + ': ' + failed.reason);
     }
     await self.skipWaiting();
   })());

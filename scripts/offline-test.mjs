@@ -20,23 +20,27 @@ const browser = await chromium.launch({
 const context = await browser.newContext({ viewport: { width: 1200, height: 800 } })
 const page = await context.newPage()
 
-await page.goto(url, { waitUntil: 'load' })
-await page.waitForFunction(() => navigator.serviceWorker?.controller != null, null, {
-  timeout: 30000,
-})
-
-// Precaching continues after activation; wait for the cache to actually fill.
-const cached = await page.waitForFunction(
-  async () => {
+/**
+ * The worker only takes control after `install` resolves, and `install` does
+ * not resolve until every asset is cached. Waiting for a controller is
+ * therefore the precise signal that precaching finished — polling the cache
+ * count races the worker and answers before it has opened a cache at all.
+ */
+async function precacheCount(target) {
+  await target.waitForFunction(() => navigator.serviceWorker?.controller != null, null, {
+    timeout: 90000,
+  })
+  return target.evaluate(async () => {
     const names = await caches.keys()
-    let total = 0
-    for (const name of names) total += (await (await caches.open(name)).keys()).length
-    return total > 20 ? total : false
-  },
-  null,
-  { timeout: 60000 },
-)
-console.log(`PASS  service worker precached ${await cached.jsonValue()} entries`)
+    let cached = 0
+    for (const name of names) cached += (await (await caches.open(name)).keys()).length
+    return cached
+  })
+}
+
+await page.goto(url, { waitUntil: 'load' })
+const total = await precacheCount(page)
+console.log(`PASS  service worker precached ${total} entries`)
 
 await context.setOffline(true)
 console.log('      network disabled')
@@ -73,5 +77,24 @@ const addressHit = await page.getByText('Esplanade & 7:30').count()
 assert(addressHit > 0, 'address geocoding works offline')
 
 if (process.argv[3]) await page.screenshot({ path: process.argv[3] })
+
+// The install happens once, on whatever connection someone has before they
+// drive out. A single dropped request used to abort it and leave the progress
+// count frozen, so prove a flaky asset is survivable rather than assuming it.
+const flaky = await browser.newContext({ viewport: { width: 1200, height: 800 } })
+let tripped = false
+await flaky.route('**/icon-512.png', (route) => {
+  if (tripped) return route.continue()
+  tripped = true
+  return route.fulfill({ status: 503, body: '' })
+})
+const flakyPage = await flaky.newPage()
+await flakyPage.goto(url, { waitUntil: 'load' })
+
+const survived = await precacheCount(flakyPage).catch(() => 0)
+
+assert(tripped, 'the flaky asset was actually served a 503')
+assert(survived >= total, `precache survived a dropped request (${survived}/${total} cached)`)
+
 await browser.close()
 process.exit(failed ? 1 : 0)

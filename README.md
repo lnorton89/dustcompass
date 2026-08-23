@@ -38,6 +38,12 @@ worker, listings, glyphs, ~7.9MB — because a cache that fills as you browse is
 useless when you are already in the desert. `scripts/offline-test.mjs` proves
 this rather than asserting it: it loads the app, cuts the network entirely,
 reloads, and requires the city to still render and addresses to still geocode.
+That install happens once, on whatever connection someone has before they drive
+out, so each asset gets three attempts and several are fetched at a time. It
+still fails as a whole if anything is unreachable — a partial cache reporting
+success would be a lie told at the worst possible moment — but it says so, and
+the status chip offers a retry rather than freezing on the count it died at.
+The offline test drops a request mid-install to prove the retry works.
 If you later want surrounding desert, `src/map/protocols.ts` registers
 `pmtiles://` — a single static archive read with HTTP range requests, no
 backend.

@@ -5,13 +5,14 @@ import type { Position } from '../brc/geo'
 interface Props {
   position: Position
   name: string
+  address?: string
   navigating?: boolean
 }
 
 /** A high-contrast, labeled target that remains legible over every map theme. */
-export function FocusMarker({ position, name, navigating = false }: Props) {
+export function FocusMarker({ position, name, address, navigating = false }: Props) {
   const color = navigating ? '#5ec8d8' : '#ff8a4c'
-  const label = navigating ? `Navigation destination: ${name}` : `Selected location: ${name}`
+  const label = `${navigating ? 'Navigation destination' : 'Selected location'}: ${name}${address ? `, ${address}` : ''}`
 
   return (
     <Marker longitude={position[0]} latitude={position[1]} anchor="center">
@@ -62,31 +63,53 @@ export function FocusMarker({ position, name, navigating = false }: Props) {
             borderRadius: '50%',
           }}
         />
-        <Typography
-          component="span"
+        <Box
           sx={{
             position: 'absolute',
             top: 49,
             left: '50%',
             transform: 'translateX(-50%)',
-            maxWidth: 220,
-            px: 1,
-            py: 0.35,
+            minWidth: navigating ? 190 : 0,
+            maxWidth: 240,
+            px: navigating ? 1.25 : 1,
+            py: navigating ? 0.65 : 0.35,
             bgcolor: 'rgba(18,16,14,.94)',
             color: '#fff7e8',
-            border: `1px solid ${color}`,
+            border: `${navigating ? 2 : 1}px solid ${color}`,
             borderRadius: 1,
-            fontSize: 12,
-            fontWeight: 700,
-            lineHeight: 1.2,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            boxShadow: '0 2px 8px rgba(0,0,0,.65)',
+            textAlign: 'center',
+            boxShadow: '0 3px 12px rgba(0,0,0,.8)',
           }}
         >
-          {navigating ? 'GO TO · ' : ''}{name}
-        </Typography>
+          {navigating && (
+            <Typography
+              component="span"
+              sx={{ display: 'block', color, fontSize: 10, fontWeight: 900, letterSpacing: '.12em', lineHeight: 1.1 }}
+            >
+              DESTINATION
+            </Typography>
+          )}
+          <Typography
+            component="span"
+            sx={{
+              display: 'block',
+              maxWidth: 220,
+              fontSize: navigating ? 14 : 12,
+              fontWeight: 800,
+              lineHeight: 1.2,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {name}
+          </Typography>
+          {navigating && address && (
+            <Typography component="span" sx={{ display: 'block', color: '#d8d0c2', fontSize: 11, lineHeight: 1.2 }}>
+              {address}
+            </Typography>
+          )}
+        </Box>
       </Box>
     </Marker>
   )

@@ -189,6 +189,14 @@ export default function App() {
     return { top: 32, right: 432, bottom: 32, left: 32 }
   }, [compact])
 
+  const navigationPadding = useCallback(
+    () =>
+      compact
+        ? { top: 72, right: 20, bottom: 136, left: 20 }
+        : { top: 88, right: 32, bottom: 112, left: 32 },
+    [compact],
+  )
+
   const flyTo = useCallback(
     (position: Position, poi?: Poi) => {
       mapRef.current?.flyTo({
@@ -486,6 +494,12 @@ export default function App() {
         onNavigate={(poi) => {
           setHeading({ name: poi.name, position: poi.position, address: poi.address })
           setSelected(undefined)
+          mapRef.current?.flyTo({
+            center: poi.position,
+            zoom: 16.5,
+            duration: 900,
+            padding: navigationPadding(),
+          })
           location.start()
         }}
         onClose={() => setSelected(undefined)}

@@ -1,12 +1,15 @@
 import { useMemo } from 'react'
 import { Layer, Source } from '@vis.gl/react-maplibre'
 import type { Poi, PoiKind } from '../data/types'
+import type { Position } from '../brc/geo'
 import type { PlayaPalette } from './style'
 
 interface Props {
   pois: Poi[]
   visible: Set<PoiKind>
   palette: PlayaPalette
+  /** Hide labels that would compete with the explicit selected/destination callout. */
+  focusPosition?: Position
 }
 
 export const POI_LAYER_ID = 'poi-dot'
@@ -16,7 +19,7 @@ export const POI_LAYER_ID = 'poi-dot'
  * MapLibre's own GeoJSON clustering handles on a phone — deck.gl only starts to
  * earn its weight an order of magnitude above this.
  */
-export function PoiLayers({ pois, visible, palette }: Props) {
+export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
   const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
     () => ({
       type: 'FeatureCollection',
@@ -30,11 +33,16 @@ export function PoiLayers({ pois, visible, palette }: Props) {
             kind: poi.kind,
             name: poi.name,
             address: poi.address ?? '',
+            focusOverlap: Boolean(
+              focusPosition &&
+                Math.abs(poi.position[0] - focusPosition[0]) < 1e-7 &&
+                Math.abs(poi.position[1] - focusPosition[1]) < 1e-7,
+            ),
           },
           geometry: { type: 'Point', coordinates: poi.position },
         })),
     }),
-    [pois, visible],
+    [focusPosition, pois, visible],
   )
 
   const colorByKind = ['match', ['get', 'kind'], 'art', palette.art, palette.camp] as const
@@ -79,7 +87,11 @@ export function PoiLayers({ pois, visible, palette }: Props) {
         id="poi-label"
         type="symbol"
         minzoom={15.5}
-        filter={['!', ['has', 'point_count']]}
+        filter={[
+          'all',
+          ['!', ['has', 'point_count']],
+          ['!=', ['get', 'focusOverlap'], true],
+        ]}
         layout={{
           'text-field': ['get', 'name'],
           'text-font': ['Open Sans Regular'],

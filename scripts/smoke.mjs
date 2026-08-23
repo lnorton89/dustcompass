@@ -187,6 +187,20 @@ await page.waitForTimeout(900)
 
 assert(await page.getByTestId('navigation-target').isVisible(), 'navigation keeps a labeled destination target')
 assert((await page.getByTestId('selection-target').count()) === 0, 'selection target becomes the navigation target')
+const targetText = await page.getByTestId('navigation-target').innerText()
+assert(
+  targetText.includes('DESTINATION') && targetText.includes('Pink Fuzzy Monkey'),
+  `map callout names the exact destination (${targetText.replace(/\n/g, ' · ')})`,
+)
+const destinationBox = await page.getByTestId('navigation-target').boundingBox()
+assert(
+  destinationBox &&
+    destinationBox.x > 1440 * 0.3 &&
+    destinationBox.x < 1440 * 0.7 &&
+    destinationBox.y > 900 * 0.25 &&
+    destinationBox.y < 900 * 0.7,
+  `destination is recentered in the usable map (${Math.round(destinationBox?.x ?? -1)}, ${Math.round(destinationBox?.y ?? -1)})`,
+)
 
 const nav = await page.evaluate(() => {
   const route = window.__map.queryRenderedFeatures({ layers: ['route-line'] })

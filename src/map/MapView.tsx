@@ -48,7 +48,7 @@ interface Props {
   /** The listing whose detail drawer is open. */
   selected?: Poi
   /** Kept visible after the detail drawer closes and navigation begins. */
-  destination?: { name: string; position: Position }
+  destination?: { name: string; position: Position; address?: string }
   savedPlaces: SavedPlace[]
   onSelectPlace: (id: string) => void
   mapRef: React.RefObject<MapRef | null>
@@ -177,10 +177,15 @@ export function MapView({
       )}
 
       {selected && !destination && (
-        <FocusMarker position={selected.position} name={selected.name} />
+        <FocusMarker position={selected.position} name={selected.name} address={selected.address} />
       )}
       {destination && (
-        <FocusMarker position={destination.position} name={destination.name} navigating />
+        <FocusMarker
+          position={destination.position}
+          name={destination.name}
+          address={destination.address}
+          navigating
+        />
       )}
 
       <CityLayers city={data.city} campOutlines={data.campOutlines} palette={palette} />
@@ -193,7 +198,12 @@ export function MapView({
         showToilets={showToilets}
         palette={palette}
       />
-      <PoiLayers pois={data.pois} visible={visible} palette={palette} />
+      <PoiLayers
+        pois={data.pois}
+        visible={visible}
+        palette={palette}
+        focusPosition={destination?.position ?? selected?.position}
+      />
     </MapGL>
   )
 }

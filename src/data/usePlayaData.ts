@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CityLayout } from '../brc/layout'
 import { buildCity, type CityGeometry } from '../brc/city'
+import { buildServices, toiletPoints, type ServiceSpec } from '../brc/services'
 import { geocode } from '../brc/geocode'
 import type { ArtItem, CampItem, EventItem, Poi } from './types'
 import { applyEmbargo, BRC_2026, embargoState, type EmbargoState } from './embargo'
+import type { EventRange } from './events'
 
 export interface PlayaData {
   layout: CityLayout
@@ -12,10 +14,18 @@ export interface PlayaData {
   camps: CampItem[]
   events: EventItem[]
   pois: Poi[]
+  /** The event week these listings describe, used to anchor "what's on now". */
+  range?: EventRange
+  services: GeoJSON.FeatureCollection<GeoJSON.Point>
+  toilets: GeoJSON.FeatureCollection<GeoJSON.Point>
   embargo: EmbargoState
 }
 
 const DATA_YEAR = import.meta.env.VITE_DATA_YEAR ?? '2025'
+
+function empty(): GeoJSON.FeatureCollection {
+  return { type: 'FeatureCollection', features: [] }
+}
 
 async function loadJson<T>(path: string): Promise<T> {
   const response = await fetch(path)
@@ -36,8 +46,11 @@ export function usePlayaData() {
       loadJson<ArtItem[]>(`${base}/art.json`),
       loadJson<CampItem[]>(`${base}/camp.json`),
       loadJson<EventItem[]>(`${base}/event.json`),
+      loadJson<ServiceSpec[]>(`${base}/services.json`).catch(() => [] as ServiceSpec[]),
+      loadJson<GeoJSON.FeatureCollection>(`${base}/toilets.geojson`).catch(() => empty()),
+      loadJson<{ rangeInfo?: EventRange }>(`${base}/dates_info.json`).catch(() => ({}) as { rangeInfo?: EventRange }),
     ])
-      .then(([layout, rawArt, rawCamps, events]) => {
+      .then(([layout, rawArt, rawCamps, events, serviceSpecs, rawToilets, dates]) => {
         if (cancelled) return
         const embargo = embargoState(BRC_2026)
         const art = applyEmbargo(rawArt, embargo.artReleased)
@@ -49,6 +62,9 @@ export function usePlayaData() {
           camps,
           events,
           pois: toPois(layout, art, camps),
+          range: dates.rangeInfo,
+          services: buildServices(layout, serviceSpecs),
+          toilets: toiletPoints(rawToilets),
           embargo,
         })
       })

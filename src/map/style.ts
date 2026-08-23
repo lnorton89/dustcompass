@@ -10,6 +10,10 @@ export interface PlayaPalette {
   labelHalo: string
   art: string
   camp: string
+  toilet: string
+  medical: string
+  ranger: string
+  civic: string
 }
 
 export const DARK: PlayaPalette = {
@@ -22,6 +26,10 @@ export const DARK: PlayaPalette = {
   labelHalo: '#12100e',
   art: '#ff8a4c',
   camp: '#5ec8d8',
+  toilet: '#8b9dc3',
+  medical: '#ef4444',
+  ranger: '#22c55e',
+  civic: '#cbb994',
 }
 
 export const LIGHT: PlayaPalette = {
@@ -34,6 +42,10 @@ export const LIGHT: PlayaPalette = {
   labelHalo: '#f5f0e4',
   art: '#c2410c',
   camp: '#0e7490',
+  toilet: '#4c5c80',
+  medical: '#b91c1c',
+  ranger: '#15803d',
+  civic: '#7a6a45',
 }
 
 /**

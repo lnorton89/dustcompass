@@ -40,7 +40,7 @@ try {
       'sparse-checkout',
       'set',
       `data/${YEAR}/layouts/*`,
-      `data/${YEAR}/geo/*`,
+      `data/${YEAR}/geo/toilets.geojson`,
       `data/${YEAR}/APIData/APIData.bundle/*.json`,
       ...GLYPH_RANGES.map((r) => `data/${YEAR}/Map/Map.bundle/glyphs/Open Sans Regular/${r}.pbf`),
     ],
@@ -55,7 +55,19 @@ try {
   await mkdir(FONTS, { recursive: true })
 
   await cp(join(src, 'layouts', 'layout.json'), join(OUT, 'layout.json'))
-  for (const name of ['art', 'camp', 'event', 'points']) {
+
+  // Named city services (medical, rangers, airport, DPW) are clock addresses in
+  // the layout spec, so they geocode like anything else.
+  const poi = join(src, 'layouts', 'poi.json')
+  if (existsSync(poi)) await cp(poi, join(OUT, 'services.json'))
+
+  // Toilets come from iBurn's pre-generated geometry rather than the layout
+  // spec. The spec places banks by bearing, offset and orientation, and getting
+  // that subtly wrong puts a toilet in the wrong block — which matters more here
+  // than architectural consistency does.
+  const toilets = join(src, 'geo', 'toilets.geojson')
+  if (existsSync(toilets)) await cp(toilets, join(OUT, 'toilets.geojson'))
+  for (const name of ['art', 'camp', 'event', 'points', 'dates_info']) {
     const from = join(src, 'APIData', 'APIData.bundle', `${name}.json`)
     if (existsSync(from)) await cp(from, join(OUT, `${name}.json`))
   }

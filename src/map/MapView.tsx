@@ -14,22 +14,38 @@ import { reverseGeocode } from '../brc/geocode'
 import type { Position } from '../brc/geo'
 import { CityLayers } from './CityLayers'
 import { POI_LAYER_ID, PoiLayers } from './PoiLayers'
+import { ServiceLayers } from './ServiceLayers'
 import { baseStyle, DARK, LIGHT } from './style'
 
 interface Props {
   data: PlayaData
   mode: 'dark' | 'light'
   visible: Set<PoiKind>
+  showServices: boolean
+  showToilets: boolean
   /** True to rotate the map so 12:00 points up, which is how the city reads. */
   cityUp: boolean
   onSelect: (poi: Poi | undefined) => void
   onProbe: (address: string, position: Position) => void
+  /** Fires when the browser reports the user's position. */
+  onLocate: (position: Position) => void
   mapRef: React.RefObject<MapRef | null>
 }
 
 const GLYPHS = `${import.meta.env.BASE_URL}fonts/{fontstack}/{range}.pbf`
 
-export function MapView({ data, mode, visible, cityUp, onSelect, onProbe, mapRef }: Props) {
+export function MapView({
+  data,
+  mode,
+  visible,
+  showServices,
+  showToilets,
+  cityUp,
+  onSelect,
+  onProbe,
+  onLocate,
+  mapRef,
+}: Props) {
   const palette = mode === 'dark' ? DARK : LIGHT
   const style = useMemo(() => baseStyle(palette, GLYPHS), [palette])
   const [cursor, setCursor] = useState<string>()
@@ -82,9 +98,21 @@ export function MapView({ data, mode, visible, cityUp, onSelect, onProbe, mapRef
       style={{ position: 'absolute', inset: 0 }}
     >
       <NavigationControl position="bottom-right" visualizePitch showCompass />
-      <GeolocateControl position="bottom-right" trackUserLocation positionOptions={{ enableHighAccuracy: true }} />
+      <GeolocateControl
+        position="bottom-right"
+        trackUserLocation
+        positionOptions={{ enableHighAccuracy: true }}
+        onGeolocate={(event) => onLocate([event.coords.longitude, event.coords.latitude])}
+      />
       <ScaleControl position="bottom-left" unit="imperial" />
       <CityLayers city={data.city} palette={palette} />
+      <ServiceLayers
+        services={data.services}
+        toilets={data.toilets}
+        showServices={showServices}
+        showToilets={showToilets}
+        palette={palette}
+      />
       <PoiLayers pois={data.pois} visible={visible} palette={palette} />
     </MapGL>
   )

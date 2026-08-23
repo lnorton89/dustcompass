@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   Box,
   Chip,
@@ -11,15 +12,39 @@ import {
   Typography,
 } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
+import StarIcon from '@mui/icons-material/Star'
+import StarBorderIcon from '@mui/icons-material/StarBorder'
+import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk'
+import DirectionsBikeIcon from '@mui/icons-material/DirectionsBike'
+import type { Position } from '../brc/geo'
+import { formatDistance, formatMinutes, travelBetween } from '../brc/travel'
 import type { EventItem, Poi } from '../data/types'
 
 interface Props {
   poi: Poi | undefined
   events: EventItem[]
+  /** Where to measure from — the user's GPS fix, or the Man as a fallback. */
+  origin: Position
+  originLabel: string
+  isFavorite: boolean
+  onToggleFavorite: (uid: string) => void
   onClose: () => void
 }
 
-export function DetailDrawer({ poi, events, onClose }: Props) {
+export function DetailDrawer({
+  poi,
+  events,
+  origin,
+  originLabel,
+  isFavorite,
+  onToggleFavorite,
+  onClose,
+}: Props) {
+  const travel = poi ? travelBetween(origin, poi.position) : undefined
+  const [imageFailed, setImageFailed] = useState(false)
+
+  // A new listing gets a fresh attempt at its image.
+  useEffect(() => setImageFailed(false), [poi?.uid])
   return (
     <Drawer
       anchor="right"
@@ -38,9 +63,19 @@ export function DetailDrawer({ poi, events, onClose }: Props) {
                 </Typography>
               )}
             </Box>
-            <IconButton onClick={onClose} size="small" aria-label="Close details">
-              <CloseIcon fontSize="small" />
-            </IconButton>
+            <Stack direction="row" spacing={0.5}>
+              <IconButton
+                onClick={() => onToggleFavorite(poi.uid)}
+                size="small"
+                aria-label={isFavorite ? 'Remove from favourites' : 'Add to favourites'}
+                color={isFavorite ? 'primary' : 'default'}
+              >
+                {isFavorite ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
+              </IconButton>
+              <IconButton onClick={onClose} size="small" aria-label="Close details">
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Stack>
           </Stack>
 
           <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
@@ -52,12 +87,37 @@ export function DetailDrawer({ poi, events, onClose }: Props) {
             {poi.address && <Chip size="small" variant="outlined" label={poi.address} />}
           </Stack>
 
-          {poi.thumbnail && (
+          {travel && (
+            <Stack
+              direction="row"
+              spacing={2}
+              sx={{ mt: 2, alignItems: 'center', color: 'text.secondary' }}
+            >
+              <Typography variant="body2">{formatDistance(travel)}</Typography>
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                <DirectionsWalkIcon fontSize="small" />
+                <Typography variant="body2">{formatMinutes(travel.walkMinutes)}</Typography>
+              </Stack>
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                <DirectionsBikeIcon fontSize="small" />
+                <Typography variant="body2">{formatMinutes(travel.bikeMinutes)}</Typography>
+              </Stack>
+            </Stack>
+          )}
+          <Typography variant="caption" color="text.secondary">
+            from {originLabel}
+          </Typography>
+
+          {poi.thumbnail && !imageFailed && (
             <Box
               component="img"
               src={poi.thumbnail}
               alt=""
               loading="lazy"
+              // Thumbnails are hosted off-playa, so they simply will not load
+              // out there. Collapse the element rather than leaving a broken
+              // image icon in the middle of the listing.
+              onError={() => setImageFailed(true)}
               sx={{ width: '100%', borderRadius: 2, mt: 2, display: 'block' }}
             />
           )}

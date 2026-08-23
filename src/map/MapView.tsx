@@ -90,7 +90,9 @@ export function MapView({
       onMouseLeave={() => setCursor(undefined)}
       cursor={cursor}
       onLoad={(event) => {
-        // Handy for poking at layers from the console; stripped from production.
+        // A readiness flag end-to-end tests can wait on in any build. The map
+        // handle itself is only exposed in development.
+        document.documentElement.dataset.mapReady = 'true'
         if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__map = event.target
       }}
       maxPitch={60}

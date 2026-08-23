@@ -25,9 +25,8 @@ export function occurrencesInWindow(
       .sort(byStart)
   }
 
-  const horizon = new Date(now)
-  if (window === 'next3h') horizon.setHours(horizon.getHours() + 3)
-  if (window === 'today') horizon.setHours(23, 59, 59, 999)
+  const horizon =
+    window === 'today' ? endOfPlayaDay(now) : new Date(now.getTime() + 3 * 60 * 60 * 1000)
 
   const out: LiveEvent[] = []
   for (const event of events) {
@@ -41,6 +40,30 @@ export function occurrencesInWindow(
     }
   }
   return out.sort(byStart)
+}
+
+/** Black Rock City runs on Pacific time whatever your phone thinks. */
+export const PLAYA_TIME_ZONE = 'America/Los_Angeles'
+
+function playaOffsetMs(at: Date): number {
+  const local = new Date(at.toLocaleString('en-US', { timeZone: PLAYA_TIME_ZONE }))
+  const utc = new Date(at.toLocaleString('en-US', { timeZone: 'UTC' }))
+  return local.getTime() - utc.getTime()
+}
+
+/**
+ * "Today" has to mean the playa's day, not the device's. Plenty of people
+ * arrive with a phone still set to the timezone they flew from, and a schedule
+ * that rolls over at the wrong midnight is worse than no schedule.
+ *
+ * The offset is sampled at `now` rather than assumed, so this stays correct
+ * either side of a DST change.
+ */
+function endOfPlayaDay(now: Date): Date {
+  const offset = playaOffsetMs(now)
+  const local = new Date(now.getTime() + offset)
+  local.setUTCHours(23, 59, 59, 999)
+  return new Date(local.getTime() - offset)
 }
 
 function toLive(event: EventItem, occurrence: Occurrence): LiveEvent {

@@ -29,12 +29,24 @@ option.
 
 **No tile server, no API key, no network.** There is no cell service on playa.
 The city geometry is generated locally, glyphs are bundled, and listings are
-static JSON. The map renders with the network switched off. If you later want
-surrounding desert, `src/map/protocols.ts` registers `pmtiles://` — a single
-static archive read with HTTP range requests, no backend.
+static JSON. It installs as a PWA and precaches everything up front — shell,
+worker, listings, glyphs, ~7.9MB — because a cache that fills as you browse is
+useless when you are already in the desert. `scripts/offline-test.mjs` proves
+this rather than asserting it: it loads the app, cuts the network entirely,
+reloads, and requires the city to still render and addresses to still geocode.
+If you later want surrounding desert, `src/map/protocols.ts` registers
+`pmtiles://` — a single static archive read with HTTP range requests, no
+backend.
 
 **Dark by default.** A white screen at 3am destroys night vision for everyone
-standing near you.
+standing near you. Toilets and services stay on their own layer that survives
+filtering camps and art away, for the same reason.
+
+**Time is playa time.** "What's on now" uses Black Rock City's clock, not the
+device's — people arrive with phones still set to wherever they flew from. And
+outside the event week the wall clock makes every window empty, so the schedule
+scrubs to the start of the burn and says it is previewing, rather than showing
+an empty list that reads as a broken app.
 
 ## Getting started
 
@@ -45,6 +57,17 @@ npm run dev
 ```
 
 `npm run fetch-data 2024` pulls a different year.
+
+## What it does
+
+- Renders Black Rock City generated from its layout spec, rotated so 12:00 is up
+- Search by camp or art name, or by address — `D & 3:15`, `7:30 & Esplanade`,
+  `9:00 B Plaza @ 4:45`, `12:00 2500'`
+- Tap bare playa to get its street address back
+- Toilets, medical, rangers and civic landmarks on a layer of their own
+- Events filtered to now / next 3h / today, jumping to the hosting camp
+- Favourites, and walk/bike estimates from your GPS fix or the Man
+- Installs as an app and works with no connectivity at all
 
 ## Data and licensing
 
@@ -74,6 +97,8 @@ For 2026, drop in the published `layout.json` and point `VITE_DATA_YEAR` at it.
 | `pmtiles` | 4.5.0 | optional basemap, single static archive |
 | `react` | 19.2 | |
 | `vite` | 8.2 | |
+| `vitest` | 4.1 | |
+| `vite-plugin-pwa` | 1.3 | precaches the app for offline use |
 
 Two integration details worth knowing, both of which cost real debugging time:
 
@@ -91,11 +116,28 @@ Two integration details worth knowing, both of which cost real debugging time:
 
 ## Testing
 
+Three layers, all runnable locally.
+
 ```sh
-npm run dev &
-node scripts/smoke.mjs http://127.0.0.1:5173/ smoke.png
+npm test                                              # 37 unit tests
+npm run dev & npm run test:smoke http://127.0.0.1:5173/     # 12 browser assertions
+npm run build && npx vite preview --port 4173 &
+npm run test:offline http://127.0.0.1:4173/           # proves offline works
 ```
 
-Boots the app in Chromium, asserts the city actually rendered (streets, labels,
-camp clusters), drives a search through the UI, and confirms the camera flew to
-the geocoded address.
+**Unit** — the geocoder is held against Burning Man's own surveyed GPS rather
+than a handful of fixtures. All 1,369 published camp addresses parse, and every
+one that is a street intersection or plaza rim lands **within one metre** of the
+surveyed position. Portal addresses are held to a looser bound because a portal
+is a gap in the street ring spanning an arc, not a point. The embargo has its
+own regression test asserting that no embargoed listing retains anything the map
+could plot.
+
+**Smoke** — boots Chromium, asserts the city rendered (streets, labels, camp
+clusters, toilets, services), toggles a filter and checks the layer actually
+empties and refills, drives a search, opens a listing, stars it and confirms it
+persisted.
+
+**Offline** — loads the app, waits for the service worker to finish precaching,
+disables the network, reloads, and requires the map to paint and addresses to
+geocode with nothing available from the server.

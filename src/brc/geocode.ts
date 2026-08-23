@@ -1,7 +1,10 @@
 import type { CityLayout, Feet } from './layout'
 import { findAnnular } from './layout'
 import {
+  clockToBearing,
   clockToMinutes,
+  destination,
+  feetToMeters,
   minutesToClock,
   polarToPosition,
   positionToPolar,
@@ -15,12 +18,50 @@ export interface PlayaAddress {
   distanceFeet: Feet
   /** Annular street ref when the address sits on one, e.g. "esplanade", "d". */
   street?: string
+  /** Plaza name when the address is a position on a plaza rim. */
+  plaza?: string
   /** Human-readable form, e.g. "D & 3:15" or "12:00 & 2500'". */
   label: string
 }
 
 export interface GeocodeResult extends PlayaAddress {
   position: Position
+}
+
+/**
+ * A plaza address is not a point on a street. Plazas are circles, and camps on
+ * them are placed around the rim by a clock face of their own — "9:00 B Plaza
+ * @ 4:45" is the 4:45 position on the rim of the plaza at 9:00 and B. The rim
+ * clock uses the same city rotation as the street grid.
+ */
+interface PlazaCircle {
+  centre: Position
+  radiusFeet: Feet
+  name: string
+}
+
+function findPlaza(layout: CityLayout, name: string): PlazaCircle | undefined {
+  const wanted = name.trim().toLowerCase()
+
+  const plaza = layout.plazas.find((p) => p.name.toLowerCase() === wanted)
+  if (plaza) {
+    return {
+      centre: polarToPosition(layout, plaza.time, resolve(layout, plaza.distance)),
+      radiusFeet: plaza.diameter / 2,
+      name: plaza.name,
+    }
+  }
+
+  // Center Camp is described separately from the plaza list.
+  const cc = layout.center_camp
+  if (cc && /^center camp( plaza)?$/.test(wanted)) {
+    return {
+      centre: polarToPosition(layout, '6:00', cc.distance),
+      radiusFeet: cc.cafe_plaza_radius,
+      name: 'Center Camp Plaza',
+    }
+  }
+  return undefined
 }
 
 const CLOCK = String.raw`\d{1,2}[:.]\d{2}`
@@ -50,6 +91,21 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
     }
   }
 
+  // "<plaza> @ <clock>" — a position on a plaza rim.
+  const onPlaza = new RegExp(String.raw`^(.+?)\s*@\s*(${CLOCK})$`, 'i').exec(raw)
+  if (onPlaza) {
+    const plaza = findPlaza(layout, onPlaza[1])
+    if (plaza) {
+      const clock = normaliseClock(onPlaza[2])
+      return {
+        clock,
+        distanceFeet: plaza.radiusFeet,
+        plaza: plaza.name,
+        label: `${plaza.name} @ ${clock}`,
+      }
+    }
+  }
+
   // "<clock> <feet>" — open playa, the form art listings use.
   const open = new RegExp(String.raw`^(${CLOCK})\s*[,&@]?\s*(\d{2,5})\s*(?:'|ft|feet)?`, 'i').exec(raw)
   if (open) {
@@ -62,7 +118,12 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
   }
 
   // "<clock> & <street>" or "<street> & <clock>", in either order.
-  const parts = raw.split(/\s*(?:&|and|at|\/)\s*/i).filter(Boolean)
+  const parts = raw
+    .split(/\s*(?:&|and|at|\/)\s*/i)
+    .filter(Boolean)
+    // "3:00 Portal & A" is the 3:00 radial meeting A — the portal is a gap in
+    // the ring at that clock, not a separate place.
+    .map((part) => part.replace(/\s*portal\s*$/i, '').trim())
   if (parts.length >= 2) {
     const clockPart = parts.find((p) => new RegExp(`^${CLOCK}$`).test(p.trim()))
     const streetPart = parts.find((p) => p !== clockPart)
@@ -87,6 +148,20 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
 export function geocode(input: string, layout: CityLayout): GeocodeResult | undefined {
   const address = parseAddress(input, layout)
   if (!address) return undefined
+
+  if (address.plaza) {
+    const plaza = findPlaza(layout, address.plaza)
+    if (plaza) {
+      return {
+        ...address,
+        position: destination(
+          plaza.centre,
+          feetToMeters(plaza.radiusFeet),
+          clockToBearing(layout, address.clock),
+        ),
+      }
+    }
+  }
   return { ...address, position: polarToPosition(layout, address.clock, address.distanceFeet) }
 }
 

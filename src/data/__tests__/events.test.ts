@@ -1,0 +1,112 @@
+import { describe, expect, it } from 'vitest'
+import { formatWhen, occurrencesInWindow, scheduleClock } from '../events'
+import type { EventItem } from '../types'
+
+const at = (start: string, end: string) => ({ start_time: start, end_time: end })
+
+const event = (title: string, occurrences: { start_time: string; end_time: string }[]): EventItem => ({
+  uid: title,
+  title,
+  event_id: 1,
+  year: 2026,
+  occurrence_set: occurrences,
+})
+
+const NOW = new Date('2026-09-02T21:00:00-07:00')
+
+const EVENTS = [
+  event('running', [at('2026-09-02T20:00:00-07:00', '2026-09-02T23:00:00-07:00')]),
+  event('soon', [at('2026-09-02T22:00:00-07:00', '2026-09-02T23:30:00-07:00')]),
+  event('later tonight', [at('2026-09-02T23:45:00-07:00', '2026-09-03T01:00:00-07:00')]),
+  event('tomorrow', [at('2026-09-03T14:00:00-07:00', '2026-09-03T15:00:00-07:00')]),
+  event('finished', [at('2026-09-02T10:00:00-07:00', '2026-09-02T11:00:00-07:00')]),
+]
+
+const titles = (window: Parameters<typeof occurrencesInWindow>[1]) =>
+  occurrencesInWindow(EVENTS, window, NOW).map((live) => live.event.title)
+
+describe('event windows', () => {
+  it('"now" is only what is actually running', () => {
+    expect(titles('now')).toEqual(['running'])
+  })
+
+  it('"next 3h" includes what is running and what starts soon', () => {
+    expect(titles('next3h')).toEqual(['running', 'soon', 'later tonight'])
+  })
+
+  it('"today" stops at the playa\'s midnight, not a rolling 24 hours', () => {
+    expect(titles('today')).toEqual(['running', 'soon', 'later tonight'])
+  })
+
+  /**
+   * People arrive with phones still set to the timezone they flew from. The
+   * schedule has to roll over at the playa's midnight regardless.
+   */
+  it('"today" is the same day whatever timezone the device is in', () => {
+    const original = process.env.TZ
+    const seen = new Set<string>()
+    for (const tz of ['UTC', 'America/New_York', 'Australia/Sydney', 'America/Los_Angeles']) {
+      process.env.TZ = tz
+      seen.add(titles('today').join(','))
+    }
+    process.env.TZ = original
+    expect([...seen]).toEqual(['running,soon,later tonight'])
+  })
+
+  it('"all" returns every occurrence in start order', () => {
+    expect(titles('all')).toEqual(['finished', 'running', 'soon', 'later tonight', 'tomorrow'])
+  })
+
+  it('expands repeating events into separate showings', () => {
+    const repeating = [
+      event('nightly', [
+        at('2026-09-02T20:30:00-07:00', '2026-09-02T21:30:00-07:00'),
+        at('2026-09-03T20:30:00-07:00', '2026-09-03T21:30:00-07:00'),
+      ]),
+    ]
+    expect(occurrencesInWindow(repeating, 'all', NOW)).toHaveLength(2)
+    expect(occurrencesInWindow(repeating, 'now', NOW)).toHaveLength(1)
+  })
+})
+
+describe('the schedule clock', () => {
+  const range = { startDate: '2026-08-30T00:00:00-07:00', endDate: '2026-09-07T12:00:00-07:00' }
+
+  it('uses the real time during the event', () => {
+    expect(scheduleClock(range, NOW)).toEqual({ now: NOW, preview: false })
+  })
+
+  it('scrubs to the start of the burn the rest of the year', () => {
+    const january = new Date('2026-01-15T09:00:00-08:00')
+    const clock = scheduleClock(range, january)
+    expect(clock.preview).toBe(true)
+    expect(clock.now.toISOString()).toBe(new Date(range.startDate).toISOString())
+  })
+
+  it('leaves the clock alone when the year has no published range', () => {
+    expect(scheduleClock(undefined, NOW)).toEqual({ now: NOW, preview: false })
+  })
+})
+
+describe('relative times', () => {
+  it('says an event is on without a countdown while there is plenty of time', () => {
+    const [live] = occurrencesInWindow(EVENTS, 'now', NOW)
+    expect(formatWhen(live, NOW)).toBe('on now')
+  })
+
+  it('counts down once it is nearly over, which is when it matters', () => {
+    const nearlyDone = new Date('2026-09-02T22:35:00-07:00')
+    const [live] = occurrencesInWindow(EVENTS, 'now', nearlyDone)
+    expect(formatWhen(live, nearlyDone)).toBe('on now · 25 min left')
+  })
+
+  it('counts up to what is starting soon', () => {
+    const soon = occurrencesInWindow(EVENTS, 'next3h', NOW)[1]
+    expect(formatWhen(soon, NOW)).toBe('in 60 min')
+  })
+
+  it('falls back to a weekday and time further out', () => {
+    const tomorrow = occurrencesInWindow(EVENTS, 'all', NOW).at(-1)!
+    expect(formatWhen(tomorrow, NOW)).toMatch(/^Thu/)
+  })
+})

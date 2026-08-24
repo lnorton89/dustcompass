@@ -966,6 +966,49 @@ await shared.close()
   )
 }
 
+/**
+ * Gates open on the clock; the locations arrive over the network. For anyone
+ * already on playa those are not the same moment, and a phone cached before
+ * Gates holds art with every location stripped out of it. It used to answer
+ * that with "no location published" — about listings that had just been
+ * published. Nobody can fix that from the desert, so it is checked here.
+ */
+{
+  const readNotice = async (when) => {
+    const ctx = await browser.newContext({ viewport: { width: 1200, height: 850 } })
+    const page = await ctx.newPage()
+    await page.clock.install({ time: new Date(when) })
+    await page.goto(url, { waitUntil: 'load' })
+    await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+    const firstRun = page.getByRole('button', { name: /Show me the map/ })
+    if (await firstRun.count()) {
+      await firstRun.first().click()
+      await page.waitForTimeout(1200)
+    }
+    await page.waitForTimeout(2500)
+    const said = await page.evaluate(
+      () =>
+        [...document.querySelectorAll('.MuiPaper-root')]
+          .map((node) => node.innerText.trim())
+          .find((text) => /Art locations/i.test(text)) || '',
+    )
+    await ctx.close()
+    return said
+  }
+
+  // The data CI publishes is fetched today, so art is still embargoed in it.
+  const beforeGates = await readNotice('2026-08-24T18:00:00Z')
+  const afterGates = await readNotice('2026-08-30T08:00:00Z')
+  assert(
+    /embargoed until Gates open/i.test(beforeGates),
+    `before Gates the map says the locations are not out (read "${beforeGates}")`,
+  )
+  assert(
+    afterGates !== beforeGates && /signal/i.test(afterGates),
+    `after Gates a stale copy says so, and says what fixes it (read "${afterGates}")`,
+  )
+}
+
 console.log(problems.length ? `\n${problems.length} problem(s):\n` + problems.join('\n') : '\nno console or network errors')
 await browser.close()
 process.exit(problems.length || process.exitCode ? 1 : 0)

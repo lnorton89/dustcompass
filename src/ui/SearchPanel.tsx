@@ -23,6 +23,7 @@ import type { Poi, UnplacedListing } from '../data/types'
 const LOCATION_PENDING: Record<UnplacedListing['reason'], string> = {
   embargoed: 'location not out yet',
   unpublished: 'no location published',
+  stale: 'location out — needs signal',
 }
 import type { SavedPlace } from '../data/useSavedPlaces'
 import type { Position } from '../brc/geo'

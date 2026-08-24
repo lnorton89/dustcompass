@@ -71,9 +71,13 @@ export function clockToMinutes(clock: string): number {
 }
 
 export function minutesToClock(minutes: number): string {
-  const t = ((minutes % 720) + 720) % 720
+  // Round once, before splitting. Flooring the hour on the unrounded value and
+  // rounding the minute separately emitted "11:60" — an invalid clock, and
+  // wrong in both digits — for anything from x:59.5 up. That is 0.8% of
+  // bearings, including the ones either side of 12:00.
+  const t = ((Math.round(minutes) % 720) + 720) % 720
   const hour = Math.floor(t / 60) || 12
-  return `${hour}:${String(Math.round(t % 60)).padStart(2, '0')}`
+  return `${hour}:${String(t % 60).padStart(2, '0')}`
 }
 
 /**

@@ -8,6 +8,7 @@ import { DATA_YEAR } from '../../config'
 
 const base = `public/data/${DATA_YEAR}`
 const layout = JSON.parse(readFileSync(`${base}/layout.json`, 'utf8')) as CityLayout
+const FEET_PER_METRE = 3.280839895
 
 type Camp = {
   name?: string
@@ -30,15 +31,32 @@ describe('reading which side of the street a camp is on', () => {
     expect(parseFacing(undefined)).toBeUndefined()
   })
 
-  it('puts the man side nearer the Man than the mountain side', () => {
+  it('reads the wording as which way a camp looks, not where it stands', () => {
     const man = frontagePosition(layout, '2:00 & E', 'Corner - facing man & 2:00')!
     const mountain = frontagePosition(layout, '2:00 & E', 'Corner - facing mountain & 2:00')!
     const centre = layout.center.geometry.coordinates as [number, number]
-    expect(distanceBetween(centre, man)).toBeLessThan(distanceBetween(centre, mountain))
+    // A camp with its frontage toward the Man stands on the far side of the
+    // street, looking inward across the road. Getting this backwards moves a
+    // thousand pins into the wrong block, so assert the direction, not just
+    // that the two differ.
+    expect(distanceBetween(centre, man)).toBeGreaterThan(distanceBetween(centre, mountain))
     // Far enough apart to be separate pins, close enough to stay on the block.
     const apart = distanceBetween(man, mountain)
     expect(apart).toBeGreaterThan(20)
     expect(apart).toBeLessThan(60)
+  })
+
+  it('never puts an Esplanade camp in the open playa inside it', () => {
+    const esplanade = layout.cStreets.find((street) => street.ref === 'esplanade')!
+    const centre = layout.center.geometry.coordinates as [number, number]
+    // Nothing camps between the Esplanade and the Man, and 57 of the 63
+    // Esplanade camps in the 2026 listings face the Man. If the sides are read
+    // backwards every one of them lands in that empty ground.
+    for (const facing of ['Mid-block facing man', 'Corner - facing man & 3:00']) {
+      const at = frontagePosition(layout, '3:00 & Esplanade', facing)!
+      const feet = distanceBetween(centre, at) * FEET_PER_METRE
+      expect(feet, `${facing} landed at ${feet.toFixed(0)} ft`).toBeGreaterThan(esplanade.distance)
+    }
   })
 
   it('leaves an address alone when the listing does not say', () => {

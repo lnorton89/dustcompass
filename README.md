@@ -54,7 +54,7 @@ option.
 **No tile server, no API key, no network.** There is no cell service on playa.
 The city geometry is generated locally, glyphs are bundled, and listings are
 static JSON. It installs as a PWA and precaches everything up front — shell,
-worker, listings, glyphs, ~7.9MB — because a cache that fills as you browse is
+worker, listings, glyphs, ~8.7MB — because a cache that fills as you browse is
 useless when you are already in the desert. `scripts/offline-test.mjs` proves
 this rather than asserting it: it loads the app, cuts the network entirely,
 reloads, and requires the city to still render and addresses to still geocode.

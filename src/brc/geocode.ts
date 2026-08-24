@@ -64,7 +64,13 @@ function findPlaza(layout: CityLayout, name: string): PlazaCircle | undefined {
   return undefined
 }
 
-const CLOCK = String.raw`\d{1,2}[:.]\d{2}`
+/**
+ * Minutes, not any two digits. `2:60` used to satisfy this, reach
+ * `clockToMinutes` and throw — and both the search box and the `?at=`
+ * parameter of a shared link call straight through here, so a malformed
+ * address took the render down rather than simply failing to match.
+ */
+const CLOCK = String.raw`\d{1,2}[:.][0-5]\d`
 
 /**
  * Parse the address forms that appear in Burning Man's own data and on street
@@ -145,7 +151,10 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
   }
 
   // "<clock> <feet>" — open playa, the form art listings use.
-  const open = new RegExp(String.raw`^(${CLOCK})\s*[,&@]?\s*(\d{1,5})\s*(?:'|ft|feet)?`, 'i').exec(raw)
+  // The trailing guard matters: without it the hour of a second clock reads
+  // as a distance, and "10:00 & 10:00 B Plaza" pins ten feet from the Man
+  // instead of on a plaza a kilometre away.
+  const open = new RegExp(String.raw`^(${CLOCK})\s*[,&@]?\s*(\d{1,5})(?![\d:.])\s*(?:'|ft|feet)?`, 'i').exec(raw)
   if (open) {
     const clock = normaliseClock(open[1])
     return {
@@ -177,6 +186,19 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
           distanceFeet: street.distance,
           street: street.ref,
           label: `${street.name} & ${clock}`,
+        }
+      }
+      // Some listings name a plaza on the far side of the ampersand —
+      // "10:00 & 10:00 B Plaza". The plaza is the more specific place, and it
+      // already knows where it is.
+      const plaza = findPlaza(layout, streetPart)
+      if (plaza) {
+        const clock = normaliseClock(clockPart)
+        return {
+          clock,
+          distanceFeet: plaza.radiusFeet,
+          plaza: plaza.name,
+          label: `${plaza.name} @ ${clock}`,
         }
       }
     }

@@ -10,10 +10,13 @@ import { geocode } from './geocode'
  * labels fight, and tapping the pile selects whichever camp the renderer
  * happened to return.
  *
- * The listings say which side of the street each camp is on. "Facing man" is
- * the frontage on the Man side of that street, "facing mountain" the far side,
- * and they are genuinely different places — opposite sides of a forty-foot
- * road, in different blocks. Using that is not a guess; ignoring it was.
+ * The listings say which side of the street each camp is on, and the wording
+ * describes which way the camp *looks*, not where it sits. A camp "facing man"
+ * has its frontage toward the Man, so it stands on the far side of its street
+ * looking inward across the road. The published data settles it: 57 of the 63
+ * Esplanade camps face the Man, and nothing camps between Esplanade and the Man
+ * — that is open playa. Read the other way round, this put all 57 of them in
+ * the empty ground inside Esplanade.
  *
  * What is deliberately not invented is position *along* the street. Mid-block
  * camps only say they are mid-block, not which way from the corner, so they
@@ -47,13 +50,18 @@ export function frontagePosition(
 
   const facing = parseFacing(exactLocation)
   // Only an address that resolves to an annular street has an inside and an
-  // outside. Open playa, plazas and portals do not.
-  if (!facing || !hit.street || hit.distanceFeet === undefined) return hit.position
+  // outside. Open playa and portals do not — and a plaza address already
+  // carries a position on the plaza rim, which is more specific than anything
+  // a street offset could say, so it is left alone even though it names a
+  // street too.
+  if (!facing || hit.plaza || !hit.street || hit.distanceFeet === undefined) {
+    return hit.position
+  }
 
   const street = layout.cStreets.find((s) => s.ref === hit.street)
   if (!street) return hit.position
 
   const halfRoad = (street.width ?? layout.road_width) / 2
   const offset = halfRoad + SETBACK_FEET
-  return polarToPosition(layout, hit.clock, hit.distanceFeet + (facing === 'man' ? -offset : offset))
+  return polarToPosition(layout, hit.clock, hit.distanceFeet + (facing === 'man' ? offset : -offset))
 }

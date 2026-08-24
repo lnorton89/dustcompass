@@ -50,6 +50,15 @@ export function NavBar({ name, address, travel, heading, located, status, accura
         <Typography variant="subtitle2" sx={{ lineHeight: 1.2 }}>
           Heading to {name}
         </Typography>
+        {/*
+         * This is the screen you read while walking, at arm's length, in
+         * daylight, and it was set entirely in 13px caption — the distance, the
+         * times and the clock heading all at footnote size. The two things you
+         * actually act on are how far it is and which way to go, so those come
+         * up to body size and the heading takes the accent; the travel times
+         * stay a step below; the accuracy and the caveats stay footnotes,
+         * because that is what they are.
+         */}
         <Stack
           direction="row"
           spacing={1.25}
@@ -60,27 +69,41 @@ export function NavBar({ name, address, travel, heading, located, status, accura
             rowGap: 0.25,
             // The travel icons take their size from here, so the row moves with
             // the type scale rather than being pinned to a raw pixel value.
-            fontSize: (theme) => theme.typography.caption.fontSize,
+            fontSize: (theme) => theme.typography.body2.fontSize,
           }}
         >
-          <Typography variant="caption">{formatDistance(travel)}</Typography>
+          <Typography variant="body2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+            {formatDistance(travel)}
+          </Typography>
           <Stack direction="row" spacing={0.4} sx={{ alignItems: 'center' }}>
             <DirectionsWalkIcon fontSize="inherit" />
-            <Typography variant="caption">{formatMinutes(travel.walkMinutes)}</Typography>
+            <Typography variant="body2">{formatMinutes(travel.walkMinutes)}</Typography>
           </Stack>
           <Stack direction="row" spacing={0.4} sx={{ alignItems: 'center' }}>
             <DirectionsBikeIcon fontSize="inherit" />
-            <Typography variant="caption">{formatMinutes(travel.bikeMinutes)}</Typography>
+            <Typography variant="body2">{formatMinutes(travel.bikeMinutes)}</Typography>
           </Stack>
-          <Typography variant="caption" noWrap>
-            {located
-              ? `toward ${heading}`
-              : status === 'locating'
+          {located ? (
+            // "Head toward 4:30" is the one instruction you can follow without
+            // looking at the screen again, which is the whole reason the heading
+            // is given as a clock position. It should not be the quietest thing
+            // in the row.
+            <Typography
+              variant="body2"
+              noWrap
+              sx={{ fontWeight: 700, color: 'primary.main' }}
+            >
+              toward {heading}
+            </Typography>
+          ) : (
+            <Typography variant="body2" noWrap>
+              {status === 'locating'
                 ? 'finding you…'
                 : status === 'denied'
                   ? `${address ?? heading} · from the Man (location off)`
                   : `${address ?? heading} · from the Man`}
-          </Typography>
+            </Typography>
+          )}
         </Stack>
         {approximate && (
           <Typography variant="caption" color="warning.main" sx={{ display: 'block', lineHeight: 1.2, mt: 0.25 }}>

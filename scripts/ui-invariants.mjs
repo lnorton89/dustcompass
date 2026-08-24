@@ -262,6 +262,77 @@ for (const viewport of VIEWPORTS.filter((v) => v.width <= COMPACT_MAX)) {
 }
 
 // ---------------------------------------------------------------------------
+// 2c. Top-of-map notices (the embargo notice, the partial-data warning, the
+// stale-link notice) share one flex column now instead of each guessing its
+// own top offset from the others' assumed height (#73) — that assumption
+// broke the moment any notice varied in height: a taller footnote from Large
+// Text, a wrapped line on a narrow phone, or several missing datasets named
+// at once in the partial-data notice. Whichever of them are actually up must
+// never overlap, at both text sizes.
+//
+// The embargo and partial-data notices depend on the data this run actually
+// fetched (art may already be released; the dataset may have loaded clean),
+// so only the stale-link notice — forced here with an unknown `?poi=` — is
+// reliably present. This still exercises the shared column for whatever
+// else happens to be up alongside it, and is strengthened below if more
+// than one notice actually appears.
+// ---------------------------------------------------------------------------
+
+async function openWithNotices(viewport, reading) {
+  const context = await browser.newContext({
+    viewport: { width: viewport.width, height: viewport.height },
+    isMobile: viewport.width <= COMPACT_MAX,
+    hasTouch: viewport.width <= COMPACT_MAX,
+    geolocation: { latitude: 40.7772, longitude: -119.1893 },
+    permissions: ['geolocation'],
+  })
+  const page = await context.newPage()
+  await page.addInitScript((size) => {
+    try {
+      localStorage.setItem('dust-compass:first-run:1', 'seen')
+      // Deliberately not marking the embargo notice seen, unlike open()
+      // above — this check wants every notice the current data actually
+      // warrants to be up at once, not suppressed ahead of time.
+      localStorage.setItem('dust-compass:reading-size', size)
+    } catch {
+      /* private-mode storage throws; the notices are harmless if they appear */
+    }
+  }, reading)
+  const target = new URL(url)
+  target.searchParams.set('poi', 'ui-invariants-unknown-uid')
+  await page.goto(target.href, { waitUntil: 'load' })
+  await page
+    .waitForFunction(() => document.documentElement.dataset.mapReady === 'true', null, { timeout: 45000 })
+    .catch(() => {})
+  await page.waitForTimeout(2000)
+  return { context, page }
+}
+
+for (const reading of ['normal', 'large']) {
+  const { context, page } = await openWithNotices({ name: '375', width: 375, height: 812 }, reading)
+  const boxes = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="top-notice"]')]
+      .map((el) => el.getBoundingClientRect())
+      .map((rect) => ({ top: rect.top, bottom: rect.bottom }))
+      .sort((a, b) => a.top - b.top),
+  )
+  if (boxes.length === 0) {
+    fail(`at ${reading} text: expected at least the stale-link notice to be up`, 'found none')
+  } else {
+    const overlapping = boxes.filter((box, index) => index > 0 && box.top < boxes[index - 1].bottom)
+    if (overlapping.length === 0) {
+      pass(`at ${reading} text: ${boxes.length} top notice(s) stack without overlapping`)
+    } else {
+      fail(
+        `at ${reading} text: top notices overlap`,
+        boxes.map((b) => `${Math.round(b.top)}–${Math.round(b.bottom)}`).join(', '),
+      )
+    }
+  }
+  await context.close()
+}
+
+// ---------------------------------------------------------------------------
 // 3. All three palettes reach every surface, and night stays dark.
 // ---------------------------------------------------------------------------
 

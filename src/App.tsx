@@ -1265,147 +1265,145 @@ export default function App() {
                   }}
                 />
               )}
-              {!data.embargo.artReleased && !embargoNoticeSeen && (
-                /*
-                 * This was MUI's filled `info` alert — a saturated #0288d1
-                 * billboard in an app made of ember, teal and dust, and on a
-                 * small phone the loudest thing on screen the moment it opened.
-                 * It is a footnote about a licence condition, not an alarm, so
-                 * it now wears the same paper as everything else and says its
-                 * piece on one line.
-                 */
-                <Paper
-                  elevation={0}
-                  sx={{
-                    position: 'absolute',
-                    // Below the non-affiliation footnote on a phone, which now
-                    // occupies the top-left corner. Measured, not guessed: the
-                    // footnote grows with the credit line and with whatever text
-                    // size the reader has asked for.
-                    top: {
-                      xs: `calc(${footnoteHeight + 16}px + var(--safe-top))`,
-                      sm: 8,
-                    },
-                    left: 8,
-                    right: { xs: 8, sm: 'auto' },
-                    maxWidth: { sm: 400 },
-                    zIndex: 2,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    pl: 1.25,
-                    pr: 0.5,
-                    py: 0.25,
-                    border: '1px solid',
-                    borderColor: 'divider',
-                  }}
-                >
-                  <InfoOutlinedIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
-                  <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
-                    Art locations are embargoed until Gates open.
-                  </Typography>
-                  <IconButton size="small" onClick={dismissEmbargoNotice} aria-label="Dismiss">
-                    <CloseIcon sx={{ fontSize: 18 }} />
-                  </IconButton>
-                </Paper>
-              )}
-              {data.partialDataWarnings.length > 0 && (
-                // Toilets/services/dates falling back to empty used to be
-                // indistinguishable from a normal map with nothing wrong —
-                // silently dropping the safety-relevant layer entirely rather
-                // than saying so. This does not block the app the way the
-                // required-dataset error above does; it names what is
-                // missing and offers a retry.
-                <Paper
-                  elevation={0}
-                  sx={{
-                    position: 'absolute',
-                    // Stack below the embargo notice on a phone when both are
-                    // showing at once, rather than overlapping it.
-                    top:
-                      !data.embargo.artReleased && !embargoNoticeSeen
-                        ? { xs: 'calc(104px + var(--safe-top))', sm: 56 }
-                        : { xs: 'calc(56px + var(--safe-top))', sm: 8 },
-                    left: 8,
-                    right: { xs: 8, sm: 'auto' },
-                    maxWidth: { sm: 420 },
-                    zIndex: 2,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    pl: 1.25,
-                    pr: 0.5,
-                    py: 0.25,
-                    border: '1px solid',
-                    borderColor: 'warning.main',
-                  }}
-                >
-                  <WarningAmberIcon sx={{ fontSize: 18, color: 'warning.main', flexShrink: 0 }} />
-                  <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
-                    Could not load {joinWithAnd(data.partialDataWarnings.map((w) => PARTIAL_DATA_LABEL[w]))}.
-                    Retry when you have signal.
-                  </Typography>
-                  <Button size="small" color="warning" onClick={retry}>
-                    Retry
-                  </Button>
-                </Paper>
-              )}
-              {staleLink && (
-                // A `?poi=` naming a listing that is neither placed nor
-                // unplaced-but-embargoed — removed/cancelled since the link
-                // was shared, or from a year whose dataset has moved on. The
-                // old behaviour silently erased the link and landed on the
-                // bare map with no explanation; this says what happened and
-                // keeps the link in the address bar (see the URL-mirroring
-                // effect's own `staleLink` guard) until it is dismissed.
-                <Paper
-                  elevation={0}
-                  sx={{
-                    position: 'absolute',
-                    // Stack below whichever of the embargo/partial-data
-                    // banners are also showing, rather than overlapping them.
-                    top:
-                      (!data.embargo.artReleased && !embargoNoticeSeen ? 1 : 0) +
-                        (data.partialDataWarnings.length > 0 ? 1 : 0) ===
-                      2
-                        ? { xs: 'calc(152px + var(--safe-top))', sm: 104 }
-                        : (!data.embargo.artReleased && !embargoNoticeSeen ? 1 : 0) +
-                              (data.partialDataWarnings.length > 0 ? 1 : 0) ===
-                            1
-                          ? { xs: 'calc(104px + var(--safe-top))', sm: 56 }
-                          : { xs: 'calc(56px + var(--safe-top))', sm: 8 },
-                    left: 8,
-                    right: { xs: 8, sm: 'auto' },
-                    maxWidth: { sm: 420 },
-                    zIndex: 2,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    pl: 1.25,
-                    pr: 0.5,
-                    py: 0.25,
-                    border: '1px solid',
-                    borderColor: 'divider',
-                  }}
-                >
-                  <LinkOffIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
-                  <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
-                    This shared listing is no longer in the current map.
-                  </Typography>
-                  <Button
-                    size="small"
-                    onClick={() => {
-                      setStaleLink(undefined)
-                      searchInput.current?.focus()
+              {/*
+               * Every notice below shares one absolutely positioned column
+               * instead of each guessing its own top offset from a fixed
+               * "banners are 48px tall" assumption (#73). That assumption
+               * broke the moment any notice actually varied in height — a
+               * taller footnote from Large Text mode or a long survey
+               * credit, a wrapped line on a narrow phone, or the
+               * partial-data notice naming several missing datasets at
+               * once — leaving later banners starting above where the
+               * previous one actually ended. A plain flex column lets
+               * ordinary layout absorb all of that; only the column itself
+               * needs a position, and only once, using the same measured
+               * `footnoteHeight` the embargo notice already computed this
+               * from.
+               */}
+              <Stack
+                spacing={1}
+                sx={{
+                  position: 'absolute',
+                  top: {
+                    xs: `calc(${footnoteHeight + 16}px + var(--safe-top))`,
+                    sm: 8,
+                  },
+                  left: 8,
+                  right: { xs: 8, sm: 'auto' },
+                  zIndex: 2,
+                  alignItems: 'flex-start',
+                }}
+              >
+                {!data.embargo.artReleased && !embargoNoticeSeen && (
+                  /*
+                   * This was MUI's filled `info` alert — a saturated #0288d1
+                   * billboard in an app made of ember, teal and dust, and on a
+                   * small phone the loudest thing on screen the moment it opened.
+                   * It is a footnote about a licence condition, not an alarm, so
+                   * it now wears the same paper as everything else and says its
+                   * piece on one line.
+                   */
+                  <Paper
+                    elevation={0}
+                    data-testid="top-notice"
+                    sx={{
+                      width: { xs: '100%', sm: 'auto' },
+                      maxWidth: { sm: 400 },
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      pl: 1.25,
+                      pr: 0.5,
+                      py: 0.25,
+                      border: '1px solid',
+                      borderColor: 'divider',
                     }}
                   >
-                    Search
-                  </Button>
-                  <Button size="small" onClick={() => setStaleLink(undefined)}>
-                    Show map
-                  </Button>
-                </Paper>
-              )}
+                    <InfoOutlinedIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+                    <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
+                      Art locations are embargoed until Gates open.
+                    </Typography>
+                    <IconButton size="small" onClick={dismissEmbargoNotice} aria-label="Dismiss">
+                      <CloseIcon sx={{ fontSize: 18 }} />
+                    </IconButton>
+                  </Paper>
+                )}
+                {data.partialDataWarnings.length > 0 && (
+                  // Toilets/services/dates falling back to empty used to be
+                  // indistinguishable from a normal map with nothing wrong —
+                  // silently dropping the safety-relevant layer entirely rather
+                  // than saying so. This does not block the app the way the
+                  // required-dataset error above does; it names what is
+                  // missing and offers a retry.
+                  <Paper
+                    elevation={0}
+                    data-testid="top-notice"
+                    sx={{
+                      width: { xs: '100%', sm: 'auto' },
+                      maxWidth: { sm: 420 },
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      pl: 1.25,
+                      pr: 0.5,
+                      py: 0.25,
+                      border: '1px solid',
+                      borderColor: 'warning.main',
+                    }}
+                  >
+                    <WarningAmberIcon sx={{ fontSize: 18, color: 'warning.main', flexShrink: 0 }} />
+                    <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
+                      Could not load {joinWithAnd(data.partialDataWarnings.map((w) => PARTIAL_DATA_LABEL[w]))}.
+                      Retry when you have signal.
+                    </Typography>
+                    <Button size="small" color="warning" onClick={retry}>
+                      Retry
+                    </Button>
+                  </Paper>
+                )}
+                {staleLink && (
+                  // A `?poi=` naming a listing that is neither placed nor
+                  // unplaced-but-embargoed — removed/cancelled since the link
+                  // was shared, or from a year whose dataset has moved on. The
+                  // old behaviour silently erased the link and landed on the
+                  // bare map with no explanation; this says what happened and
+                  // keeps the link in the address bar (see the URL-mirroring
+                  // effect's own `staleLink` guard) until it is dismissed.
+                  <Paper
+                    elevation={0}
+                    data-testid="top-notice"
+                    sx={{
+                      width: { xs: '100%', sm: 'auto' },
+                      maxWidth: { sm: 420 },
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      pl: 1.25,
+                      pr: 0.5,
+                      py: 0.25,
+                      border: '1px solid',
+                      borderColor: 'divider',
+                    }}
+                  >
+                    <LinkOffIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+                    <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
+                      This shared listing is no longer in the current map.
+                    </Typography>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setStaleLink(undefined)
+                        searchInput.current?.focus()
+                      }}
+                    >
+                      Search
+                    </Button>
+                    <Button size="small" onClick={() => setStaleLink(undefined)}>
+                      Show map
+                    </Button>
+                  </Paper>
+                )}
+              </Stack>
             </>
           )}
         </Box>

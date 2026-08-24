@@ -587,7 +587,12 @@ await page.waitForTimeout(500)
 await page.getByRole('button', { name: 'My camp' }).click()
 await page.waitForTimeout(700)
 
-const savedJson = await page.evaluate(() => localStorage.getItem('playa-map.places.v1'))
+// Saved-place storage is scoped per data year (a prior year's coordinates
+// are not safe to draw as current), so the key carries the same suffix.
+const savedJson = await page.evaluate(
+  (year) => localStorage.getItem(`playa-map.places.v1.${year}`),
+  DATA_YEAR,
+)
 assert(Boolean(savedJson) && savedJson.includes('My camp'), 'saved spot persisted to the device')
 assert(
   (await page.evaluate(() => window.__map.queryRenderedFeatures({ layers: ['saved-dot'] }).length)) > 0,
@@ -816,9 +821,21 @@ await shared.close()
   if (!short || !tall || short.uid === tall.uid) {
     assert(false, 'skipped #19 sheet-height test — could not find two sufficiently different camps in this dataset')
   } else {
-    const bottomPaddingFor = async (uid) => {
-      await page.goto(new URL(`?poi=${uid}`, url).href, { waitUntil: 'load' })
-      await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+    // The #19 fix lives entirely in flyTo()'s padding estimate/correction —
+    // a cold `?poi=` load frames the camera through MapView's own
+    // `initialTarget` jumpTo instead, which carries no padding at all, so
+    // driving this through a deep link would measure a code path the fix
+    // never touches. Selecting through search is what actually exercises it.
+    await page.goto(url, { waitUntil: 'load' })
+    await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+    await page.waitForTimeout(2000)
+    const detailSearch = page.getByPlaceholder(/Camp, art, or an address|Search the playa/)
+    const bottomPaddingFor = async (name) => {
+      await detailSearch.fill('')
+      await detailSearch.fill(name)
+      await page.waitForTimeout(700)
+      await page.keyboard.press('ArrowDown')
+      await page.keyboard.press('Enter')
       // Long enough for both the initial fallback-estimated flyTo (900ms) and
       // the bounded correction that follows the real measurement (300ms) to
       // finish settling.
@@ -826,8 +843,8 @@ await shared.close()
       return page.evaluate(() => window.__map.getPadding().bottom)
     }
 
-    const shortPadding = await bottomPaddingFor(short.uid)
-    const tallPadding = await bottomPaddingFor(tall.uid)
+    const shortPadding = await bottomPaddingFor(short.name)
+    const tallPadding = await bottomPaddingFor(tall.name)
     assert(
       tallPadding > shortPadding,
       `a taller detail sheet (${tall.name}, ${hostedEventCount.get(tall.uid) ?? 0} events) reserves more bottom padding (${tallPadding}) than a shorter one (${short.name}, ${shortPadding}) (#19)`,

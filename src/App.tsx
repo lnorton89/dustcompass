@@ -321,15 +321,21 @@ export default function App() {
    * year so next year's embargo introduces itself again.
    */
   const EMBARGO_NOTICE_KEY = `dust-compass:embargo-notice:${DATA_YEAR}`
-  const [embargoNoticeSeen, setEmbargoNoticeSeen] = useState(() => {
+  // Starts false — matching what the static export's prerendered HTML has to
+  // assume, since localStorage does not exist at build time — and corrected
+  // right after mount if the visitor already dismissed it. Reading the real
+  // value straight from the useState initializer instead made the very first
+  // client render disagree with the server-rendered markup on a return visit,
+  // which is a hydration error, not merely a startup flash.
+  const [embargoNoticeSeen, setEmbargoNoticeSeen] = useState(false)
+  useEffect(() => {
     try {
-      return localStorage.getItem(EMBARGO_NOTICE_KEY) === 'seen'
+      if (localStorage.getItem(EMBARGO_NOTICE_KEY) === 'seen') setEmbargoNoticeSeen(true)
     } catch {
       // Private windows and blocked site data both throw. The notice showing
       // twice is a far smaller problem than the map not opening.
-      return false
     }
-  })
+  }, [EMBARGO_NOTICE_KEY])
   const dismissEmbargoNotice = useCallback(() => {
     setEmbargoNoticeSeen(true)
     try {
@@ -995,9 +1001,13 @@ export default function App() {
                 onPinClick={() => pin && setProbe(pin.address)}
                 initialTarget={initialTarget}
                 // Withheld until a real fix exists rather than drawn from the
-                // Man fallback — a route line with no ambiguity about where it
-                // starts, matching what NavBar's own copy already says.
-                route={heading && here ? { from: here, to: heading.position } : undefined}
+                // Man fallback with no fix at all — a route line with no
+                // ambiguity about where it starts, matching what NavBar's own
+                // copy already says. Once a real fix exists, `origin` is what
+                // actually draws it (not `here` directly): a fix nowhere near
+                // the city still resolves to the Man, same as the distance
+                // readout, rather than a route line running off the map.
+                route={heading && here && origin ? { from: origin, to: heading.position } : undefined}
                 selected={selected}
                 destination={heading}
               />

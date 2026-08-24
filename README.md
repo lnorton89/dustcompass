@@ -233,7 +233,7 @@ Use [GitHub Issues](https://github.com/lnorton89/dustcompass/issues) for reprodu
 
 ## License
 
-Dust Compass is released under the [MIT License](LICENSE).
+Dust Compass source code and project-owned assets are released under the [MIT License](LICENSE). Burning Man Event Data, survey data, trademarks, and third-party assets are not relicensed by this repository; their respective terms still apply. See [Data, embargoes, and attribution](#data-embargoes-and-attribution).
 
 ---
 

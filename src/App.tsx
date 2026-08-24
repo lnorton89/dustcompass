@@ -222,6 +222,42 @@ export function liveAddressMessage(label: string | undefined): string {
   return label ? `You are near ${label}` : 'Finding you…'
 }
 
+/**
+ * `map.fitBounds()` treats its two-point array as `[southwest, northeast]`,
+ * not "any two corners" — handing it two arbitrary points in the wrong
+ * order (the reader's own position happens to be east of, or north of, the
+ * destination) makes MapLibre compute a bounding box that wraps the *other*
+ * way around the globe to keep west-to-east positive, landing the camera at
+ * a near-global zoom on the opposite side of the world instead of framing
+ * the two points at all. Sorting into actual min/max corners first avoids
+ * that regardless of which point is which relative to the other. Exported
+ * for a focused unit test.
+ */
+export function boundsOf(a: Position, b: Position): [Position, Position] {
+  return [
+    [Math.min(a[0], b[0]), Math.min(a[1], b[1])],
+    [Math.max(a[0], b[0]), Math.max(a[1], b[1])],
+  ]
+}
+
+/**
+ * A bbox for `fitBounds()` that keeps `anchor` exactly centered once fit,
+ * by mirroring `include` across it — a point plus its own mirror image
+ * straddle their midpoint by construction, and `fitBounds()` centers on its
+ * box's own midpoint. Fitting `anchor`/`include` directly with `boundsOf`
+ * puts whichever one isn't the box's centroid at a corner instead — fine
+ * for "is the reader's own position somewhere on screen", poor for the
+ * destination they're actually trying to navigate toward, which reads as
+ * off to one side rather than the visual anchor it already was before
+ * framing the reader's position was ever added. This keeps that anchor
+ * centered while still guaranteeing `include` ends up inside the fitted
+ * view. Exported for a focused unit test.
+ */
+export function boundsCenteredOn(anchor: Position, include: Position): [Position, Position] {
+  const mirrored: Position = [2 * anchor[0] - include[0], 2 * anchor[1] - include[1]]
+  return boundsOf(include, mirrored)
+}
+
 export function canConfirmArrival(
   travelMeters: number,
   hasUsableFix: boolean,
@@ -813,16 +849,63 @@ export default function App() {
       // effect below, sharing the old pin's address while navigating to
       // somewhere else entirely.
       setPin(undefined)
-      mapRef.current?.flyTo({
-        center: target.position,
-        zoom: 16.5,
-        duration: 900,
-        padding: navigationPadding(),
-      })
+      /**
+       * A fix that's already known by the moment "Take me there" is pressed
+       * gets framed together with the destination in this one motion — the
+       * whole point of the live-location marker (#59) is showing where the
+       * reader is relative to where they're going, not just where they're
+       * going. A fix that ISN'T known yet (the permission prompt and first
+       * GPS read both take a beat) falls back to framing the destination
+       * alone here; the effect below catches it once one does arrive and
+       * re-frames exactly once, rather than leaving the reader's own
+       * position — and the marker built from it — sitting outside the
+       * frame for the rest of the walk. Doing both from a single call site
+       * keeps this to one camera motion in the common case where a fix is
+       * already there, instead of always flying to the destination first
+       * and then immediately re-fitting a moment later.
+       */
+      if (usableFix) {
+        mapRef.current?.fitBounds(boundsCenteredOn(target.position, usableFix), {
+          padding: navigationPadding(),
+          duration: 900,
+          maxZoom: 16.5,
+        })
+        framedNavigationFor.current = `${target.position[0]},${target.position[1]}`
+      } else {
+        mapRef.current?.flyTo({
+          center: target.position,
+          zoom: 16.5,
+          duration: 900,
+          padding: navigationPadding(),
+        })
+        framedNavigationFor.current = undefined
+      }
       acquireLocation('navigation')
     },
-    [acquireLocation, navigationPadding],
+    [acquireLocation, navigationPadding, usableFix],
   )
+
+  const framedNavigationFor = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!heading) {
+      framedNavigationFor.current = undefined
+      return
+    }
+    const key = `${heading.position[0]},${heading.position[1]}`
+    if (!usableFix || framedNavigationFor.current === key) return
+    framedNavigationFor.current = key
+    // An instant jump, not an animated fly: this fires the moment a fix
+    // lands, which in practice is often only a beat after `navigateTo`'s own
+    // 900ms flyTo already started — animating this too stacks a second,
+    // independently-timed camera motion on top of the first instead of
+    // cleanly replacing it, leaving the map settled nowhere in particular
+    // for longer than either transition alone.
+    mapRef.current?.fitBounds(boundsCenteredOn(heading.position, usableFix), {
+      padding: navigationPadding(),
+      duration: 0,
+      maxZoom: 16.5,
+    })
+  }, [heading, usableFix, navigationPadding])
 
   const flyTo = useCallback(
     (position: Position, poi?: Poi) => {

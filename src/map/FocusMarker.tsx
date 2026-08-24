@@ -33,7 +33,19 @@ export function FocusMarker({
   const label = `${navigating ? 'Navigation destination' : 'Selected location'}: ${name}${address ? `, ${address}` : ''}`
 
   return (
-    <Marker longitude={position[0]} latitude={position[1]} anchor="center" style={{ zIndex: 10 }}>
+    // Purely informational — no click handler of its own, everywhere, so the
+    // whole marker (not just the inner Box, which already declared this) is
+    // click-through. Without it, the wrapper `.maplibregl-marker` div MapLibre
+    // itself renders around this still intercepts clicks aimed at whatever is
+    // underneath by default, regardless of the inner content's own
+    // pointer-events — real for the live-location marker (#59) it can end up
+    // stacked directly on top of, when navigation starts near the destination.
+    <Marker
+      longitude={position[0]}
+      latitude={position[1]}
+      anchor="center"
+      style={{ zIndex: 10, pointerEvents: 'none' }}
+    >
       <Box
         role="img"
         aria-label={label}

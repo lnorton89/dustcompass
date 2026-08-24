@@ -1,6 +1,7 @@
 import { Box, Typography } from '@mui/material'
 import { Marker } from '@vis.gl/react-maplibre'
 import type { Position } from '../brc/geo'
+import type { PlayaPalette } from './style'
 
 interface Props {
   position: Position
@@ -8,11 +9,27 @@ interface Props {
   address?: string
   navigating?: boolean
   approximate?: boolean
+  palette: PlayaPalette
 }
 
-/** A high-contrast, labeled target that remains legible over every map theme. */
-export function FocusMarker({ position, name, address, navigating = false, approximate = false }: Props) {
-  const color = navigating ? '#5ec8d8' : '#ff8a4c'
+/**
+ * A high-contrast, labeled target that remains legible over every map theme —
+ * including red night mode, where a hard-coded cyan/cream marker would be the
+ * one bright, off-hue surface in an interface built entirely around staying
+ * off it. Colours come from the active `PlayaPalette` rather than fixed hex,
+ * the same source the rest of the map draws its legend from: `camp`'s accent
+ * marks the navigation target, `art`'s marks a plain selection, and each
+ * already carries its own red intensity in night mode.
+ */
+export function FocusMarker({
+  position,
+  name,
+  address,
+  navigating = false,
+  approximate = false,
+  palette,
+}: Props) {
+  const color = navigating ? palette.camp : palette.art
   const label = `${navigating ? 'Navigation destination' : 'Selected location'}: ${name}${address ? `, ${address}` : ''}`
 
   return (
@@ -38,7 +55,7 @@ export function FocusMarker({ position, name, address, navigating = false, appro
             inset: 5,
             border: `4px solid ${color}`,
             borderRadius: '50%',
-            boxShadow: '0 2px 10px rgba(0,0,0,.8), inset 0 0 0 2px #12100e',
+            boxShadow: `0 2px 10px rgba(0,0,0,.8), inset 0 0 0 2px ${palette.labelHalo}`,
           }}
         />
         <Box
@@ -60,7 +77,7 @@ export function FocusMarker({ position, name, address, navigating = false, appro
             height: 12,
             transform: 'translate(-50%, -50%)',
             bgcolor: color,
-            border: '2px solid #12100e',
+            border: `2px solid ${palette.labelHalo}`,
             borderRadius: '50%',
           }}
         />
@@ -74,8 +91,8 @@ export function FocusMarker({ position, name, address, navigating = false, appro
             maxWidth: 240,
             px: navigating ? 1.25 : 1,
             py: navigating ? 0.65 : 0.35,
-            bgcolor: 'rgba(18,16,14,.94)',
-            color: '#fff7e8',
+            bgcolor: palette.labelHalo,
+            color: palette.label,
             border: `${navigating ? 2 : 1}px solid ${color}`,
             borderRadius: 1,
             textAlign: 'center',
@@ -108,7 +125,7 @@ export function FocusMarker({ position, name, address, navigating = false, appro
             {name}
           </Typography>
           {navigating && address && (
-            <Typography component="span" sx={{ display: 'block', color: '#d8d0c2', fontSize: 11, lineHeight: 1.2 }}>
+            <Typography component="span" sx={{ display: 'block', color: palette.label, opacity: 0.75, fontSize: 11, lineHeight: 1.2 }}>
               {address}
             </Typography>
           )}

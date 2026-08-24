@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatWhen, occurrencesInWindow, scheduleClock } from '../events'
+import { formatWhen, occurrencesInWindow, relevantOccurrence, scheduleClock } from '../events'
 import type { EventItem } from '../types'
 
 const at = (start: string, end: string) => ({ start_time: start, end_time: end })
@@ -108,5 +108,53 @@ describe('relative times', () => {
   it('falls back to a weekday and time further out', () => {
     const tomorrow = occurrencesInWindow(EVENTS, 'all', NOW).at(-1)!
     expect(formatWhen(tomorrow, NOW)).toMatch(/^Thu/)
+  })
+
+  /**
+   * The absolute time shown here is playa time regardless of the phone's own
+   * timezone — a device still set to where the visitor flew from should not
+   * see the schedule shift.
+   */
+  it('renders the same absolute time on non-Pacific device timezones', () => {
+    const tomorrow = occurrencesInWindow(EVENTS, 'all', NOW).at(-1)!
+    const original = process.env.TZ
+    const seen = new Set<string>()
+    for (const tz of ['UTC', 'America/New_York', 'Australia/Sydney']) {
+      process.env.TZ = tz
+      seen.add(formatWhen(tomorrow, NOW))
+    }
+    process.env.TZ = original
+    expect([...seen]).toHaveLength(1)
+    expect([...seen][0]).toMatch(/^Thu.*2/)
+  })
+})
+
+describe('relevantOccurrence', () => {
+  const repeating = event('nightly', [
+    at('2026-08-30T20:00:00-07:00', '2026-08-30T21:00:00-07:00'),
+    at('2026-09-01T20:00:00-07:00', '2026-09-01T21:00:00-07:00'),
+    at('2026-09-03T20:00:00-07:00', '2026-09-03T21:00:00-07:00'),
+    at('2026-09-05T20:00:00-07:00', '2026-09-05T21:00:00-07:00'),
+  ])
+
+  it('picks the showing that is currently running', () => {
+    const midShow = new Date('2026-09-03T20:30:00-07:00')
+    const result = relevantOccurrence(repeating, midShow)
+    expect(result?.state).toBe('running')
+    expect(result?.occurrence.start_time).toBe('2026-09-03T20:00:00-07:00')
+  })
+
+  it('picks the next upcoming showing between occurrences', () => {
+    const betweenShows = new Date('2026-09-02T12:00:00-07:00')
+    const result = relevantOccurrence(repeating, betweenShows)
+    expect(result?.state).toBe('upcoming')
+    expect(result?.occurrence.start_time).toBe('2026-09-03T20:00:00-07:00')
+  })
+
+  it('falls back to the most recently ended showing once every occurrence is over', () => {
+    const afterAll = new Date('2026-09-06T12:00:00-07:00')
+    const result = relevantOccurrence(repeating, afterAll)
+    expect(result?.state).toBe('ended')
+    expect(result?.occurrence.start_time).toBe('2026-09-05T20:00:00-07:00')
   })
 })

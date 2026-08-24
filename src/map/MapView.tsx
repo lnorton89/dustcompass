@@ -252,7 +252,12 @@ export function MapView({
       )}
 
       {selected && !destination && (
-        <FocusMarker position={selected.position} name={selected.name} address={selected.address} />
+        <FocusMarker
+          position={selected.position}
+          name={selected.name}
+          address={selected.address}
+          palette={palette}
+        />
       )}
       {destination && (
         <FocusMarker
@@ -261,6 +266,7 @@ export function MapView({
           address={destination.address}
           navigating
           approximate={destination.approximate}
+          palette={palette}
         />
       )}
 

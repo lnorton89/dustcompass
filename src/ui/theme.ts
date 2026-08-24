@@ -154,11 +154,29 @@ export function playaTheme(mode: ThemeMode): Theme {
       },
       // Only the ones that do something when pressed. A chip used as a readout
       // is text, and text does not need a thumb.
+      //
+      // `root` and `clickable` are two keys of the same `styleOverrides`
+      // object, not two separate `MuiChip` component entries — a second
+      // `MuiChip` entry below (for night mode's default-chip colour) would
+      // replace this one outright rather than merge with it, silently
+      // dropping the touch-target floor in the one mode most likely to be
+      // used one-handed and in the dark.
       MuiChip: {
         styleOverrides: {
           clickable: ({ theme }) => ({
             [theme.breakpoints.down('md')]: { minHeight: TOUCH },
           }),
+          // MUI's default filled chip is neutral grey, which in night mode is
+          // both a contrast failure against the red text and a hole in the
+          // palette — one grey control in an otherwise entirely red interface.
+          root: night
+            ? {
+                '&.MuiChip-colorDefault.MuiChip-filled': {
+                  backgroundColor: '#3d0d0d',
+                  color: '#ffb3b3',
+                },
+              }
+            : undefined,
         },
       },
       // Event rows and saved spots: long lists where a mis-tap costs a flight
@@ -256,23 +274,6 @@ export function playaTheme(mode: ThemeMode): Theme {
           }),
         },
       },
-      // MUI's default filled chip is neutral grey, which in night mode is both
-      // a contrast failure against the red text and a hole in the palette —
-      // one grey control in an otherwise entirely red interface.
-      ...(night
-        ? {
-            MuiChip: {
-              styleOverrides: {
-                root: {
-                  '&.MuiChip-colorDefault.MuiChip-filled': {
-                    backgroundColor: '#3d0d0d',
-                    color: '#ffb3b3',
-                  },
-                },
-              },
-            },
-          }
-        : {}),
     },
   })
 }

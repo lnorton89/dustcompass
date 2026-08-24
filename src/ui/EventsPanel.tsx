@@ -21,7 +21,7 @@ import SearchIcon from '@mui/icons-material/Search'
 import NearMeIcon from '@mui/icons-material/NearMe'
 import ScheduleIcon from '@mui/icons-material/Schedule'
 import type { EventItem, Poi } from '../data/types'
-import { formatWhen, occurrencesInWindow, type EventWindow } from '../data/events'
+import { PLAYA_TIME_ZONE, formatWhen, occurrencesInWindow, type EventWindow } from '../data/events'
 import { formatDistance, travelBetween } from '../brc/travel'
 import type { Position } from '../brc/geo'
 
@@ -218,7 +218,7 @@ export function EventsPanel({
           {rows.length === 300 ? 'showing first 300' : `${rows.length} showing`}
           {sort === 'distance' && !origin && ' · finding you…'}
           {preview &&
-            ` · previewing from ${now.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}`}
+            ` · previewing from ${now.toLocaleDateString(undefined, { timeZone: PLAYA_TIME_ZONE, weekday: 'long', month: 'short', day: 'numeric' })}`}
         </Typography>
       </Box>
 
@@ -228,75 +228,78 @@ export function EventsPanel({
         {rows.map((row, index) => {
           const host = row.host
           const live = row.start <= now && row.end > now
+          const content = (
+            <>
+              <ListItemText
+                primary={row.event.title}
+                secondary={
+                  <>
+                    {/* "On now" is the single most useful fact in this list
+                        and it was buried mid-sentence in grey. */}
+                    {live && (
+                      <Box
+                        component="span"
+                        sx={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 0.35,
+                          mr: 0.75,
+                          color: 'primary.main',
+                          fontWeight: 700,
+                        }}
+                      >
+                        <ScheduleIcon sx={{ fontSize: 14 }} />
+                        {formatWhen(row, now)}
+                      </Box>
+                    )}
+                    {[
+                      host?.name ?? row.event.other_location,
+                      live ? undefined : formatWhen(row, now),
+                      row.travel && formatDistance(row.travel),
+                      host ? undefined : 'location not listed',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </>
+                }
+                slotProps={{
+                  primary: { variant: 'body2', sx: { fontWeight: 600 } },
+                  secondary: { variant: 'caption' },
+                }}
+              />
+              {row.event.event_type && (
+                // `abbr` is the API's four-letter code — "prty", "othr",
+                // "adlt". Nobody outside the dataset knows what those mean.
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={row.event.event_type.label}
+                  sx={{ flexShrink: 0, mt: 0.25, maxWidth: 120 }}
+                />
+              )}
+            </>
+          )
+          const rowSx = { alignItems: 'flex-start', gap: 1, py: 1 }
           return (
             // A plain <li> wrapping the button: putting role="button" on the
             // <li> itself would strip its list semantics from the a11y tree.
             <ListItem key={`${row.event.uid}-${index}`} disablePadding>
               {/*
-               * Events at an unregistered camp used to render as a disabled
-               * row: greyed almost to nothing, with no reason given and no way
-               * to find out. Plenty of the good ones are at a camp that never
-               * filed a location, and the listing is still worth reading. The
-               * row stays at full contrast and says what it cannot do.
+               * Events at an unregistered camp used to render as a
+               * `ListItemButton` whose click handler did nothing — a control
+               * that advertised itself as actionable to a screen reader and a
+               * keyboard user while performing no action for either. Plenty
+               * of the good ones are at a camp that never filed a location,
+               * and the listing is still worth reading; it just is not
+               * something to tap, so it is no longer marked up as one.
                */}
-              <ListItemButton
-                onClick={() => host && onSelect(host)}
-                disableRipple={!host}
-                sx={{
-                  cursor: host ? 'pointer' : 'default',
-                  alignItems: 'flex-start',
-                  gap: 1,
-                  py: 1,
-                }}
-              >
-                <ListItemText
-                  primary={row.event.title}
-                  secondary={
-                    <>
-                      {/* "On now" is the single most useful fact in this list
-                          and it was buried mid-sentence in grey. */}
-                      {live && (
-                        <Box
-                          component="span"
-                          sx={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 0.35,
-                            mr: 0.75,
-                            color: 'primary.main',
-                            fontWeight: 700,
-                          }}
-                        >
-                          <ScheduleIcon sx={{ fontSize: 14 }} />
-                          {formatWhen(row, now)}
-                        </Box>
-                      )}
-                      {[
-                        host?.name ?? row.event.other_location,
-                        live ? undefined : formatWhen(row, now),
-                        row.travel && formatDistance(row.travel),
-                        host ? undefined : 'location not listed',
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </>
-                  }
-                  slotProps={{
-                    primary: { variant: 'body2', sx: { fontWeight: 600 } },
-                    secondary: { variant: 'caption' },
-                  }}
-                />
-                {row.event.event_type && (
-                  // `abbr` is the API's four-letter code — "prty", "othr",
-                  // "adlt". Nobody outside the dataset knows what those mean.
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    label={row.event.event_type.label}
-                    sx={{ flexShrink: 0, mt: 0.25, maxWidth: 120 }}
-                  />
-                )}
-              </ListItemButton>
+              {host ? (
+                <ListItemButton onClick={() => onSelect(host)} sx={{ cursor: 'pointer', ...rowSx }}>
+                  {content}
+                </ListItemButton>
+              ) : (
+                <Box sx={{ display: 'flex', width: '100%', px: 2, ...rowSx }}>{content}</Box>
+              )}
             </ListItem>
           )
         })}

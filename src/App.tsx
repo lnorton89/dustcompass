@@ -810,6 +810,7 @@ export default function App() {
             events={selected ? (eventsByHost.get(selected.uid) ?? []) : []}
             origin={origin ?? [0, 0]}
             originLabel={originLabel}
+            now={clock.now}
             isFavorite={selected ? favorites.has(selected.uid) : false}
             onToggleFavorite={toggleFavorite}
             onShare={(poi) => void share({ poi: poi.uid }, poi.name, !isCivic(poi))}

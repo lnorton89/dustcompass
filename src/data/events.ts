@@ -77,6 +77,34 @@ function toLive(event: EventItem, occurrence: Occurrence): LiveEvent {
 
 const byStart = (a: LiveEvent, b: LiveEvent) => a.start.getTime() - b.start.getTime()
 
+export interface RelevantOccurrence {
+  occurrence: Occurrence
+  state: 'running' | 'upcoming' | 'ended'
+}
+
+/**
+ * Which showing of a repeating event is worth showing right now: the one
+ * running, otherwise the next one coming up, otherwise (for an event whose
+ * week is entirely behind it) the one that ran most recently.
+ */
+export function relevantOccurrence(event: EventItem, now: Date): RelevantOccurrence | undefined {
+  let upcoming: RelevantOccurrence | undefined
+  let past: RelevantOccurrence | undefined
+  for (const occurrence of event.occurrence_set) {
+    const start = new Date(occurrence.start_time)
+    const end = new Date(occurrence.end_time)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue
+    if (start <= now && end > now) return { occurrence, state: 'running' }
+    if (start > now && (!upcoming || start < new Date(upcoming.occurrence.start_time))) {
+      upcoming = { occurrence, state: 'upcoming' }
+    }
+    if (end <= now && (!past || end > new Date(past.occurrence.end_time))) {
+      past = { occurrence, state: 'ended' }
+    }
+  }
+  return upcoming ?? past
+}
+
 export function formatWhen(live: LiveEvent, now: Date = new Date()): string {
   if (live.start <= now && live.end > now) {
     const left = Math.round((live.end.getTime() - now.getTime()) / 60000)
@@ -84,7 +112,12 @@ export function formatWhen(live: LiveEvent, now: Date = new Date()): string {
   }
   const mins = Math.round((live.start.getTime() - now.getTime()) / 60000)
   if (mins > 0 && mins < 180) return `in ${mins} min`
-  return live.start.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+  return live.start.toLocaleString(undefined, {
+    timeZone: PLAYA_TIME_ZONE,
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 export interface EventRange {

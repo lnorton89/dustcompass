@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   Box,
   Chip,
@@ -23,6 +23,7 @@ import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk'
 import DirectionsBikeIcon from '@mui/icons-material/DirectionsBike'
 import type { Position } from '../brc/geo'
 import { formatDistance, formatMinutes, travelBetween } from '../brc/travel'
+import { PLAYA_TIME_ZONE, relevantOccurrence } from '../data/events'
 import type { EventItem, Poi } from '../data/types'
 
 interface Props {
@@ -31,6 +32,8 @@ interface Props {
   /** Where to measure from — the user's GPS fix, or the Man as a fallback. */
   origin: Position
   originLabel: string
+  /** The playa schedule clock, so a repeating event shows its current showing. */
+  now: Date
   isFavorite: boolean
   onToggleFavorite: (uid: string) => void
   onShare: (poi: Poi) => void
@@ -59,6 +62,7 @@ export function DetailDrawer({
   events,
   origin,
   originLabel,
+  now,
   isFavorite,
   onToggleFavorite,
   onShare,
@@ -68,6 +72,12 @@ export function DetailDrawer({
   compact,
 }: Props) {
   const travel = poi ? travelBetween(origin, poi.position) : undefined
+  // Whichever showing is worth reading right now, not whichever the API
+  // listed first — a Sunday occurrence is not the useful one on Thursday.
+  const sortedEvents = useMemo(
+    () => [...events].sort((a, b) => occurrenceSortKey(a, now) - occurrenceSortKey(b, now)),
+    [events, now],
+  )
   const [imageState, setImageState] = useState<{ uid?: string; failed: boolean }>({
     failed: false,
   })
@@ -222,11 +232,11 @@ export function DetailDrawer({
             {events.length} event{events.length === 1 ? '' : 's'}
           </Typography>
           <List dense disablePadding>
-            {events.slice(0, 40).map((event) => (
+            {sortedEvents.slice(0, 40).map((event) => (
               <ListItem key={event.uid} disableGutters>
                 <ListItemText
                   primary={event.title}
-                  secondary={formatOccurrences(event)}
+                  secondary={formatOccurrences(event, now)}
                   slotProps={{ primary: { variant: 'body2' } }}
                 />
               </ListItem>
@@ -335,16 +345,30 @@ function missingDescription(kind: Poi['kind']): string {
   return 'No description published yet. Camps often add one closer to the event.'
 }
 
-function formatOccurrences(event: EventItem): string {
+function formatOccurrences(event: EventItem, now: Date): string {
   const type = event.event_type?.label
-  const first = event.occurrence_set[0]
-  if (!first) return type ?? ''
-  const start = new Date(first.start_time)
+  const relevant = relevantOccurrence(event, now)
+  if (!relevant) return type ?? ''
+  const start = new Date(relevant.occurrence.start_time)
   const when = start.toLocaleString(undefined, {
+    timeZone: PLAYA_TIME_ZONE,
     weekday: 'short',
     hour: 'numeric',
     minute: '2-digit',
   })
+  const suffix = relevant.state === 'ended' ? ' (ended)' : ''
   const more = event.occurrence_set.length > 1 ? ` +${event.occurrence_set.length - 1} more` : ''
-  return [type, when + more].filter(Boolean).join(' · ')
+  return [type, when + suffix + more].filter(Boolean).join(' · ')
+}
+
+/** Running first, then soonest upcoming, then most-recently-ended last. */
+function occurrenceSortKey(event: EventItem, now: Date): number {
+  const relevant = relevantOccurrence(event, now)
+  if (!relevant) return Infinity
+  const time = new Date(
+    relevant.state === 'ended' ? relevant.occurrence.end_time : relevant.occurrence.start_time,
+  ).getTime()
+  if (relevant.state === 'running') return time
+  if (relevant.state === 'upcoming') return 1e15 + time
+  return 2e15 - time
 }

@@ -143,7 +143,17 @@ export function SearchPanel({
       inputValue={query}
       onInputChange={(_, value) => setQuery(value)}
       onChange={(_, value) => {
-        if (!value || typeof value === 'string') return
+        if (!value) return
+        // freeSolo hands back the raw text when Enter is pressed with no
+        // suggestion highlighted — which is the common case for typing a
+        // full address and submitting it, rather than pointer-selecting the
+        // option the box generated for it. Geocode it directly rather than
+        // silently doing nothing.
+        if (typeof value === 'string') {
+          const result = geocode(value, layout)
+          if (result) onGo(result.position)
+          return
+        }
         if (value.unplaced) onOpenUnplaced(value.unplaced)
         else if (value.position) onGo(value.position, value.poi)
       }}

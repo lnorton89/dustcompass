@@ -13,8 +13,15 @@ someone else has half-written and publishes it under your commit message — tha
 has already happened here once, to an in-progress `scripts/make-playa.mjs`, and
 it went out to `master`.
 
-Before committing, run `git status --short` and account for **every** line. If
-something is there that you did not write, leave it alone.
+Before committing, run `git status --short` and account for **every** line, then
+read `git diff --cached` in full and confirm every hunk is yours. Grepping for
+the names you happen to know about is not enough — the second time this went
+wrong, the sweep was a component extraction whose keywords nobody had thought to
+search for. If something is there that you did not write, leave it alone.
+
+After staging a shared file, `git diff --cached HEAD~1 -- <file>` against the
+last commit that passed CI is the cheapest way to see exactly what you are
+adding.
 
 ### Committing when a shared file holds someone else's work too
 

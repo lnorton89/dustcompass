@@ -6,6 +6,7 @@
  * empty map. Better to refuse loudly at fetch time and say exactly which field
  * is missing.
  */
+import { EMBARGO_RELEASES } from '../../src/data/embargoDates.mjs'
 
 export const ENDPOINTS = ['art', 'camp', 'event']
 
@@ -172,15 +173,13 @@ export function releaseForYear(year) {
   return release
 }
 
-export const RELEASE_2026 = {
-  camp: new Date('2026-08-23T00:00:00-07:00'),
-  art: new Date('2026-08-30T00:01:00-07:00'),
+function releaseFor(dates) {
+  return { camp: new Date(dates.campRelease), art: new Date(dates.gatesOpen) }
 }
 
+export const RELEASE_2026 = releaseFor(EMBARGO_RELEASES['2026'])
+
 export const RELEASES = {
-  2025: {
-    camp: new Date('2025-08-17T00:00:00-07:00'),
-    art: new Date('2025-08-24T00:01:00-07:00'),
-  },
+  2025: releaseFor(EMBARGO_RELEASES['2025']),
   2026: RELEASE_2026,
 }

@@ -7,6 +7,8 @@
  *
  * https://innovate.burningman.org/terms-of-service-for-burning-man-apis-and-datasets/
  */
+import { EMBARGO_RELEASES } from './embargoDates.mjs'
+
 export interface EmbargoWindow {
   /** Gates open. Art locations are withheld until this moment. */
   gatesOpen: Date
@@ -14,16 +16,14 @@ export interface EmbargoWindow {
   campRelease: Date
 }
 
-/** Burning Man 2026: Gates open 12:01am Sunday 30 August (PDT, UTC-7). */
-export const BRC_2026: EmbargoWindow = {
-  campRelease: new Date('2026-08-23T00:00:00-07:00'),
-  gatesOpen: new Date('2026-08-30T00:01:00-07:00'),
+function windowFor(dates: { campRelease: string; gatesOpen: string }): EmbargoWindow {
+  return { campRelease: new Date(dates.campRelease), gatesOpen: new Date(dates.gatesOpen) }
 }
 
-export const BRC_2025: EmbargoWindow = {
-  campRelease: new Date('2025-08-17T00:00:00-07:00'),
-  gatesOpen: new Date('2025-08-24T00:01:00-07:00'),
-}
+/** Burning Man 2026: Gates open 12:01am Sunday 30 August (PDT, UTC-7). */
+export const BRC_2026: EmbargoWindow = windowFor(EMBARGO_RELEASES['2026'])
+
+export const BRC_2025: EmbargoWindow = windowFor(EMBARGO_RELEASES['2025'])
 
 export function embargoWindowForYear(year: string): EmbargoWindow {
   if (year === '2025') return BRC_2025

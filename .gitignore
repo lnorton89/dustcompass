@@ -11,6 +11,9 @@ offline-next.png
 # Rendered by `npm run og` on every build.
 /public/og-image.png
 
+# One share card per listing, rendered by `npm run share-cards`.
+/public/share
+
 /public/maplibre-worker.mjs
 /public/maplibre-gl-shared.mjs
 

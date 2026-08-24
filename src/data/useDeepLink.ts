@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CityLayout } from '../brc/layout'
 import { geocode, reverseGeocode } from '../brc/geocode'
 import type { Position } from '../brc/geo'
+import { BASE_PATH } from '../config'
 
 export interface DeepLink {
   /** A selected listing, by its Burning Man uid. */
@@ -36,6 +37,26 @@ export function deepLinkUrl(
   url.search = ''
   if (link.poi) url.searchParams.set('poi', link.poi)
   if (link.at) url.searchParams.set('at', link.at)
+  return url.toString()
+}
+
+/**
+ * The URL to hand to someone else.
+ *
+ * A listing gets its own page rather than a query parameter, because that page
+ * carries the listing's name, address and photo in its metadata — so the link
+ * unfurls as that camp instead of as the app's front door. It sends the reader
+ * straight on to the same map view a `?poi=` link would have opened.
+ */
+export function shareUrl(
+  link: DeepLink,
+  base = typeof window === 'undefined' ? 'https://lnorton89.github.io/dustcompass/' : window.location.href,
+): string {
+  if (!link.poi) return deepLinkUrl(link, base)
+  const url = new URL(base)
+  url.search = ''
+  url.hash = ''
+  url.pathname = `${BASE_PATH}/p/${encodeURIComponent(link.poi)}/`
   return url.toString()
 }
 

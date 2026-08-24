@@ -43,7 +43,7 @@ import { useFavorites } from './data/useFavorites'
 import { useGeolocation } from './data/useGeolocation'
 import { useSavedPlaces } from './data/useSavedPlaces'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
-import { addressFor, deepLinkUrl, resolveDeepLink, useDeepLink } from './data/useDeepLink'
+import { addressFor, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
 import { travelBetween } from './brc/travel'
 import { bearingToClock, bearingBetween } from './brc/geo'
 import { shareLink } from './ui/share'
@@ -250,7 +250,7 @@ export default function App() {
   )
 
   const share = useCallback(async (link: { poi?: string; at?: string }, title: string) => {
-    const result = await shareLink(deepLinkUrl(link), title)
+    const result = await shareLink(shareUrl(link), title)
     if (result === 'copied') setProbe('Link copied')
     else if (result === 'unavailable') setProbe('Could not copy the link')
   }, [])

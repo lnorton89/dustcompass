@@ -15,6 +15,9 @@ const NEVER_PRECACHE = new Set(['sw.js', 'og-image.png'])
 
 for (const file of files.sort()) {
   const pathname = relative(output, file).split(sep).join('/')
+  // Share cards and the pages that carry them exist for crawlers. There are
+  // hundreds of them and the app never shows one.
+  if (pathname.startsWith('share/') || pathname.startsWith('p/')) continue
   if (NEVER_PRECACHE.has(pathname) || pathname.endsWith('.map')) continue
   const bytes = await readFile(file)
   digest.update(pathname).update(bytes)
@@ -89,7 +92,11 @@ self.addEventListener('install', (event) => {
       await notify({ type: 'CACHE_FAILED', completed, total: PRECACHE.length, url: failed.url });
       throw new Error('Could not cache ' + failed.url + ': ' + failed.reason);
     }
-    await self.skipWaiting();
+    // Deliberately no skipWaiting here. Taking over the moment a new version
+    // finishes installing means the open tab gets reloaded underneath whoever
+    // is reading it — the page renders, then renders again a second later.
+    // The new worker waits, the status chip says "Update ready", and the reload
+    // happens when the user asks for it.
   })());
 });
 

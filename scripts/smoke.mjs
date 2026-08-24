@@ -596,6 +596,57 @@ assert(
   'saved-spot destination is named on the map',
 )
 
+// #14: the orientation control has to track the map's actual bearing, not
+// just whichever toggle last requested a rotation — a gesture or MapLibre's
+// own compass control can change it independently of that toggle. Driven at
+// a phone-width viewport, since the visible "12:00 up"/"North up" label only
+// renders in the compact bottom bar; the desktop toolbar shows the same
+// state as a hover tooltip, which isn't practical to assert here.
+{
+  const mobile = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  const orient = await mobile.newPage()
+  await orient.addInitScript(() => {
+    try {
+      localStorage.setItem('dust-compass:first-run:1', 'seen')
+    } catch {
+      /* private-mode storage throws; the dialog is harmless if it appears */
+    }
+  })
+  await orient.goto(url, { waitUntil: 'load' })
+  await orient.waitForFunction(() => window.__map, null, { timeout: 30000 })
+  await orient.waitForTimeout(3000)
+
+  const orientButton = orient.getByRole('button', { name: 'Orient the map so 12:00 points up' })
+  const orientLabel = () => orientButton.innerText()
+
+  assert((await orientLabel()).includes('12:00 up'), 'orientation control starts city-up on a fresh load')
+
+  // Rotate the map directly through MapLibre, bypassing every React state
+  // setter — this is exactly what the built-in compass control and a
+  // two-finger rotate gesture also do.
+  await orient.evaluate(() => window.__map.setBearing(0))
+  await orient.waitForTimeout(300)
+  assert(
+    (await orientLabel()).includes('North up'),
+    'rotating to north outside React updates the control to North up',
+  )
+
+  await orient.evaluate(() => window.__map.setBearing(200))
+  await orient.waitForTimeout(300)
+  assert(
+    !(await orientLabel()).includes('12:00 up') && !(await orientLabel()).includes('North up'),
+    'a manual rotation to neither canonical bearing leaves neither orientation selected',
+  )
+
+  await orientButton.click()
+  await orient.waitForTimeout(700)
+  assert(
+    (await orientLabel()).includes('12:00 up'),
+    'tapping the orientation control still snaps to city-up from a free rotation',
+  )
+
+  await mobile.close()
+}
 
 // That URL, opened cold, must restore the same place.
 const shared = await context.newPage()

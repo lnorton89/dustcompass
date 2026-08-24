@@ -40,6 +40,14 @@ interface Props {
   showToilets: boolean
   /** True to rotate the map so 12:00 points up, which is how the city reads. */
   cityUp: boolean
+  /**
+   * Fires with the map's actual current bearing whenever it changes, for any
+   * reason — a gesture, the built-in compass control, or a programmatic
+   * `easeTo`. The caller derives its own orientation display from this
+   * rather than from whichever toggle last requested a rotation, since only
+   * this reflects what the map is actually showing.
+   */
+  onBearingChange?: (bearing: number) => void
   onSelect: (poi: Poi | undefined) => void
   onProbe: (address: string, position: Position) => void
   /** Fires when the map's locate control is pressed. */
@@ -116,6 +124,7 @@ export function MapView({
   showServices,
   showToilets,
   cityUp,
+  onBearingChange,
   onSelect,
   onProbe,
   onLocate,
@@ -257,9 +266,15 @@ export function MapView({
       onMouseMove={(event) => setCursor(event.features?.length ? 'pointer' : undefined)}
       onMouseLeave={() => setCursor(undefined)}
       cursor={cursor}
+      onRotate={(event) => onBearingChange?.(event.viewState.bearing)}
       onLoad={(event) => {
         const map = event.target
         const bearing = cityUp ? data.layout.bearing : 0
+        // `jumpTo` below only fires MapLibre's own 'rotate' event when the
+        // bearing actually changes from whatever `initialViewState` set —
+        // report it directly too, so the caller's orientation state is
+        // correct from the first frame even when it doesn't.
+        onBearingChange?.(bearing)
 
         if (initialTarget) {
           map.jumpTo({ center: initialTarget, zoom: 16.5, bearing })

@@ -50,7 +50,7 @@ import { useSavedPlaces } from './data/useSavedPlaces'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
 import { travelBetween } from './brc/travel'
-import { bearingToClock, bearingBetween } from './brc/geo'
+import { bearingToClock, bearingBetween, bearingsMatch } from './brc/geo'
 import { shareLink } from './ui/share'
 import type { Poi, PoiKind, UnplacedListing } from './data/types'
 import { reverseGeocode } from './brc/geocode'
@@ -187,11 +187,35 @@ export default function App() {
   // filter set get the same treatment for the same reason: nothing about
   // them should reset just because the tab did.
   const [mode, setMode] = useState<ThemeMode>(() => readStored(MODE_KEY, isThemeMode, 'dark'))
-  const [cityUp, setCityUp] = useState(() => readStored(CITY_UP_KEY, isBoolean, true))
+  // Only the map's *initial* bearing on first load — after that, orientation
+  // display is derived from the map's actual reported bearing below, since a
+  // gesture or the built-in compass control can change it independently of
+  // whatever this last remembered choice was.
+  const [initialCityUp] = useState(() => readStored(CITY_UP_KEY, isBoolean, true))
   const [active, setActive] = useState<Set<Filter>>(() => readStoredFilters())
   useEffect(() => writeStored(MODE_KEY, mode), [mode])
-  useEffect(() => writeStored(CITY_UP_KEY, cityUp), [cityUp])
   useEffect(() => writeStored(ACTIVE_FILTERS_KEY, [...active]), [active])
+  /**
+   * The map's own current bearing, reported by MapView on every rotate —
+   * gesture, MapLibre's built-in compass control, or our own `easeTo` calls
+   * all go through the same event. `cityUp`/`northUp` below are derived from
+   * this rather than tracked as their own toggle state, so the control can
+   * never claim an orientation the map has since rotated away from.
+   */
+  const [mapBearing, setMapBearing] = useState<number>()
+  const cityUp = mapBearing !== undefined && data !== undefined && bearingsMatch(mapBearing, data.layout.bearing)
+  const northUp = mapBearing !== undefined && bearingsMatch(mapBearing, 0)
+  // Only remember an explicit canonical choice — a mid-rotation gesture that
+  // passes through neither orientation on its way elsewhere shouldn't
+  // overwrite what the next cold load should start facing.
+  useEffect(() => {
+    if (cityUp) writeStored(CITY_UP_KEY, true)
+    else if (northUp) writeStored(CITY_UP_KEY, false)
+  }, [cityUp, northUp])
+  // Neither canonical label is true mid-gesture or after a manual rotation
+  // that lands somewhere else — claiming one anyway is exactly the bug this
+  // exists to fix.
+  const orientationLabel = cityUp ? '12:00 up' : northUp ? 'North up' : 'Free rotation'
   // The static <meta name="theme-color"> in layout.tsx only covers first
   // paint; browser/PWA chrome should follow the live theme afterward, the
   // same as everything else on screen does.
@@ -595,12 +619,13 @@ export default function App() {
   }, [])
 
   const toggleCityUp = useCallback(() => {
-    setCityUp((current) => {
-      const next = !current
-      mapRef.current?.easeTo({ bearing: next ? (data?.layout.bearing ?? 45) : 0, duration: 600 })
-      return next
-    })
-  }, [data])
+    // Toggling out of city-up (however the map actually got there — a tap, a
+    // gesture, or the compass control) always goes to north-up; anything
+    // else, including free rotation, goes to city-up. The map's own 'rotate'
+    // event reports the result back through onBearingChange.
+    const next = !cityUp
+    mapRef.current?.easeTo({ bearing: next ? (data?.layout.bearing ?? 45) : 0, duration: 600 })
+  }, [cityUp, data])
 
   const kinds = useMemo(() => {
     const set = new Set<PoiKind>()
@@ -753,7 +778,7 @@ export default function App() {
                     <ControlButton
                       icon={<ExploreIcon />}
                       title="Orient the map so 12:00 points up"
-                      tooltip={cityUp ? '12:00 is up' : 'North is up'}
+                      tooltip={orientationLabel}
                       selected={cityUp}
                       pressed={cityUp}
                       onClick={toggleCityUp}
@@ -838,7 +863,8 @@ export default function App() {
                 visible={kinds}
                 showServices={active.has('services')}
                 showToilets={active.has('toilets')}
-                cityUp={cityUp}
+                cityUp={initialCityUp}
+                onBearingChange={setMapBearing}
                 mapRef={mapRef}
                 onSelect={(poi) => {
                   if (poi) flyTo(poi.position, poi)
@@ -1091,7 +1117,7 @@ export default function App() {
               },
               {
                 key: 'orient',
-                label: cityUp ? '12:00 up' : 'North up',
+                label: orientationLabel,
                 title: 'Orient the map so 12:00 points up',
                 icon: <ExploreIcon />,
                 selected: cityUp,

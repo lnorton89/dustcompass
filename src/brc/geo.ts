@@ -53,6 +53,15 @@ export function bearingBetween(from: Position, to: Position): number {
   return (deg(Math.atan2(y, x)) + 360) % 360
 }
 
+/**
+ * Whether two compass bearings are close enough to call the same direction,
+ * accounting for wraparound at 0/360 — e.g. 359° and 1° are 2° apart, not 358°.
+ */
+export function bearingsMatch(a: number, b: number, toleranceDeg = 1.5): boolean {
+  const diff = Math.abs(((a - b + 180) % 360 + 360) % 360 - 180)
+  return diff <= toleranceDeg
+}
+
 export function distanceBetween(from: Position, to: Position): number {
   const scale = localScale((from[1] + to[1]) / 2)
   return Math.hypot(rad(to[0] - from[0]) * scale.east, rad(to[1] - from[1]) * scale.north)

@@ -102,6 +102,24 @@ Use the pull-request template when opening a PR. Pushing to the default branch
 also triggers the deployment workflow, which fetches fresh current-year data
 and re-runs release checks before publishing GitHub Pages.
 
+## Dependency updates
+
+Dependabot checks npm packages every Monday at 06:00 Pacific and GitHub Actions
+at 06:15 Pacific. Minor and patch npm updates are grouped by production or
+development scope, and Actions updates are grouped into one pull request, to
+keep routine maintenance reviewable without producing a pull request per
+package. Major npm upgrades remain separate because they usually need focused
+migration and browser testing.
+
+GitHub vulnerability alerts and automated Dependabot security fixes are enabled
+for the repository. Security updates may arrive outside the weekly version-update
+schedule. Treat generated pull requests like any other code change: inspect the
+release notes and lockfile, require CI to pass, and run the relevant production
+browser suites when an update can affect rendering, offline behavior, build
+output, or runtime behavior. The policy is defined in
+`.github/dependabot.yml`; change that file when the cadence or grouping needs to
+change.
+
 ## Issues
 
 Search existing issues first, then use the bug or feature template. A good bug

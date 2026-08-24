@@ -69,7 +69,7 @@ export function DetailDrawer({
         paper: {
           sx: compact
             ? {
-                maxHeight: 'min(82dvh, calc(100dvh - env(safe-area-inset-top) - 16px))',
+                maxHeight: 'min(82dvh, calc(100dvh - var(--safe-top) - 16px))',
                 borderTopLeftRadius: 16,
                 borderTopRightRadius: 16,
                 overflowY: 'auto',
@@ -79,7 +79,15 @@ export function DetailDrawer({
       }}
     >
       {poi && (
-        <Box sx={{ p: 2 }}>
+        <Box
+          sx={{
+            p: 2,
+            // Past the paper's own safe-area inset. What ends this sheet is
+            // usually a photo or a list of events, and either one run hard
+            // against the bottom reads as cut off rather than finished.
+            pb: 3,
+          }}
+        >
           <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', justifyContent: 'space-between' }}>
             <Box>
               <Typography variant="h6">{poi.name}</Typography>
@@ -137,7 +145,7 @@ export function DetailDrawer({
               </Stack>
             </Stack>
           )}
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
             from {originLabel}
           </Typography>
 

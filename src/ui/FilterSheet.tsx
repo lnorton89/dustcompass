@@ -65,7 +65,25 @@ export function FilterSheet<T extends string>({
       anchor="bottom"
       open={open}
       onClose={onClose}
-      slotProps={{ paper: { sx: { maxHeight: '90dvh', borderTopLeftRadius: 16, borderTopRightRadius: 16, p: 2 } } }}
+      slotProps={{
+        paper: {
+          sx: {
+            maxHeight: '90dvh',
+            borderTopLeftRadius: 16,
+            borderTopRightRadius: 16,
+            // Five chips and a switch stranded in the corner of a 1440px band
+            // is not a sheet, it is a stripe. On a wide screen it keeps to a
+            // readable column in the middle.
+            maxWidth: { sm: 560 },
+            mx: 'auto',
+            p: 2,
+            // Padding set here beats the theme's inset on the same element, so
+            // this one carries both — 16px of its own, plus whatever the
+            // screen's bottom furniture needs.
+            pb: 'calc(16px + var(--safe-bottom))',
+          },
+        },
+      }}
     >
       <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
         <Typography variant="subtitle2">Show on the map</Typography>

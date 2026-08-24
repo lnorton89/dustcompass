@@ -103,7 +103,14 @@ export function EventsPanel({
       slotProps={{
         paper: {
           sx: compact
-            ? { height: '70dvh', borderTopLeftRadius: 16, borderTopRightRadius: 16 }
+            ? {
+                // Tall enough to read a schedule in, but bounded by what is
+                // in it: a fixed 70dvh left an empty window sitting behind
+                // two-thirds of a screen of nothing.
+                maxHeight: 'min(78dvh, calc(100dvh - var(--safe-top) - 16px))',
+                borderTopLeftRadius: 16,
+                borderTopRightRadius: 16,
+              }
             : { width: 380 },
         },
       }}
@@ -159,7 +166,9 @@ export function EventsPanel({
         </Typography>
       </Box>
 
-      <List dense sx={{ overflowY: 'auto' }}>
+      {/* The rows scroll; the header above them stays. `pb` keeps the last
+          event clear of the screen edge instead of flush against it. */}
+      <List dense sx={{ overflowY: 'auto', flex: '0 1 auto', pb: 1.5 }}>
         {rows.map((row, index) => {
           const host = row.host
           return (
@@ -187,7 +196,7 @@ export function EventsPanel({
         })}
       </List>
       {rows.length === 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 3 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ px: 2, pt: 1, pb: 3 }}>
           Nothing scheduled in this window.
         </Typography>
       )}

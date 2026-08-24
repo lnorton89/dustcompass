@@ -32,9 +32,11 @@ export function NavBar({ name, address, travel, heading, located, status, accura
       elevation={8}
       sx={{
         position: 'absolute',
-        left: 8,
-        right: 8,
-        bottom: 8,
+        // It sits over the map at the bottom of the screen, which on a phone
+        // is where the home indicator is and where the corners curve away.
+        left: 'calc(8px + var(--safe-left))',
+        right: 'calc(8px + var(--safe-right))',
+        bottom: 'calc(8px + var(--safe-bottom))',
         p: { xs: 1, sm: 1.5 },
         display: 'flex',
         alignItems: 'center',

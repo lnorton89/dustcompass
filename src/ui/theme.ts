@@ -37,6 +37,62 @@ export function playaTheme(mode: ThemeMode): Theme {
     },
     components: {
       MuiPaper: { styleOverrides: { root: { backgroundImage: 'none' } } },
+      /*
+       * The map is allowed the whole screen — under the notch, under the home
+       * indicator, into the rounded corners. Nothing drawn on top of it is.
+       *
+       * Set here rather than on each surface: there are four drawers, opened
+       * from three different places, and running under the home indicator is
+       * not a property of what happens to be inside one. `--safe-*` resolve to
+       * 0 wherever there is nothing to avoid, so a desktop sees no change.
+       */
+      // The bar reaches the top of the screen, so it is padded rather than the
+      // toolbar inside it — the toolbar's own minHeight sets the bar's height,
+      // and padding there would shrink the row instead of moving it down.
+      MuiAppBar: {
+        styleOverrides: {
+          root: {
+            paddingTop: 'var(--safe-top)',
+            paddingLeft: 'var(--safe-left)',
+            paddingRight: 'var(--safe-right)',
+          },
+        },
+      },
+      // Which edge it came in from decides which insets it has to clear: a
+      // sheet from the bottom meets the home indicator, a panel from the side
+      // runs the full height and meets both the notch and the indicator.
+      MuiDrawer: {
+        styleOverrides: {
+          paper: ({ ownerState }) => ({
+            ...(ownerState.anchor === 'bottom' && {
+              // Full width, so a sheet meets the side cutouts in landscape as
+              // well as the indicator along the bottom.
+              paddingBottom: 'var(--safe-bottom)',
+              paddingLeft: 'var(--safe-left)',
+              paddingRight: 'var(--safe-right)',
+            }),
+            ...(ownerState.anchor === 'left' && {
+              paddingTop: 'var(--safe-top)',
+              paddingBottom: 'var(--safe-bottom)',
+              paddingLeft: 'var(--safe-left)',
+            }),
+            ...(ownerState.anchor === 'right' && {
+              paddingTop: 'var(--safe-top)',
+              paddingBottom: 'var(--safe-bottom)',
+              paddingRight: 'var(--safe-right)',
+            }),
+          }),
+        },
+      },
+      MuiSnackbar: {
+        styleOverrides: {
+          anchorOriginBottomCenter: {
+            bottom: 'calc(24px + var(--safe-bottom))',
+            left: 'calc(8px + var(--safe-left))',
+            right: 'calc(8px + var(--safe-right))',
+          },
+        },
+      },
       // MUI inverts a snackbar's background on purpose, which puts a near-white
       // slab in the middle of a dark interface. Two things break on it: the
       // accent colour its own action buttons use fails contrast at 1.9:1, and

@@ -539,10 +539,18 @@ export default function App() {
                 data-testid="api-disclaimer"
                 sx={{
                   position: 'absolute',
-                  left: 8,
-                  bottom: { xs: heading ? 172 : 72, sm: heading ? 112 : 34 },
+                  // It shares the bottom-left corner with the scale bar and,
+                  // on a phone, with whatever the screen keeps down there.
+                  left: 'calc(8px + var(--safe-left))',
+                  bottom: {
+                    xs: `calc(${heading ? 172 : 72}px + var(--safe-bottom))`,
+                    sm: `calc(${heading ? 112 : 34}px + var(--safe-bottom))`,
+                  },
                   zIndex: 2,
-                  maxWidth: { xs: 'calc(100% - 88px)', sm: 430 },
+                  maxWidth: {
+                    xs: 'calc(100% - 88px - var(--safe-left) - var(--safe-right))',
+                    sm: 430,
+                  },
                   px: 1,
                   py: 0.5,
                   bgcolor: 'rgba(18,16,14,.9)',

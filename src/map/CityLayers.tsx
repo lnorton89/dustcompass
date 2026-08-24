@@ -198,21 +198,27 @@ export function CityLayers({ city, campOutlines, palette, labelScale, baseRoadWi
 // actually reaches the compiled expression (#51), rather than exercising it
 // through a full MapLibre render.
 export function roadWidth(multiplier: number, baseRoadWidth: number) {
-  const ramp = [
-    'interpolate',
-    ['exponential', 2],
-    ['zoom'],
-    12,
-    0.7 * multiplier,
-    16,
-    3 * multiplier,
-    19,
-    22 * multiplier,
-  ]
   // Coalesce guards a feature that somehow carries no width (city.ts always
   // sets one, but an expression evaluated by MapLibre itself has no type
   // system to lean on) — falling back to the baseline gives a 1:1 ratio,
   // the same width the ramp alone used to draw everything at.
   const ratio = ['/', ['coalesce', ['get', 'width'], baseRoadWidth], baseRoadWidth]
-  return ['*', ramp, ratio] as unknown as number
+  // The style spec only allows a "zoom" expression as the direct input to a
+  // top-level "step"/"interpolate" — nesting the whole ramp inside a "*"
+  // (as an earlier version of this did) is an invalid paint expression and
+  // MapLibre drops the layer entirely rather than partially applying it, so
+  // every street on the map silently stopped rendering. The ratio has to be
+  // multiplied into each stop's own output instead of around the ramp.
+  const stop = (value: number) => ['*', value * multiplier, ratio]
+  return [
+    'interpolate',
+    ['exponential', 2],
+    ['zoom'],
+    12,
+    stop(0.7),
+    16,
+    stop(3),
+    19,
+    stop(22),
+  ] as unknown as number
 }

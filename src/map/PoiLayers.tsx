@@ -7,6 +7,12 @@ import { labelRamp, labelSize, type PlayaPalette } from './style'
 interface Props {
   pois: Poi[]
   visible: Set<PoiKind>
+  /**
+   * Everything sharing each point, computed once by the map and used for both
+   * jobs — the count drawn on a dot and the list a tap opens. Passed in rather
+   * than recomputed here, so the number on a dot is a promise the list keeps.
+   */
+  stacks: Map<string, Poi[]>
   palette: PlayaPalette
   /** How much bigger the reader has asked the map's labels to be drawn. */
   labelScale: number
@@ -77,22 +83,17 @@ export function clusterColor(palette: PlayaPalette) {
  * MapLibre's own GeoJSON clustering handles on a phone — deck.gl only starts to
  * earn its weight an order of magnitude above this.
  */
-export function PoiLayers({ pois, visible, palette, labelScale, focusPosition }: Props) {
+export function PoiLayers({ pois, visible, stacks, palette, labelScale, focusPosition }: Props) {
   const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(() => {
-    const shown = pois.filter((poi) => visible.has(poi.kind))
     /*
      * A playa address names an intersection, not a plot, and until the survey
      * publishes coordinates every listing is placed from its address — so most
      * of the city arrives as stacks. Three quarters of the camps share a point
-     * with at least one other, the deepest nine deep. Drawn as plain dots those
-     * stacks are a lie of omission: eight of those nine camps cannot be tapped,
+     * with at least one other, the deepest six deep. Drawn as plain dots those
+     * stacks are a lie of omission: five of those six camps cannot be tapped,
      * and nothing on the map admits they are there.
      */
-    const depth = new Map<string, number>()
-    for (const poi of shown) {
-      const key = stackKey(poi.position)
-      depth.set(key, (depth.get(key) ?? 0) + 1)
-    }
+    const shown = pois.filter((poi) => visible.has(poi.kind))
     return {
       type: 'FeatureCollection',
       features: shown.map((poi) => ({
@@ -103,7 +104,7 @@ export function PoiLayers({ pois, visible, palette, labelScale, focusPosition }:
           kind: poi.kind,
           name: poi.name,
           address: poi.address ?? '',
-          stack: depth.get(stackKey(poi.position)) ?? 1,
+          stack: stacks.get(stackKey(poi.position))?.length ?? 1,
           focusOverlap: Boolean(
             focusPosition &&
               Math.abs(poi.position[0] - focusPosition[0]) < 1e-7 &&
@@ -113,7 +114,7 @@ export function PoiLayers({ pois, visible, palette, labelScale, focusPosition }:
         geometry: { type: 'Point', coordinates: poi.position },
       })),
     }
-  }, [focusPosition, pois, visible])
+  }, [focusPosition, pois, stacks, visible])
 
   const colorByKind = ['match', ['get', 'kind'], 'art', palette.art, palette.camp] as const
 

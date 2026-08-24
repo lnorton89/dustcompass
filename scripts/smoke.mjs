@@ -443,11 +443,11 @@ if (contested) {
   const listed = await sheet.locator('.MuiListItemButton-root').count()
   assert(
     listed === contested.stack,
-    `a shared pin offers every listing on it (dot says ${contested.stack}, list holds ${listed})`,
+    `a shared pin offers every place on it (dot says ${contested.stack}, list holds ${listed})`,
   )
   assert(
-    new RegExp(`${contested.stack} listings share this address`).test(said),
-    'a shared pin says how many listings are on it',
+    new RegExp(`${contested.stack} places share this address`).test(said),
+    'a shared pin says how many places are on it',
   )
   const wanted = (
     await sheet.locator('.MuiListItemButton-root').nth(1).innerText()

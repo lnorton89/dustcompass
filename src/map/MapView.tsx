@@ -196,21 +196,43 @@ export function MapView({
   }, [renderStatus, applyRenderEvent])
 
   /**
-   * Everything sharing each point, by the same key the dots are drawn by — and
-   * over the same listings, so the list a tap opens holds exactly what the map
-   * is showing. Counting hidden kinds here offered the reader a camp they had
-   * just filtered out, under a dot with no count on it.
+   * Everything sharing each point, over exactly what the map is drawing.
+   *
+   * One source of truth for both jobs: the dots read their counts from this,
+   * and a tap reads its list from it, so the number on a dot is a promise the
+   * list keeps. Computing it twice let the two drift — a dot with no count on
+   * it opened a list of two, because one side counted a filtered-out listing.
+   *
+   * Civic places belong in it too. A camp addressed "3:00 Portal" geocodes to
+   * the portal's own surveyed point, exactly, so no rule about which is nearer
+   * the thumb can separate them — SonicBoom Saloon could not be opened at all,
+   * because the portal it shares a pixel with always won.
    */
   const stacks = useMemo(() => {
+    const drawn = (poi: Poi) => {
+      if (poi.kind === 'landmark') return true
+      if (poi.kind === 'service') return poi.category === 'toilet' ? showToilets : showServices
+      return visible.has(poi.kind)
+    }
     const out = new globalThis.Map<string, Poi[]>()
-    for (const poi of data.pois.filter((candidate) => visible.has(candidate.kind))) {
+    for (const poi of data.pois.filter(drawn)) {
       const key = stackKey(poi.position)
       const found = out.get(key)
       if (found) found.push(poi)
       else out.set(key, [poi])
     }
     return out
-  }, [data.pois, visible])
+  }, [data.pois, showServices, showToilets, visible])
+
+  /** Of everything at this point, the list — or nothing when it stands alone. */
+  const sharedWith = useCallback(
+    (poi: Poi | undefined) => {
+      if (!poi) return undefined
+      const sharing = stacks.get(stackKey(poi.position))
+      return sharing && sharing.length > 1 ? sharing : undefined
+    },
+    [stacks],
+  )
 
   // Frame the whole city rather than guessing a zoom. A fixed zoom that suits a
   // desktop window crops the city badly on a tall phone screen.
@@ -285,16 +307,26 @@ export function MapView({
         // hand back used to be the only one reachable from the map — the
         // others were invisible, with no way to admit they existed. Hand over
         // the whole point instead and let the reader say which one they meant.
-        const sharing = poi ? (stacks.get(stackKey(poi.position)) ?? [poi]) : []
-        if (sharing.length > 1) {
+        const sharing = sharedWith(poi)
+        if (sharing) {
           onSelectStack(sharing)
           return
         }
         onSelect(poi)
         return
       }
-      if (picked && picked.feature.properties?.uid) {
-        onSelect(poiIndex.get(String(picked.feature.properties.uid)))
+      if (picked?.groupId === 'civic' && picked.feature.properties?.uid) {
+        const poi = poiIndex.get(String(picked.feature.properties.uid))
+        // A camp addressed "3:00 Portal" geocodes to the portal's own
+        // surveyed point, exactly — so a civic hit can share its pixel with a
+        // listing too, and used to always win outright with no way for the
+        // reader to reach whatever it was standing on.
+        const sharing = sharedWith(poi)
+        if (sharing) {
+          onSelectStack(sharing)
+          return
+        }
+        onSelect(poi)
         return
       }
 
@@ -318,8 +350,8 @@ export function MapView({
       const fallback = event.features?.find((feature) => feature.properties?.uid)
       if (fallback?.properties?.uid) {
         const poi = poiIndex.get(String(fallback.properties.uid))
-        const sharing = poi ? (stacks.get(stackKey(poi.position)) ?? [poi]) : []
-        if (sharing.length > 1) {
+        const sharing = sharedWith(poi)
+        if (sharing) {
           onSelectStack(sharing)
           return
         }
@@ -332,7 +364,7 @@ export function MapView({
       onProbe(reverseGeocode(position, data.layout).label, position)
       onSelect(undefined)
     },
-    [data.layout, onProbe, onSelect, onSelectPlace, onSelectStack, poiIndex, stacks],
+    [data.layout, onProbe, onSelect, onSelectPlace, onSelectStack, poiIndex, sharedWith],
   )
 
   return (
@@ -494,6 +526,7 @@ export function MapView({
       <PoiLayers
         pois={data.pois}
         visible={visible}
+        stacks={stacks}
         palette={palette}
         labelScale={labelScale}
         focusPosition={destination?.position ?? selected?.position}

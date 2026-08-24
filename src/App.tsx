@@ -8,6 +8,8 @@ import {
   Button,
   CircularProgress,
   CssBaseline,
+  IconButton,
+  Paper,
   Snackbar,
   Stack,
   ThemeProvider,
@@ -18,6 +20,8 @@ import {
 import { useMediaQuery } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
 import InputAdornment from '@mui/material/InputAdornment'
+import CloseIcon from '@mui/icons-material/Close'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import TuneIcon from '@mui/icons-material/Tune'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import NightlightIcon from '@mui/icons-material/Nightlight'
@@ -56,6 +60,9 @@ import { BRAND } from './brand'
 import { BrandMark } from './ui/BrandMark'
 import { PwaStatus } from './ui/PwaStatus'
 import { ControlButton, ControlDivider, ControlGroup } from './ui/ControlGroup'
+import { BottomBar } from './ui/BottomBar'
+import { FirstRun } from './ui/FirstRun'
+import { haptic } from './ui/haptics'
 
 type Filter = PoiKind | 'toilets' | 'services' | 'favorites'
 
@@ -145,11 +152,18 @@ export default function App() {
   const palette = useMemo(() => paletteFor(mode), [mode])
   // Phones are the real target here; the desktop layout is the special case.
   const compact = useMediaQuery(theme.breakpoints.down('md'))
-  // The inline filter chips are a convenience, and search is not. Below a wide
-  // desktop the two together overflow the bar: everything else in it refuses to
-  // shrink, so the search box was the only thing left to squeeze, and it
-  // collapsed to nothing. The chips step aside; the filter sheet still has them.
-  const roomForFilterChips = useMediaQuery(theme.breakpoints.up('lg'))
+  /*
+   * The filter keys are in the bar from `md` up; this is only about whether
+   * they can afford their names. Written out as measurements, because that is
+   * what decided it — search width across the breakpoints, with the labels on
+   * at `lg`: 385, 420, 363, 480. The dip at 1280 is the five names arriving and
+   * taking 240px out of the one control that always needs width. At `xl` they
+   * arrive somewhere there is genuinely room: 385, 420, 480, 480, 560.
+   *
+   * Below that the keys keep their icons, their tooltips, and the accent colour
+   * that ties each to what it draws on the map.
+   */
+  const roomForFilterChips = useMediaQuery(theme.breakpoints.up('xl'))
   const eventsByHost = useEventsByHost(data)
   const { initial: deepLink, publish } = useDeepLink()
   const [pin, setPin] = useState<{ position: Position; address: string }>()
@@ -165,6 +179,60 @@ export default function App() {
     const id = setInterval(() => setRealNow(new Date()), 60_000)
     return () => clearInterval(id)
   }, [])
+
+
+  /**
+   * The desktop detail panel is a column of the layout, so opening it takes
+   * width away from the map. MapLibre sizes its canvas once and does not watch
+   * for that, so it has to be told — otherwise the city stays drawn at the old
+   * width and everything on it is fractionally in the wrong place.
+   */
+  useEffect(() => {
+    if (compact) return
+    const id = requestAnimationFrame(() => mapRef.current?.resize())
+    return () => cancelAnimationFrame(id)
+  }, [compact, selected])
+
+  /**
+   * Keyboard shortcuts, for the half of the audience planning their week at a
+   * desk rather than finding a bathroom at 3am. Deliberately not while typing:
+   * "f" is a letter before it is a shortcut.
+   */
+  const searchInput = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target as HTMLElement | null
+      const typing =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable === true
+
+      if (event.key === 'Escape') {
+        // Whatever is open, innermost first, so one key walks back out.
+        if (saving) return
+        if (eventsOpen) setEventsOpen(false)
+        else if (filtersOpen) setFiltersOpen(false)
+        else if (selected) setSelected(undefined)
+        else if (heading) {
+          setHeading(undefined)
+          location.stop()
+        } else if (typing) searchInput.current?.blur()
+        return
+      }
+      if (typing) return
+      if (event.key === '/') {
+        event.preventDefault()
+        searchInput.current?.focus()
+      } else if (event.key === 'e' || event.key === 'E') {
+        setEventsOpen((open) => !open)
+      } else if (event.key === 'f' || event.key === 'F') {
+        setFiltersOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [eventsOpen, filtersOpen, heading, location, saving, selected])
 
   /**
    * A shared link names either a listing or an address. Resolve it to a
@@ -247,18 +315,43 @@ export default function App() {
       clock: bearingToClock(data.layout, bearingBetween(origin, heading.position)),
     }
   }, [heading, origin, data])
+  /**
+   * Arrival, buzzed once. The whole point of giving the heading as a clock
+   * position is that you can act on it without looking at the screen, so the
+   * app has to be able to say "you are here" without being looked at either.
+   *
+   * Latched, so a GPS fix jittering across the threshold does not buzz over and
+   * over. No snackbar to go with it: the navigation strip is already showing the
+   * distance counting down, and it is the buzz that carries the news to someone
+   * whose phone is in a pocket.
+   */
+  const arrived = useRef(false)
+  useEffect(() => {
+    if (!navigation || arrived.current) return
+    if (navigation.travel.meters > 25) return
+    arrived.current = true
+    haptic('arrive')
+  }, [navigation])
 
 
+  /**
+   * How much of the map the detail sheet is about to cover. It was a flat 70%
+   * of the screen, and the sheet is nothing of the sort — it is as tall as its
+   * contents, which measured nearer a third. The map dutifully lifted the place
+   * you had just chosen into the top eighth of the screen and left a third of
+   * a screen of empty desert between it and the sheet.
+   *
+   * The sheet reports its own height as it opens; until the first one has, an
+   * estimate stands in. On desktop the panel is a column beside the map rather
+   * than a layer over it, so there is nothing to compensate for at all.
+   */
+  const detailHeight = useRef(0)
   const focusPadding = useCallback(() => {
     if (compact) {
-      return {
-        top: 24,
-        right: 24,
-        bottom: Math.round(window.innerHeight * 0.7) + 24,
-        left: 24,
-      }
+      const covered = detailHeight.current || Math.round(window.innerHeight * 0.38)
+      return { top: 24, right: 24, bottom: covered + 24, left: 24 }
     }
-    return { top: 32, right: 432, bottom: 32, left: 32 }
+    return { top: 32, right: 32, bottom: 32, left: 32 }
   }, [compact])
 
   const navigationPadding = useCallback(
@@ -272,6 +365,7 @@ export default function App() {
   const navigateTo = useCallback(
     (target: { name: string; position: Position; address?: string; positionSource?: 'gps' | 'address' }) => {
       setHeading({ ...target, approximate: target.positionSource === 'address' })
+      arrived.current = false
       setSelected(undefined)
       mapRef.current?.flyTo({
         center: target.position,
@@ -361,7 +455,10 @@ export default function App() {
             {!compact && (
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mr: 1 }}>
                 <BrandMark size={34} sx={{ flexShrink: 0 }} />
-                <Box>
+                {/* The name and tagline are worth 180px of a 1440px bar and are
+                    not worth it on a 900px one, where they were taking the room
+                    out of the search box. The mark alone still brands the bar. */}
+                <Box sx={{ display: { xs: 'none', lg: 'block' } }}>
                   <Typography variant="h6" sx={{ whiteSpace: 'nowrap', lineHeight: 1.05 }}>
                     {BRAND.name}
                   </Typography>
@@ -372,7 +469,17 @@ export default function App() {
               </Stack>
             )}
 
-            <Box sx={{ flex: '1 1 auto', minWidth: { xs: 0, sm: 220 }, maxWidth: { md: 480 } }}>
+            {/* On a phone this is now the only thing sharing the bar with the
+                brand mark and the status readout — the actions moved to the
+                bottom — so it gets the width instead of being squeezed to 79px
+                by four buttons that would not shrink. */}
+            <Box
+              sx={{
+                flex: '1 1 auto',
+                minWidth: { xs: 0, sm: 220 },
+                maxWidth: { md: 420, lg: 480, xl: 560 },
+              }}
+            >
               {data ? (
                 <SearchPanel
                   layout={data.layout}
@@ -384,6 +491,7 @@ export default function App() {
                     setSelected(undefined)
                     setUnplaced(listing)
                   }}
+                  inputRef={searchInput}
                   compact={compact}
                 />
               ) : (
@@ -391,6 +499,10 @@ export default function App() {
                 // against the right edge of an otherwise blank bar.
                 <TextField
                   fullWidth
+                  // Matches the real search field exactly, including the touch
+                  // floor it picks up from the theme. `medium` here made the
+                  // placeholder 56px against the live field's 44px, so the whole
+                  // toolbar jumped height the moment the data arrived.
                   size="small"
                   disabled
                   placeholder="Loading the playa…"
@@ -409,21 +521,32 @@ export default function App() {
 
             {/* Two groups rather than nine loose buttons: what is drawn on the
                 map, and how the map is drawn. The status readout stays outside
-                both, because it is something to read, not something to press. */}
+                both, because it is something to read, not something to press.
+
+                On a phone none of it is here at all — it is in the bottom bar,
+                inside the arc a thumb can actually reach, and the search box
+                gets the width the four of them were taking. */}
             <Stack
               direction="row"
               spacing={1.25}
               sx={{ alignItems: 'center', ml: 'auto', flexShrink: 0 }}
             >
               <PwaStatus compact={compact} />
-              <ControlGroup>
-                {!compact && roomForFilterChips && (
-                  <>
+              {!compact && (
+                <>
+                  <ControlGroup>
+                    {/* The filters appear from `md` up, and only put their names
+                        on from `lg`. They used to be all-or-nothing at `lg`,
+                        which made search *narrower* on a 1280 desktop than on a
+                        1024 laptop — five labelled keys arrived in one step and
+                        took the width out of the one control that always needs
+                        it. Dropping to icons in between lets the bar hand back
+                        a little at a time. */}
                     {FILTERS.map((filter) => (
                       <ControlButton
                         key={filter.key}
                         icon={filter.icon}
-                        label={filter.label}
+                        label={roomForFilterChips ? filter.label : undefined}
                         title={filter.label}
                         selected={active.has(filter.key)}
                         pressed={active.has(filter.key)}
@@ -432,56 +555,61 @@ export default function App() {
                       />
                     ))}
                     <ControlDivider />
-                  </>
-                )}
-                <ControlButton
-                  icon={<TuneIcon />}
-                  title="Filters and saved spots"
-                  onClick={() => setFiltersOpen(true)}
-                />
-              </ControlGroup>
-              <ControlGroup>
-                <ControlButton
-                  icon={<EventIcon />}
-                  title="Show events"
-                  tooltip="Events"
-                  selected={eventsOpen}
-                  pressed={eventsOpen}
-                  onClick={() => setEventsOpen((open) => !open)}
-                />
-                {!compact && (
-                  <ControlButton
-                    icon={<ExploreIcon />}
-                    title="Orient the map so 12:00 points up"
-                    tooltip={cityUp ? '12:00 is up' : 'North is up'}
-                    selected={cityUp}
-                    pressed={cityUp}
-                    onClick={toggleCityUp}
-                  />
-                )}
-                <ControlButton
-                  icon={
-                    mode === 'dark' ? (
-                      <DarkModeIcon />
-                    ) : mode === 'light' ? (
-                      <LightModeIcon />
-                    ) : (
-                      <NightlightIcon />
-                    )
-                  }
-                  title={THEME_LABEL[mode]}
-                  selected={mode === 'night'}
-                  onClick={() => setMode(NEXT_MODE[mode])}
-                />
-              </ControlGroup>
+                    <ControlButton
+                      icon={<TuneIcon />}
+                      title="Filters and saved spots"
+                      onClick={() => setFiltersOpen(true)}
+                    />
+                  </ControlGroup>
+                  <ControlGroup>
+                    <ControlButton
+                      icon={<EventIcon />}
+                      title="Show events"
+                      tooltip="Events"
+                      selected={eventsOpen}
+                      pressed={eventsOpen}
+                      onClick={() => setEventsOpen((open) => !open)}
+                    />
+                    <ControlButton
+                      icon={<ExploreIcon />}
+                      title="Orient the map so 12:00 points up"
+                      tooltip={cityUp ? '12:00 is up' : 'North is up'}
+                      selected={cityUp}
+                      pressed={cityUp}
+                      onClick={toggleCityUp}
+                    />
+                    <ControlButton
+                      icon={
+                        mode === 'dark' ? (
+                          <DarkModeIcon />
+                        ) : mode === 'light' ? (
+                          <LightModeIcon />
+                        ) : (
+                          <NightlightIcon />
+                        )
+                      }
+                      title={THEME_LABEL[mode]}
+                      selected={mode === 'night'}
+                      onClick={() => setMode(NEXT_MODE[mode])}
+                    />
+                  </ControlGroup>
+                </>
+              )}
             </Stack>
           </Toolbar>
         </AppBar>
 
+        {/* The map and, on a wide screen, the detail column beside it. The
+            drawer used to be a layer over the whole window, which meant it
+            sliced the toolbar in half — at 1440 it cut a filter key down the
+            middle. A panel that is part of the layout takes its space from the
+            map instead of from the app's own chrome. */}
+        <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <Box
           sx={{
             position: 'relative',
             flex: 1,
+            minWidth: 0,
             '& .maplibregl-ctrl-bottom-right': {
               transition: 'bottom 180ms ease',
               bottom: heading ? { xs: 118, sm: 100 } : 0,
@@ -570,9 +698,30 @@ export default function App() {
                   },
                   px: 1,
                   py: 0.5,
-                  bgcolor: 'rgba(18,16,14,.9)',
-                  color: '#e8e0cf',
-                  border: '1px solid rgba(232,224,207,.35)',
+                  /*
+                   * These three were hard-coded, so the one surface the app
+                   * never themed was the one always on screen: a dark slab
+                   * sitting on the cream map in light mode, and in red night
+                   * the brightest thing in view — a 14.5:1 cream-on-black
+                   * block in an interface built around not being a flashlight.
+                   *
+                   * It is a footnote and should read as one, so it takes the
+                   * same paper as every other surface at less than full
+                   * opacity, and the quieter of the two text colours.
+                   */
+                  bgcolor: 'background.paper',
+                  color: 'text.secondary',
+                  opacity: 0.92,
+                  /*
+                   * A footnote with nothing to press, sitting on top of the
+                   * map. It was swallowing every tap that landed on it, so any
+                   * camp or cluster behind it simply could not be selected —
+                   * and it sits in the bottom-left corner, over the city.
+                   * Clicks belong to the map underneath.
+                   */
+                  pointerEvents: 'none',
+                  border: '1px solid',
+                  borderColor: 'divider',
                   borderRadius: 1,
                   backdropFilter: 'blur(4px)',
                 }}
@@ -599,28 +748,120 @@ export default function App() {
                 />
               )}
               {!data.embargo.artReleased && !embargoNoticeSeen && (
-                <Alert
-                  severity="info"
-                  variant="filled"
-                  onClose={dismissEmbargoNotice}
+                /*
+                 * This was MUI's filled `info` alert — a saturated #0288d1
+                 * billboard in an app made of ember, teal and dust, and on a
+                 * small phone the loudest thing on screen the moment it opened.
+                 * It is a footnote about a licence condition, not an alarm, so
+                 * it now wears the same paper as everything else and says its
+                 * piece on one line.
+                 */
+                <Paper
+                  elevation={0}
                   sx={{
                     position: 'absolute',
                     top: 8,
                     left: 8,
                     right: { xs: 8, sm: 'auto' },
-                    maxWidth: { sm: 360 },
+                    maxWidth: { sm: 400 },
+                    zIndex: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    pl: 1.25,
+                    pr: 0.5,
                     py: 0.25,
-                    opacity: 0.95,
+                    border: '1px solid',
+                    borderColor: 'divider',
                   }}
                 >
-                  <Typography variant="body2">
+                  <InfoOutlinedIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+                  <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
                     Art locations are embargoed until Gates open.
                   </Typography>
-                </Alert>
+                  <IconButton size="small" onClick={dismissEmbargoNotice} aria-label="Dismiss">
+                    <CloseIcon sx={{ fontSize: 18 }} />
+                  </IconButton>
+                </Paper>
               )}
             </>
           )}
         </Box>
+
+          {/* Compact renders this as a sheet from the bottom, which portals out
+              of here to the body; only the desktop panel actually occupies the
+              column. Rendered once either way, so there is one of it. */}
+          <DetailDrawer
+            poi={selected}
+            events={selected ? (eventsByHost.get(selected.uid) ?? []) : []}
+            origin={origin ?? [0, 0]}
+            originLabel={originLabel}
+            isFavorite={selected ? favorites.has(selected.uid) : false}
+            onToggleFavorite={toggleFavorite}
+            onShare={(poi) => void share({ poi: poi.uid }, poi.name, !isCivic(poi))}
+            onNavigate={navigateTo}
+            onClose={() => setSelected(undefined)}
+            onMeasure={(height) => {
+              detailHeight.current = height
+            }}
+            compact={compact}
+          />
+          <UnplacedSheet
+            listing={unplaced}
+            onShare={(listing) => void share({ poi: listing.uid }, listing.name)}
+            onClose={() => setUnplaced(undefined)}
+            compact={compact}
+          />
+        </Box>
+
+        {compact && (
+          <BottomBar
+            items={[
+              {
+                key: 'filters',
+                label: 'Layers',
+                title: 'Filters and saved spots',
+                icon: <TuneIcon />,
+                selected: filtersOpen,
+                pressed: filtersOpen,
+                onClick: () => setFiltersOpen((open) => !open),
+              },
+              {
+                key: 'events',
+                label: 'Events',
+                title: 'Show events',
+                icon: <EventIcon />,
+                selected: eventsOpen,
+                pressed: eventsOpen,
+                onClick: () => setEventsOpen((open) => !open),
+              },
+              {
+                key: 'orient',
+                label: cityUp ? '12:00 up' : 'North up',
+                title: 'Orient the map so 12:00 points up',
+                icon: <ExploreIcon />,
+                selected: cityUp,
+                pressed: cityUp,
+                onClick: toggleCityUp,
+              },
+              {
+                key: 'theme',
+                label: mode === 'dark' ? 'Dark' : mode === 'light' ? 'Light' : 'Night',
+                title: THEME_LABEL[mode],
+                icon:
+                  mode === 'dark' ? (
+                    <DarkModeIcon />
+                  ) : mode === 'light' ? (
+                    <LightModeIcon />
+                  ) : (
+                    <NightlightIcon />
+                  ),
+                selected: mode === 'night',
+                onClick: () => setMode(NEXT_MODE[mode]),
+              },
+            ]}
+          />
+        )}
       </Box>
 
       <SavePlaceDialog
@@ -630,6 +871,8 @@ export default function App() {
           if (saving) savePlace(name, saving.position, saving.address)
           setSaving(undefined)
           setProbe(`Saved "${name}"`)
+          // Usually done while already moving away from the thing being marked.
+          haptic('confirm')
         }}
         onClose={() => setSaving(undefined)}
       />
@@ -675,25 +918,6 @@ export default function App() {
         />
       )}
 
-      <DetailDrawer
-        poi={selected}
-        events={selected ? (eventsByHost.get(selected.uid) ?? []) : []}
-        origin={origin ?? [0, 0]}
-        originLabel={originLabel}
-        isFavorite={selected ? favorites.has(selected.uid) : false}
-        onToggleFavorite={toggleFavorite}
-        onShare={(poi) => void share({ poi: poi.uid }, poi.name, !isCivic(poi))}
-        onNavigate={navigateTo}
-        onClose={() => setSelected(undefined)}
-        compact={compact}
-      />
-      <UnplacedSheet
-        listing={unplaced}
-        onShare={(listing) => void share({ poi: listing.uid }, listing.name)}
-        onClose={() => setUnplaced(undefined)}
-        compact={compact}
-      />
-
       <Snackbar
         open={Boolean(probe)}
         autoHideDuration={6000}
@@ -729,6 +953,8 @@ export default function App() {
           ) : undefined
         }
       />
+
+      <FirstRun />
     </ThemeProvider>
   )
 }

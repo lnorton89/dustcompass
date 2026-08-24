@@ -7,6 +7,7 @@ import {
   IconButton,
   List,
   ListItem,
+  ListItemButton,
   ListItemText,
   Paper,
   Stack,
@@ -44,6 +45,8 @@ interface Props {
   onToggleFavorite: (uid: string) => void
   onShare: (poi: Poi) => void
   onNavigate: (poi: Poi) => void
+  /** Opens an individual hosted event's own detail (description, full schedule). */
+  onSelectEvent: (event: EventItem) => void
   onClose: () => void
   /**
    * How much of the map this sheet is covering, reported as it opens so the
@@ -74,6 +77,7 @@ export function DetailDrawer({
   onToggleFavorite,
   onShare,
   onNavigate,
+  onSelectEvent,
   onClose,
   onMeasure,
   compact,
@@ -94,6 +98,14 @@ export function DetailDrawer({
   // the stale "failed" state is never painted.
   if (poi && imageState.uid !== poi.uid) setImageState({ uid: poi.uid, failed: false })
   const imageFailed = imageState.failed
+
+  // The initial cap is a display choice, not a limit on what is reachable —
+  // "Show all" is remembered per listing the same way the image attempt is,
+  // so switching to a different camp starts collapsed again rather than
+  // carrying an unrelated listing's expanded state along with it.
+  const [eventsShown, setEventsShown] = useState<{ uid?: string; all: boolean }>({ all: false })
+  if (poi && eventsShown.uid !== poi.uid) setEventsShown({ uid: poi.uid, all: false })
+  const visibleEvents = eventsShown.all ? sortedEvents : sortedEvents.slice(0, 40)
 
   // Measured off the paper itself rather than guessed at a fraction of the
   // window: what is in here decides how tall it is, and a listing with a photo
@@ -260,18 +272,38 @@ export function DetailDrawer({
           <Divider sx={{ my: 2 }} />
           <Typography variant="subtitle2" gutterBottom>
             {events.length} event{events.length === 1 ? '' : 's'}
+            {/* The heading used to promise the full count while the list
+                silently cut off at 40 with no indication anything was
+                missing — for an event-heavy camp, dozens of real schedule
+                entries were simply unreachable from here (issue #28). */}
+            {!eventsShown.all && events.length > 40 && ` (showing 40)`}
           </Typography>
           <List dense disablePadding>
-            {sortedEvents.slice(0, 40).map((event) => (
-              <ListItem key={event.uid} disableGutters>
-                <ListItemText
-                  primary={event.title}
-                  secondary={formatOccurrences(event, now)}
-                  slotProps={{ primary: { variant: 'body2' } }}
-                />
+            {visibleEvents.map((event) => (
+              <ListItem key={event.uid} disableGutters disablePadding>
+                {/* Hosted events used to be plain, noninteractive text —
+                    reading the title and time here was as far as they went.
+                    Every row now opens the event's own detail, the same
+                    place EventsPanel's rows lead to (issue #20). */}
+                <ListItemButton onClick={() => onSelectEvent(event)} sx={{ py: 0.75 }}>
+                  <ListItemText
+                    primary={event.title}
+                    secondary={formatOccurrences(event, now)}
+                    slotProps={{ primary: { variant: 'body2' } }}
+                  />
+                </ListItemButton>
               </ListItem>
             ))}
           </List>
+          {!eventsShown.all && events.length > 40 && (
+            <Button
+              size="small"
+              onClick={() => setEventsShown({ uid: poi?.uid, all: true })}
+              sx={{ mt: 0.5 }}
+            >
+              Show all {events.length}
+            </Button>
+          )}
         </>
       )}
     </>

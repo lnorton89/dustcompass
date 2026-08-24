@@ -1,6 +1,9 @@
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { formatWhen, occurrencesInWindow, relevantOccurrence, scheduleClock } from '../events'
-import type { EventItem } from '../types'
+import { formatWhen, occurrencesInWindow, relevantOccurrence, resolveEventLocation, scheduleClock } from '../events'
+import type { CityLayout } from '../../brc/layout'
+import { DATA_YEAR } from '../../config'
+import type { EventItem, Poi } from '../types'
 
 const at = (start: string, end: string) => ({ start_time: start, end_time: end })
 
@@ -158,3 +161,74 @@ describe('relevantOccurrence', () => {
     expect(result?.occurrence.start_time).toBe('2026-09-05T20:00:00-07:00')
   })
 })
+
+/**
+ * Issue #29: an event without a resolved host used to say "location not
+ * listed" even when `other_location` plainly had something in it. These
+ * three states need to stay told apart: no host and nothing in
+ * `other_location` at all; `other_location` present but not something the
+ * geocoder can resolve; and `other_location` that parses as a real playa
+ * address, which should behave like one (distance, navigation) without
+ * pretending to be a registered host.
+ *
+ * Wrapped in a plain `if`, not `describe.runIf`: vitest still calls a
+ * `describe.runIf` callback to collect its tests regardless of the
+ * condition, so the `readFileSync` below would throw during collection on a
+ * checkout that has fetched a different year's data than `DATA_YEAR` names
+ * (CI fetches one year and only one) even though the block was meant to be
+ * skipped. An `if` around the whole `describe` call never invokes it at all.
+ */
+const layoutPath = `public/data/${DATA_YEAR}/layout.json`
+if (existsSync(layoutPath)) {
+  describe('resolveEventLocation', () => {
+    const layout = JSON.parse(readFileSync(layoutPath, 'utf8')) as CityLayout
+
+    const host: Poi = {
+      uid: 'camp-1',
+      kind: 'camp',
+      name: 'Test Camp',
+      position: [-119.203, 40.786],
+      positionSource: 'gps',
+    }
+
+    const baseEvent: EventItem = {
+      uid: 'evt-1',
+      title: 'Test Event',
+      event_id: 1,
+      year: 2026,
+      occurrence_set: [],
+    }
+
+    it('prefers a registered host over anything in other_location', () => {
+      const event = { ...baseEvent, other_location: 'D & 3:15' }
+      expect(resolveEventLocation(event, host, layout)).toEqual({ kind: 'host', poi: host })
+    })
+
+    it('reports no location when there is no host and no other_location', () => {
+      expect(resolveEventLocation(baseEvent, undefined, layout)).toEqual({ kind: 'none' })
+    })
+
+    it('reports no location for a blank/whitespace-only other_location', () => {
+      const event = { ...baseEvent, other_location: '   ' }
+      expect(resolveEventLocation(event, undefined, layout)).toEqual({ kind: 'none' })
+    })
+
+    it('resolves a parseable playa address in other_location, without a host', () => {
+      const event = { ...baseEvent, other_location: 'D & 3:15' }
+      const result = resolveEventLocation(event, undefined, layout)
+      expect(result.kind).toBe('geocoded')
+      if (result.kind === 'geocoded') {
+        expect(result.label).toBe('D & 3:15')
+        expect(result.position).toBeDefined()
+      }
+    })
+
+    it('keeps unparseable free-form text as its own state, not folded into "not listed"', () => {
+      const event = { ...baseEvent, other_location: 'ask around at the tiki bar' }
+      expect(resolveEventLocation(event, undefined, layout)).toEqual({
+        kind: 'unmapped',
+        label: 'ask around at the tiki bar',
+      })
+    })
+  })
+}

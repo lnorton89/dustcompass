@@ -21,9 +21,16 @@ import SearchIcon from '@mui/icons-material/Search'
 import NearMeIcon from '@mui/icons-material/NearMe'
 import ScheduleIcon from '@mui/icons-material/Schedule'
 import type { EventItem, Poi } from '../data/types'
-import { PLAYA_TIME_ZONE, formatWhen, occurrencesInWindow, type EventWindow } from '../data/events'
+import {
+  PLAYA_TIME_ZONE,
+  formatWhen,
+  occurrencesInWindow,
+  resolveEventLocation,
+  type EventWindow,
+} from '../data/events'
 import { formatDistance, travelBetween } from '../brc/travel'
 import type { Position } from '../brc/geo'
+import type { CityLayout } from '../brc/layout'
 import type { LocationStatus } from '../data/useGeolocation'
 
 interface Props {
@@ -31,6 +38,8 @@ interface Props {
   events: EventItem[]
   /** Camps and art by uid, so an event can be located on the map. */
   hosts: Map<string, Poi>
+  /** So a free-form `other_location` can be tried against the same geocoder the search box uses. */
+  layout: CityLayout
   now: Date
   /** True when `now` has been scrubbed to the start of the burn. */
   preview: boolean
@@ -47,7 +56,8 @@ interface Props {
    * active navigation); this only ever releases this panel's own claim.
    */
   onDoneWithLocation: () => void
-  onSelect: (poi: Poi) => void
+  /** Opens the event's own detail — every row, host or not, goes here. */
+  onSelectEvent: (event: EventItem) => void
   onClose: () => void
   /** Phone layout: come up from the bottom instead of in from the side. */
   compact?: boolean
@@ -69,13 +79,14 @@ export function EventsPanel({
   open,
   events,
   hosts,
+  layout,
   now,
   preview,
   origin,
   locationStatus,
   onNeedLocation,
   onDoneWithLocation,
-  onSelect,
+  onSelectEvent,
   onClose,
   compact,
 }: Props) {
@@ -150,8 +161,19 @@ export function EventsPanel({
     const located = found.map((row) => {
       const hostId = row.event.hosted_by_camp ?? row.event.located_at_art ?? ''
       const host = hosts.get(hostId)
-      const travel = host && origin ? travelBetween(origin, host.position) : undefined
-      return { ...row, host, travel }
+      // A registered host wins; otherwise a parseable `other_location` gets
+      // to behave like a real address too — closest sorting and navigation
+      // used to be unavailable to those events even when the address was
+      // perfectly good, simply because nothing ever tried to resolve it.
+      const location = resolveEventLocation(row.event, host, layout)
+      const position =
+        location.kind === 'host'
+          ? location.poi.position
+          : location.kind === 'geocoded'
+            ? location.position
+            : undefined
+      const travel = position && origin ? travelBetween(origin, position) : undefined
+      return { ...row, host, location, travel }
     })
 
     const term = query.trim().toLowerCase()
@@ -170,7 +192,7 @@ export function EventsPanel({
       matching.sort((a, b) => (a.travel?.meters ?? Infinity) - (b.travel?.meters ?? Infinity))
     }
     return matching.slice(0, 300)
-  }, [events, window, now, sort, origin, hosts, query])
+  }, [events, window, now, sort, origin, hosts, layout, query])
 
   return (
     <Drawer
@@ -305,7 +327,6 @@ export function EventsPanel({
           event clear of the screen edge instead of flush against it. */}
       <List dense sx={{ overflowY: 'auto', flex: '0 1 auto', pb: 1.5 }}>
         {rows.map((row, index) => {
-          const host = row.host
           const live = row.start <= now && row.end > now
           const content = (
             <>
@@ -332,10 +353,22 @@ export function EventsPanel({
                       </Box>
                     )}
                     {[
-                      host?.name ?? row.event.other_location,
+                      row.location.kind === 'host'
+                        ? row.location.poi.name
+                        : row.location.kind !== 'none'
+                          ? row.location.label
+                          : undefined,
                       live ? undefined : formatWhen(row, now),
                       row.travel && formatDistance(row.travel),
-                      host ? undefined : 'location not listed',
+                      // A truly empty field is the only case that is
+                      // "not listed" — free-form text that just did not
+                      // parse is shown for what it is, not folded into the
+                      // same message as having nothing at all (issue #29).
+                      row.location.kind === 'none'
+                        ? 'location not listed'
+                        : row.location.kind === 'unmapped'
+                          ? 'not mapped'
+                          : undefined,
                     ]
                       .filter(Boolean)
                       .join(' · ')}
@@ -364,21 +397,16 @@ export function EventsPanel({
             // <li> itself would strip its list semantics from the a11y tree.
             <ListItem key={`${row.event.uid}-${index}`} disablePadding>
               {/*
-               * Events at an unregistered camp used to render as a
-               * `ListItemButton` whose click handler did nothing — a control
-               * that advertised itself as actionable to a screen reader and a
-               * keyboard user while performing no action for either. Plenty
-               * of the good ones are at a camp that never filed a location,
-               * and the listing is still worth reading; it just is not
-               * something to tap, so it is no longer marked up as one.
+               * Every row opens the event's own detail — description, full
+               * occurrence list, and (when available) navigation — whether
+               * or not it has a registered host. Events at an unregistered
+               * camp used to render as a `ListItemButton` whose click
+               * handler did nothing at all; now there is always something
+               * for the tap to do, located or not (issue #20).
                */}
-              {host ? (
-                <ListItemButton onClick={() => onSelect(host)} sx={{ cursor: 'pointer', ...rowSx }}>
-                  {content}
-                </ListItemButton>
-              ) : (
-                <Box sx={{ display: 'flex', width: '100%', px: 2, ...rowSx }}>{content}</Box>
-              )}
+              <ListItemButton onClick={() => onSelectEvent(row.event)} sx={{ cursor: 'pointer', ...rowSx }}>
+                {content}
+              </ListItemButton>
             </ListItem>
           )
         })}

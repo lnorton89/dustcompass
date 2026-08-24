@@ -1,10 +1,10 @@
 /**
  * @vitest-environment jsdom
  */
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DetailDrawer } from '../DetailDrawer'
-import type { Poi } from '../../data/types'
+import type { EventItem, Poi } from '../../data/types'
 
 afterEach(() => cleanup())
 
@@ -26,6 +26,7 @@ const baseProps = {
   onToggleFavorite: vi.fn(),
   onShare: vi.fn(),
   onNavigate: vi.fn(),
+  onSelectEvent: vi.fn(),
   onClose: vi.fn(),
   compact: true,
 }
@@ -133,5 +134,78 @@ describe('DetailDrawer · onMeasure (#19)', () => {
     onMeasure.mockClear()
     triggerResize?.(999)
     expect(onMeasure).not.toHaveBeenCalled()
+  })
+})
+
+const hostedEvent = (uid: string): EventItem => ({
+  uid,
+  title: `Event ${uid}`,
+  event_id: 1,
+  year: 2026,
+  occurrence_set: [{ start_time: '2026-08-29T12:00:00-07:00', end_time: '2026-08-29T13:00:00-07:00' }],
+})
+
+/**
+ * Issue #28: the heading promised the full event count while the list
+ * silently cut off at 40 with no indication anything was missing or way to
+ * reach the rest.
+ */
+describe('DetailDrawer · hosted events beyond the 40-event cap (#28)', () => {
+  const manyEvents = Array.from({ length: 53 }, (_, index) => hostedEvent(String(index)))
+
+  it('discloses that only 40 of a larger total are shown', () => {
+    render(<DetailDrawer {...baseProps} poi={poi('a', 'Camp A')} events={manyEvents} />)
+    expect(screen.getByText(/53 events/i)).toBeDefined()
+    expect(screen.getByText(/showing 40/i)).toBeDefined()
+    expect(screen.getByRole('button', { name: /show all 53/i })).toBeDefined()
+  })
+
+  it('reveals every event once "Show all" is pressed', () => {
+    render(<DetailDrawer {...baseProps} poi={poi('a', 'Camp A')} events={manyEvents} />)
+    fireEvent.click(screen.getByRole('button', { name: /show all 53/i }))
+
+    expect(screen.getByText('Event 52')).toBeDefined()
+    expect(screen.queryByRole('button', { name: /show all/i })).toBeNull()
+  })
+
+  it('does not disclose anything when every event already fits', () => {
+    const fewEvents = manyEvents.slice(0, 5)
+    render(<DetailDrawer {...baseProps} poi={poi('a', 'Camp A')} events={fewEvents} />)
+    expect(screen.queryByText(/showing 40/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /show all/i })).toBeNull()
+  })
+
+  it('collapses back to 40 when switching to a different listing', () => {
+    const { rerender } = render(
+      <DetailDrawer {...baseProps} poi={poi('a', 'Camp A')} events={manyEvents} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /show all 53/i }))
+    expect(screen.queryByRole('button', { name: /show all/i })).toBeNull()
+
+    rerender(<DetailDrawer {...baseProps} poi={poi('b', 'Camp B')} events={manyEvents} />)
+    expect(screen.getByRole('button', { name: /show all 53/i })).toBeDefined()
+  })
+})
+
+/**
+ * Issue #20: hosted events used to render as plain, noninteractive text —
+ * reading the title and time here was as far as it went. Every row now
+ * opens the event's own detail.
+ */
+describe('DetailDrawer · hosted event rows open event detail (#20)', () => {
+  it('opens the event detail when a hosted-event row is clicked', () => {
+    const onSelectEvent = vi.fn()
+    const single = hostedEvent('only')
+    render(
+      <DetailDrawer
+        {...baseProps}
+        poi={poi('a', 'Camp A')}
+        events={[single]}
+        onSelectEvent={onSelectEvent}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Event only/i }))
+    expect(onSelectEvent).toHaveBeenCalledWith(single)
   })
 })

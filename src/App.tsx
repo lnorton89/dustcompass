@@ -40,6 +40,7 @@ import { SearchPanel } from './ui/SearchPanel'
 import { DetailDrawer } from './ui/DetailDrawer'
 import { UnplacedSheet } from './ui/UnplacedSheet'
 import { EventsPanel } from './ui/EventsPanel'
+import { EventDetail } from './ui/EventDetail'
 import { FilterSheet } from './ui/FilterSheet'
 import { NavBar } from './ui/NavBar'
 import { playaTheme } from './ui/theme'
@@ -53,7 +54,7 @@ import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from 
 import { travelBetween } from './brc/travel'
 import { bearingToClock, bearingBetween, bearingsMatch } from './brc/geo'
 import { shareLink } from './ui/share'
-import type { Poi, PoiKind, UnplacedListing } from './data/types'
+import type { EventItem, Poi, PoiKind, UnplacedListing } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
 import { paletteFor, type PlayaPalette, type ThemeMode } from './map/style'
@@ -230,6 +231,11 @@ export default function App() {
   const [selected, setSelected] = useState<Poi>()
   // A listing with no location to open on — before Gates, all of the art.
   const [unplaced, setUnplaced] = useState<UnplacedListing>()
+  // The event itself, opened from an Events row or a hosted-event row in a
+  // camp/art detail — both used to lead only to the host (or, for an event
+  // with no registered host, nowhere at all), with no way to read the
+  // event's own description (issue #20).
+  const [selectedEvent, setSelectedEvent] = useState<EventItem>()
   const [probe, setProbe] = useState<string>()
   const [deletedPlace, setDeletedPlace] = useState<(typeof places)[number]>()
   // The map's own locate control and the "take me there" flow feed the same
@@ -1181,6 +1187,7 @@ export default function App() {
             onToggleFavorite={toggleFavorite}
             onShare={(poi) => void share({ poi: poi.uid }, poi.name, !isCivic(poi))}
             onNavigate={navigateTo}
+            onSelectEvent={setSelectedEvent}
             onClose={() => setSelected(undefined)}
             onMeasure={onDetailMeasure}
             compact={compact}
@@ -1284,18 +1291,33 @@ export default function App() {
           open={eventsOpen}
           events={data.events}
           hosts={hostsByUid}
+          layout={data.layout}
           now={clock.now}
           preview={clock.preview}
           origin={here}
           locationStatus={location.status}
           onNeedLocation={() => acquireLocation('events')}
           onDoneWithLocation={() => releaseLocation('events')}
-          onSelect={(poi) => {
-            setEventsOpen(false)
-            flyTo(poi.position, poi)
-          }}
+          onSelectEvent={setSelectedEvent}
           onClose={() => setEventsOpen(false)}
           compact={compact}
+        />
+      )}
+
+      {data && (
+        <EventDetail
+          event={selectedEvent}
+          host={hostsByUid.get(
+            selectedEvent?.hosted_by_camp ?? selectedEvent?.located_at_art ?? '',
+          )}
+          layout={data.layout}
+          origin={origin}
+          now={clock.now}
+          onClose={() => setSelectedEvent(undefined)}
+          onNavigate={(target) => {
+            setEventsOpen(false)
+            navigateTo(target)
+          }}
         />
       )}
 

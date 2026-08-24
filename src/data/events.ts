@@ -1,10 +1,43 @@
-import type { EventItem, Occurrence } from './types'
+import { geocode } from '../brc/geocode'
+import type { CityLayout } from '../brc/layout'
+import type { EventItem, Occurrence, Poi } from './types'
 
 export interface LiveEvent {
   event: EventItem
   occurrence: Occurrence
   start: Date
   end: Date
+}
+
+/**
+ * Where an event actually is, distinguishing every state a reader needs told
+ * apart: a registered host beats everything else; `other_location` free text
+ * that the same geocoder the search box uses can resolve gets to behave like
+ * a real address (distance, navigation); text present but unresolvable is
+ * shown as-is rather than pretending to be a registered host; and only a
+ * truly empty field is "not listed" at all (issue #29 — these three used to
+ * collapse into "location not listed" whenever there was no host, even when
+ * `other_location` plainly had something in it).
+ */
+export type EventLocation =
+  | { kind: 'host'; poi: Poi }
+  | { kind: 'geocoded'; label: string; position: Poi['position'] }
+  | { kind: 'unmapped'; label: string }
+  | { kind: 'none' }
+
+export function resolveEventLocation(
+  event: EventItem,
+  host: Poi | undefined,
+  layout: CityLayout,
+): EventLocation {
+  if (host) return { kind: 'host', poi: host }
+  const label = event.other_location?.trim()
+  if (!label) return { kind: 'none' }
+  // Conservative on purpose: only a location the same geocoder the search
+  // box trusts can actually parse gets treated as a real place. Anything
+  // else is shown for what it is — text a person wrote, not a coordinate.
+  const located = geocode(label, layout)
+  return located ? { kind: 'geocoded', label, position: located.position } : { kind: 'unmapped', label }
 }
 
 export type EventWindow = 'now' | 'next3h' | 'today' | 'all'

@@ -262,6 +262,26 @@ if (await closest.count()) {
   assert(false, 'distance sort offered when a fix is available')
 }
 
+// #20: every event row — hosted or not — has to open the event's own
+// detail, not do nothing (unlocated) or jump straight past the description
+// to the venue (located). Clicking any row must open a dialog naming that
+// exact event, not the map underneath it.
+{
+  const firstRow = page.locator('.MuiDrawer-root .MuiListItemButton-root').first()
+  const rowTitle = (
+    await firstRow.locator('.MuiListItemText-primary').first().innerText()
+  ).trim()
+  await firstRow.click()
+  await page.waitForTimeout(500)
+  const dialog = page.getByRole('dialog').filter({ hasText: rowTitle })
+  assert(
+    (await dialog.count()) > 0,
+    `clicking an events-list row opens that event's own detail (#20) (wanted "${rowTitle}")`,
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+}
+
 await page.screenshot({ path: shot })
 await page.getByLabel('Close events').click()
 await page.waitForTimeout(500)

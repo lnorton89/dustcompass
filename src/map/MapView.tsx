@@ -21,12 +21,17 @@ import { POI_CLUSTER_LAYER_ID, POI_LABEL_LAYER_ID, POI_LAYER_ID, PoiLayers } fro
 
 /** How far from the tap to look for the label that names what was tapped. */
 const LABEL_HIT_RADIUS = 18
-/** The same allowance for the survey's dots, which carry no label to aim at. */
+/**
+ * The same allowance for the survey's dots, which carry no label to aim at.
+ * Also used for saved spots: their dot is the same kind of small circular
+ * target, and the priority they need over everything else (see
+ * `handleClick`) is about hit-test *order*, not a bigger hit box.
+ */
 const DOT_HIT_RADIUS = 12
 import { RouteLayer } from './RouteLayer'
 import { SAVED_LAYER_ID, SavedPlacesLayer } from './SavedPlacesLayer'
 import { SERVICE_LAYER_ID, ServiceLayers, TOILET_LAYER_ID } from './ServiceLayers'
-import { nearestFeature } from './pick'
+import { pickByPriority } from './pick'
 import { baseStyle, paletteFor, type ThemeMode } from './style'
 import { FocusMarker } from './FocusMarker'
 import { PlayaScene } from './PlayaScene'
@@ -176,11 +181,61 @@ export function MapView({
 
   const handleClick = useCallback(
     (event: MapLayerMouseEvent) => {
-      const hit = event.features?.[0]
-      if (hit?.layer?.id === SAVED_LAYER_ID && hit.properties?.id) {
-        onSelectPlace(String(hit.properties.id))
+      const { x, y } = event.point
+      const project = (position: [number, number]) => event.target.project(position)
+      const queryLayer = (layers: string[], radius: number) =>
+        event.target.queryRenderedFeatures(
+          [
+            [x - radius, y - radius],
+            [x + radius, y + radius],
+          ],
+          { layers },
+        )
+
+      // Deliberate, deterministic priority across every tappable layer —
+      // never `event.features[0]`, whose order follows paint order (saved
+      // places are drawn *before* ServiceLayers/PoiLayers) rather than what
+      // the tap meant. `pickByPriority` walks these groups in order and
+      // takes the first one with a candidate near the tap, regardless of
+      // whether a later group's candidate happens to be a pixel closer:
+      //
+      // 1. Saved spots — the user's own placements. A "My camp" or meeting
+      //    point dropped on top of a camp/service/landmark must still open
+      //    the saved spot, not whatever the renderer stacked over it. This
+      //    is the fix for issue #26: previously a saved spot only won when
+      //    it happened to be `event.features[0]`, so one visually underneath
+      //    something else was untappable from the map.
+      // 2. Civic/safety features (rangers, medical, ice, toilets, the Man,
+      //    the portals) — survey-sourced and safety-relevant, so they beat
+      //    ordinary listings. Each stands alone at its own point, so nearest
+      //    to the tap is unambiguous.
+      // 3. POI labels — a playa address names an intersection, so several
+      //    camps can genuinely share one point. Only one wins the label, and
+      //    that is the name that was actually tapped.
+      const picked = pickByPriority(
+        [
+          { id: 'saved', idKey: 'id', features: queryLayer([SAVED_LAYER_ID], DOT_HIT_RADIUS) },
+          { id: 'civic', features: queryLayer(CIVIC_LAYER_IDS, DOT_HIT_RADIUS) },
+          { id: 'poi-label', features: queryLayer([POI_LABEL_LAYER_ID], LABEL_HIT_RADIUS) },
+        ],
+        event.point,
+        project,
+      )
+      if (picked?.groupId === 'saved' && picked.feature.properties?.id) {
+        onSelectPlace(String(picked.feature.properties.id))
         return
       }
+      if (picked && picked.feature.properties?.uid) {
+        onSelect(poiIndex.get(String(picked.feature.properties.uid)))
+        return
+      }
+
+      // Cluster bubbles are checked after saved spots (which must remain
+      // reachable even if a saved marker happens to sit under one) but have
+      // no equivalent of "nearest anchor" — expanding the wrong cluster
+      // isn't a coherent fallback, so this stays tied to MapLibre's own
+      // top-of-stack hit the way it always was.
+      const hit = event.features?.[0]
       if (hit?.layer?.id === POI_CLUSTER_LAYER_ID && hit.properties?.cluster_id) {
         const source = event.target.getSource('pois') as GeoJSONSource
         const center = (hit.geometry as GeoJSON.Point).coordinates as Position
@@ -189,43 +244,13 @@ export function MapView({
         })
         return
       }
-      const { x, y } = event.point
-      const nearestIn = (layers: string[], radius: number) =>
-        nearestFeature(
-          event.target.queryRenderedFeatures(
-            [
-              [x - radius, y - radius],
-              [x + radius, y + radius],
-            ],
-            { layers },
-          ),
-          event.point,
-          (position) => event.target.project(position),
-        )
-      const listed = (feature: ReturnType<typeof nearestIn>) =>
-        feature && poiIndex.get(String(feature.properties.uid))
 
-      // The city's own places first. Each is one dot standing alone, so the
-      // nearest one to the tap is unambiguously the one meant — unlike the
-      // camps below, which pile up on a shared intersection. Their own dots
-      // are small, and a thumb is not, so they are given a little room.
-      const civic = listed(nearestIn(CIVIC_LAYER_IDS, DOT_HIT_RADIUS))
-      if (civic) {
-        onSelect(civic)
-        return
-      }
-
-      // A playa address names an intersection, so several camps genuinely sit
-      // on one point. Only one of them wins the label, and that is the name the
-      // person just tapped — take theirs rather than whichever the renderer
-      // happened to return first.
-      // The label is drawn below its dot, so the exact click pixel is never
-      // inside it. Look in a small box instead, and among whatever is labelled
-      // there take the one anchored nearest the tap.
-      const labelled = nearestIn([POI_LABEL_LAYER_ID], LABEL_HIT_RADIUS)
-      const chosen = labelled ?? event.features?.find((feature) => feature.properties?.uid)
-      if (chosen?.properties?.uid) {
-        onSelect(poiIndex.get(String(chosen.properties.uid)))
+      // 4. Whatever MapLibre's own hit under the cursor was, if none of the
+      //    boxed queries above found anything nameable — e.g. a POI dot with
+      //    no label visible yet at this zoom.
+      const fallback = event.features?.find((feature) => feature.properties?.uid)
+      if (fallback?.properties?.uid) {
+        onSelect(poiIndex.get(String(fallback.properties.uid)))
         return
       }
       // Clicking bare playa answers "where am I?" in the only vocabulary that

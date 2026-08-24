@@ -1,299 +1,226 @@
-# Dust Compass
+<div align="center">
+  <img src="public/icon-192.png" alt="Dust Compass icon" width="112" height="112">
 
-A free, modern, offline-first map, event guide, and compass for the playa.
-React 19 + MUI 9 + MapLibre GL JS 6.
+  # Dust Compass
 
-> This app is not affiliated, endorsed, or verified by Burning Man Project.
+  **An offline-first map, event guide, and compass for Black Rock City.**
 
-**Live: https://lnorton89.github.io/dustcompass/**
+  Find camps, art, events, services, and your way home—even when the network disappears.
 
-iBurn is mobile-only and has no web map; this is that map. Every byte of city
-geometry comes from Burning Man's own published survey — no third-party data,
-no tile pipeline.
+  [![Live app](https://img.shields.io/badge/Open_the_live_app-d97706?style=for-the-badge)](https://lnorton89.github.io/dustcompass/)
+  [![CI](https://img.shields.io/github/actions/workflow/status/lnorton89/dustcompass/ci.yml?branch=master&style=for-the-badge&label=CI)](https://github.com/lnorton89/dustcompass/actions/workflows/ci.yml)
+  [![Deploy](https://img.shields.io/github/actions/workflow/status/lnorton89/dustcompass/deploy.yml?branch=master&style=for-the-badge&label=Deploy)](https://github.com/lnorton89/dustcompass/actions/workflows/deploy.yml)
+</div>
 
-## Why it works the way it does
+<a href="https://lnorton89.github.io/dustcompass/">
+  <img src="https://lnorton89.github.io/dustcompass/og-image.png" alt="Dust Compass — offline map and guide for Black Rock City" width="100%">
+</a>
 
-**The city is generated, not downloaded.** Black Rock City does not exist in
-OpenStreetMap — it is surveyed and rebuilt every year. The whole city is
-described by one declarative spec (`layout.json`): the Man's coordinates, a
-rotation, annular streets at fixed radii, and radial streets named by clock
-position. `src/brc/city.ts` turns that into GeoJSON in the browser, so a new
-year is a data drop, not a tile build.
+> [!IMPORTANT]
+> Dust Compass is an independent project. It is not affiliated with, endorsed by, or verified by Burning Man Project. Treat all locations as informational and follow posted signs and official instructions on playa.
 
-**That spec is measured, not copied.** Burning Man publishes the survey as
-polylines; the app needs the polar geometry behind them. `scripts/derive-layout.mjs`
-fits circles to the annular street centrelines to recover the Man, the rotation
-and every street radius, then refuses to write a layout unless that fitted
-centre agrees with the surveyed "The Man" control point — for 2026 the two land
-**3 cm** apart. Because the fit never sees the control points, they make an
-independent check: every surveyed plaza falls within a foot of the street the
-layout puts it on, and `src/brc/__tests__/survey.test.ts` fails the build if one
-does not. A ring the survey files under the wrong name is trimmed off rather
-than allowed to drag the radius with it.
+## Why Dust Compass
 
-**The earth is not a sphere, and here that shows.** At this latitude a
-mean-radius sphere misplaces a point 1.5 km out by up to 3.7 m, and the error
-changes sign either side of the 6:00 axis, so no fudge factor removes it.
-Measured against the surveyed plazas, the spherical model put them 12 ft off
-their design radius. `src/brc/geo.ts` works in local WGS84 radii of curvature
-instead, which tracks a true geodesic to 0.4 m at 2.5 km and costs less than
-computing one.
+Black Rock City is temporary, rotated, rebuilt from a new survey each year, and used in a place where connectivity is unreliable. A normal web map is the wrong tool.
 
-**Addresses are polar, so the geocoder is too.** `bearing = layout.bearing +
-(hour%12·60 + minute)/720·360`, radius in feet from the Man. Verified against
-Burning Man's own surveyed control points to within a foot. `src/brc/geocode.ts`
-parses the forms that appear in the real data and on street signs — `D & 3:15`,
-`7:30 & Esplanade`, `12:00 2500'` — and reverses them, so clicking bare playa
-answers "where am I?" in the only vocabulary that works out there.
+Dust Compass turns Burning Man's published city survey and listing data into a static, installable web app. It needs no account, sends saved places nowhere, uses no tile server, and precaches the working map before you leave coverage.
 
-**The map rotates.** 12:00 sits at compass bearing 45°, and the map is rotated
-to match by default so the city reads the way the street signs do. This is the
-single feature that makes a playa map legible, and it is why Leaflet was not an
-option.
+## Highlights
 
-**No tile server, no API key, no network.** There is no cell service on playa.
-The city geometry is generated locally, glyphs are bundled, and listings are
-static JSON. It installs as a PWA and precaches everything up front — shell,
-worker, listings, glyphs, ~8.7MB — because a cache that fills as you browse is
-useless when you are already in the desert. `scripts/offline-test.mjs` proves
-this rather than asserting it: it loads the app, cuts the network entirely,
-reloads, and requires the city to still render and addresses to still geocode.
-That install happens once, on whatever connection someone has before they drive
-out, so each asset gets three attempts and several are fetched at a time. It
-still fails as a whole if anything is unreachable — a partial cache reporting
-success would be a lie told at the worst possible moment — but it says so, and
-the status chip offers a retry rather than freezing on the count it died at.
-The offline test drops a request mid-install to prove the retry works.
-If you later want surrounding desert, `src/map/protocols.ts` registers
-`pmtiles://` — a single static archive read with HTTP range requests, no
-backend.
+- **Works offline** — the app shell, map geometry, labels, listings, and service worker are cached up front and verified before the app reports itself ready.
+- **Speaks playa addresses** — search `D & 3:15`, `7:30 & Esplanade`, or `12:00 2500'`; tap open playa to reverse-geocode it.
+- **Navigates with live GPS** — follow a live location marker, distance, walk/bike estimates, clock direction, and device-heading compass. The screen stays awake during active navigation when the browser supports it.
+- **Finds what matters nearby** — jump to the nearest toilet, ranger, or medical point with one tap.
+- **Keeps the week organized** — browse events by time or distance, search titles and descriptions, and save a personal offline schedule.
+- **Gets you back** — save a camp, tent, bike, meetup point, or dropped pin on the device and navigate to it later.
+- **Protects night vision** — switch between dark, light, and a deliberately low-luminance red night mode.
+- **Shares useful links** — send a camp, artwork, or exact pin with its playa address and a place-specific social preview.
 
-**Dark by default, with a red night mode.** A white screen at 3am destroys
-night vision for everyone standing near you; red preserves it, which is why red
-headlamps are the convention out here. Night mode puts the whole interface on a
-single low-luminance red, not just the map — a bright white dialog would undo
-the point of it.
+## Try it
 
-**Saved spots are the point at 4am.** Where the tent is, where the bike got
-left, where you agreed to meet. They live on the device, never touch the
-network, and survive a corrupted or truncated write — losing the file is
-acceptable, crashing the map on the one night it is needed is not. Toilets and services stay on their own layer that survives
-filtering camps and art away, for the same reason.
+Open **[lnorton89.github.io/dustcompass](https://lnorton89.github.io/dustcompass/)** in a modern browser.
 
-**"What's on now" is only half the question.** The other half is whether you
-can get there before it ends, so the events list sorts by distance as well as
-time. Choosing that sort is also when it asks for your location — offering it
-only once a fix exists means it is never there when it is first wanted.
+Before heading to playa:
 
-**The share image is built, not committed.** `scripts/lib/og-plate.mjs`
-describes the card once — palette, wordmark, compass rosette, the required
-non-affiliation line — and [metaplate](https://github.com/lnorton89/metaplate)
-renders it to `public/og-image.png` on every build, embedding real Inter bytes
-rather than trusting the build machine to have the font. The old pipeline
-screenshotted an SVG in headless Chromium, so the committed card was silently
-set in whatever the machine had installed. `metaplate verify` then checks the
-PNG header of both the source and exported copies, because a share image that
-404s or decodes wrong is invisible until someone posts the link. It is the one
-asset deliberately excluded from the offline precache: it is for crawlers, and
-the first-run download has to finish before the user reaches the desert.
+1. Open the app on a reliable connection.
+2. Wait for the status indicator to say **Ready offline**.
+3. Install it from your browser's **Add to Home Screen** or **Install app** action.
+4. Test it once in airplane mode.
 
-**A shared pin should preview as that place.** Sending someone a link and
-having it unfurl as the app's own front page wastes the only thing a preview is
-for — the name and the address. Every camp and art piece has a page of its own
-at `/p/<uid>/` carrying both, which then hands the reader on to the map with
-that listing open. A listing with a photo previews as its photo, because that
-is the better image and because the photos are whatever shape the camp
-uploaded; the ones without get a card drawn for them. Neither those pages nor
-those cards are precached — they exist for crawlers, and the offline download
-is the one number here that must not grow.
+Geolocation, compass access, wake lock, and PWA installation depend on browser and device support. HTTPS is required for the service worker and geolocation.
 
-**The listings keep moving after the last commit.** Art locations stay
-embargoed until Gates open, so on the morning of 30 August the map gains 329
-pieces it could not legally show the day before, and camps add and move events
-right through the week. Nobody is at a laptop for any of that, so the deploy
-runs on a schedule as well as on push — at 00:15 and midday Black Rock City
-time, the first of those a quarter of an hour after the embargo lifts.
+## Local development
 
-**Time is playa time.** "What's on now" uses Black Rock City's clock, not the
-device's — people arrive with phones still set to wherever they flew from. And
-outside the event week the wall clock makes every window empty, so the schedule
-scrubs to the start of the burn and says it is previewing, rather than showing
-an empty list that reads as a broken app.
+### Prerequisites
 
-## Getting started
+- Node.js 24 (the version used in CI)
+- npm
+- A modern browser with WebGL 2
+
+### Quick start with archived data
+
+This path does not require an API key:
 
 ```sh
-npm install
-npm run fetch-data      # the published survey, and the layout derived from it
-npm run fetch-api -- 2026                    # listings, needs an API key
-npm run fetch-archive -- 2025                # or a completed year's archive
-npm run dev
+git clone https://github.com/lnorton89/dustcompass.git
+cd dustcompass
+npm ci
+npm run fetch-data -- 2025
+npm run fetch-archive -- 2025
+NEXT_PUBLIC_DATA_YEAR=2025 npm run dev
 ```
 
-`npm run fetch-data 2024` pulls a different year.
+Open [http://localhost:3000](http://localhost:3000).
 
-### Live listings
+### Use current listings
 
-Camps, art and events come straight from the source. Put the key in `.env`,
-which is git-ignored, or export it:
+Request a key from the [Burning Man API](https://api.burningman.org/api-key-request/), then export it in the shell that will run the fetch:
 
 ```sh
-export BURNING_MAN_API_KEY=...      # https://api.burningman.org/api-key-request/
-npm run fetch-api 2026
-NEXT_PUBLIC_DATA_YEAR=2026 npm run dev
+export BURNING_MAN_API_KEY=your-key-here
 ```
 
-The city layout still comes from `fetch-data` — only the listings are replaced,
-which is the part published late each year. Records without coordinates are left
-alone rather than geocoded at fetch time: the app geocodes `location_string` at
-load using the same code that powers search, so doing it twice would be two
-places to get it wrong.
+In PowerShell, use `$env:BURNING_MAN_API_KEY = 'your-key-here'` instead.
 
-The script validates every response against the fields the app reads and
-**refuses to overwrite good data with a shape it does not recognise** — the
-alternative failure mode is silent, producing a dataset that loads happily and
-renders an empty map. It also distinguishes "locations are still embargoed" from
-"your key cannot see locations", which look identical in the response.
-
-## What it does
-
-- Renders Black Rock City generated from its layout spec, rotated so 12:00 is up,
-  with surveyed camp footprints once you zoom in
-- Search by camp or art name, or by address — `D & 3:15`, `7:30 & Esplanade`,
-  `9:00 B Plaza @ 4:45`, `12:00 2500'`
-- Tap bare playa to get its street address back
-- Toilets, medical, rangers and civic landmarks on a layer of their own
-- Events filtered to now / next 3h / today, sorted by time or by how close they
-  are, jumping to the hosting camp
-- Favourites, and walk/bike estimates from your GPS fix or the Man
-- "Take me there" draws a line from where you are, with distance, walk and
-  bike estimates, and the direction as a clock position
-- Save where your camp, tent or bike is, and find your way back to it
-- Dark, light, and a red night mode that preserves night vision
-- Share any listing or dropped pin as a link that carries a playa address
-- Installs as an app and works with no connectivity at all
-
-## Deploying
-
-Pushing to the default branch builds and publishes to GitHub Pages
-(`.github/workflows/deploy.yml`). The site lands at
-`https://<owner>.github.io/<repo>/`.
-
-**Setup:** Pages must be on, with *Settings → Pages → Source* set to **GitHub
-Actions** rather than "Deploy from a branch". The workflow cannot enable Pages
-itself — creating the site needs a permission the default `GITHUB_TOKEN` does
-not carry. Left on the branch source, Pages publishes the repository as-is,
-which serves the unbuilt `index.html` and a blank page.
-
-A Pages project site is served from a subpath, so the build takes the prefix
-from the repo name via `BASE_PATH`. Everything that loads data, fonts or icons
-goes through `NEXT_PUBLIC_BASE_PATH`, and the service worker's scope and
-`start_url` follow it, so the offline install works from the subpath too — the
-offline test passes against a production `/dustcompass/` Next.js export.
-
-To deploy anywhere else, build with the prefix that host serves from and publish
-`out/`:
+Fetch the city survey and current listings, then start the app:
 
 ```sh
 npm run fetch-data -- 2026
-NEXT_PUBLIC_BASE_PATH= npm run build   # a root domain, e.g. Netlify or Cloudflare Pages
+npm run fetch-api -- 2026
+NEXT_PUBLIC_DATA_YEAR=2026 npm run dev
 ```
 
-HTTPS is required, not optional: service workers and geolocation both refuse to
-run without it, and those are the two things this app is for.
+`fetch-data` retrieves the published survey and derives `public/data/<year>/layout.json`. `fetch-api` retrieves camps, art, and events, validates every response, enforces location embargoes before writing client-visible data, and refuses to replace good data with an unrecognized payload.
 
-## Data and licensing
+## Configuration
 
-The city comes from one place: the GIS survey Burning Man publishes each year at
-[burningmantech/innovate-GIS-data](https://github.com/burningmantech/innovate-GIS-data).
-Street lines, plazas, control points, toilets, city blocks and the trash fence
-are taken from it directly, and `layout.json` is derived from the same files by
-`scripts/derive-layout.mjs` rather than copied from anyone. Camp, art and event
-listings come from the [Burning Man public API](https://innovate.burningman.org/apis-page/),
-or from the official [dataset archive](https://innovate.burningman.org/dataset/)
-for a completed year.
-
-Nothing is vendored from a third-party project. The one non-Burning-Man asset is
-the offline map typeface — Open Sans (Apache-2.0), prebuilt into SDF ranges by
-[openmaptiles/fonts](https://github.com/openmaptiles/fonts) — because a label
-cannot be drawn offline without glyphs, and Burning Man does not publish any.
-
-A current-year build obtains listings from the official API using the key issued
-for this app, stored only as the masked `BURNING_MAN_API_KEY` GitHub Actions
-secret; the key is never inlined into the client bundle or shipped to browsers. The app is
-free, contains no advertising, uses an original name and compass mark, and
-includes the required non-affiliation disclaimer in the live interface and share image.
-See the current [API and dataset terms](https://innovate.burningman.org/terms-of-service-for-burning-man-apis-and-datasets/).
-
-Those terms embargo location data: **camp locations may not be shown before the
-Sunday preceding the event, and art locations not until Gates open.** That is a
-licence condition, so `scripts/fetch-api.mjs` removes confidential locations
-before writing anything into `public/` or the offline cache. The client repeats
-the check in `src/data/embargo.ts` as defense in depth; this is never merely a
-UI filter. Both stages strip the address string as well as the coordinates — a
-playa address geocodes back to within a metre of the published GPS, so leaving
-it in place would hand back exactly the position the embargo exists to withhold.
-
-For 2026, drop in the published `layout.json` and point `NEXT_PUBLIC_DATA_YEAR` at it.
-
-## Stack notes
-
-| Package | Version | Note |
+| Variable | Default | Purpose |
 |---|---|---|
-| `maplibre-gl` | 6.5.0 | ESM-only, WebGL2-required as of v6 |
-| `@vis.gl/react-maplibre` | 8.1.2 | vis.gl's MapLibre binding, split out of `react-map-gl` v8 |
-| `@mui/material` | 9.3.1 | v9 realigned majors with MUI X |
-| `pmtiles` | 4.5.0 | optional basemap, single static archive |
-| `react` | 19.2 | |
-| `next` | 16.3 | App Router, `output: 'export'` — no server anywhere |
-| `metaplate` | 0.1.2 | renders and verifies the share image at build time |
-| `vitest` | 4.1 | |
+| `BURNING_MAN_API_KEY` | — | Server-side key used only by `scripts/fetch-api.mjs`; never shipped to browsers |
+| `NEXT_PUBLIC_DATA_YEAR` | `2026` | Data directory the client loads |
+| `NEXT_PUBLIC_BASE_PATH` | empty | Deployment subpath, such as `/dustcompass` on GitHub Pages |
+| `NEXT_PUBLIC_SITE_URL` | live GitHub Pages URL | Canonical base URL used for metadata and share pages |
+| `NEXT_PUBLIC_E2E` | unset | Enables deterministic browser-test instrumentation; do not use for production builds |
 
-Two integration details worth knowing, both of which cost real debugging time:
+## How it works
 
-- **MapLibre 6 resolves its web worker from `import.meta.url`.** Once a bundler
-  emits the library as a hashed chunk, the sibling `maplibre-gl-worker.mjs` no
-  longer exists and 404s. Because every GeoJSON source is parsed in the worker,
-  the map paints its background and then *silently never fires `load`* — no
-  error. `scripts/copy-map-worker.mjs` copies the official module worker and
-  its shared runtime into `public/`, and `src/map/worker.ts` points
-  `setWorkerUrl` at that fixed path — which also survives a strict CSP.
-- **MUI 9 `Stack` dropped `alignItems`/`justifyContent`/`gap` as direct props**
-  (use `spacing` and `sx`), and `Autocomplete`'s `renderInput` params now expose
-  `slotProps` rather than `InputProps`. Spread `params.slotProps` when you
-  override it, or you drop the ref to the underlying `<input>`.
+```text
+Burning Man survey ──> fetch-data / derive-layout ──> layout.json ─┐
+                                                                  ├─> static Next.js export ─> PWA cache
+API or archive ──────> validate + embargo filtering ─> listings ──┘
+                                                                  │
+GPS + device heading ─────────────────────────────────────────────> local navigation
+```
+
+- **No backend:** Next.js exports a static site to `out/`; all map and navigation logic runs in the browser.
+- **No raster tile dependency:** `src/brc/city.ts` builds GeoJSON from the derived layout and MapLibre renders it locally. Optional `pmtiles://` support exists for a static surrounding-desert archive.
+- **One source of geographic truth:** street geometry, plazas, civic points, city blocks, toilets, the trash fence, and gate roads originate in the official annual survey.
+- **Atomic live-data updates:** the service worker promotes a complete revision only after every file is present, so a failed refresh does not replace a working offline dataset with a partial one.
+- **Local-first personal data:** favorites, saved places, and saved events remain in browser storage; saved places and events are scoped to the selected data year.
+
+<details>
+<summary><strong>Engineering notes: survey fitting, coordinates, and geocoding</strong></summary>
+
+### The city is generated, not downloaded
+
+Black Rock City does not exist as a stable street network. `scripts/derive-layout.mjs` fits the annual survey's annular street centerlines to recover the Man, city rotation, street radii, radial extents, widths, segments, and gate-road geometry. It rejects layouts that disagree with independent surveyed control points instead of quietly publishing plausible-looking geometry.
+
+### Local WGS84 math matters
+
+At Black Rock City's latitude, a mean-radius sphere can introduce several metres of position error over playa distances. `src/brc/geo.ts` uses local WGS84 radii of curvature, preserving the speed of local planar calculations while tracking surveyed and geodesic positions closely enough for street-level use.
+
+### Playa addresses are polar
+
+`src/brc/geocode.ts` converts clock position and distance from the Man into coordinates, parses real address forms used in the published data, and performs the reverse operation for tapped or live GPS positions. It validates intersections against surveyed street segments and radial extents rather than inventing roads through known gaps.
+
+</details>
+
+<details>
+<summary><strong>Engineering notes: offline behavior and share pages</strong></summary>
+
+### Offline is a tested product state
+
+The generated service worker precaches the complete application rather than filling the cache opportunistically. Returning sessions verify cache integrity; incomplete caches are repaired, and a refresh is promoted atomically. `scripts/offline-test.mjs` then disables the network, reloads the production build, and requires the map and geocoder to keep working.
+
+### Share pages remain lightweight
+
+Each listing has a static `/p/<uid>/` page with place-specific metadata. `metaplate` generates the main social image, while listing share cards are generated at build time. Crawler-only pages and cards stay outside the offline precache so they do not inflate the first-run download.
+
+</details>
+
+## Project map
+
+| Path | Responsibility |
+|---|---|
+| `src/brc/` | Survey-derived city model, coordinates, geocoding, travel math, and civic services |
+| `src/data/` | Listing ingestion, embargo enforcement, deep links, GPS, favorites, and saved data |
+| `src/map/` | MapLibre scene, layers, markers, picking, routes, and styling |
+| `src/ui/` | Search, events, details, navigation, filters, offline status, and themes |
+| `scripts/` | Data fetches, layout derivation, static assets, service worker, and browser tests |
+| `src/app/` | Next.js static routes, metadata, PWA manifest, and listing share pages |
 
 ## Testing
 
-Four layers, all runnable locally.
+The repository checks logic, the real exported application, accessibility, UI invariants, and offline behavior.
 
 ```sh
-npm test                                                 # 108 unit + component tests
-NEXT_PUBLIC_E2E=1 npm run build && npm run preview &
-npm run test:smoke  http://127.0.0.1:4173/dustcompass/   # 64 browser assertions
-npm run test:a11y   http://127.0.0.1:4173/dustcompass/   # axe, 9 UI states
-npm run test:offline http://127.0.0.1:4173/dustcompass/  # proves offline works
+npm run typecheck
+npm run lint
+npm test
 ```
 
-**Unit** — the geocoder is held against Burning Man's own surveyed GPS rather
-than a handful of fixtures. All 1,369 published camp addresses parse, and every
-one that is a street intersection or plaza rim lands **within one metre** of the
-surveyed position. Portal addresses are held to a looser bound because a portal
-is a gap in the street ring spanning an arc, not a point. The embargo has its
-own regression test asserting that no embargoed listing retains anything the map
-could plot.
+For the production browser suites:
 
-**Smoke** — boots Chromium, asserts the city rendered (streets, labels, camp
-clusters, toilets, services), toggles a filter and checks the layer actually
-empties and refills, drives a search, opens a listing, stars it and confirms it
-persisted.
+```sh
+NEXT_PUBLIC_BASE_PATH=/dustcompass NEXT_PUBLIC_E2E=1 npm run build
+NEXT_PUBLIC_BASE_PATH=/dustcompass npm run preview &
 
-**Accessibility** — axe against WCAG 2.1 AA across the map, events panel,
-search suggestions, listing details, navigation, the save dialog, red night mode
-and the phone layout including its filter sheet. Night mode drops contrast
-deliberately and still has to pass — it caught a 4.37:1 chip that would
-otherwise have shipped.
+npm run test:smoke -- http://127.0.0.1:4173/dustcompass/
+npm run test:a11y -- http://127.0.0.1:4173/dustcompass/
+npm run test:ui -- http://127.0.0.1:4173/dustcompass/
+npm run test:offline -- http://127.0.0.1:4173/dustcompass/
+```
 
-**Offline** — loads the app, waits for the service worker to finish precaching,
-disables the network, reloads, and requires the map to paint and addresses to
-geocode with nothing available from the server.
+- **Unit and component tests** cover geocoding, survey fidelity, embargo handling, events, saved data, navigation, map layers, and UI behavior.
+- **Smoke tests** exercise the production map and core workflows in Chromium.
+- **Accessibility tests** run axe against desktop, phone, dialogs, navigation, events, and all color modes.
+- **UI invariants** enforce touch-target, overlap, responsive-layout, and production-theme contracts.
+- **Offline tests** cut the network after installation and verify the exported app still boots and geocodes.
+
+## Deployment
+
+Pushing to `master` runs the GitHub Pages workflow in `.github/workflows/deploy.yml`. The workflow fetches data, runs the quality gates against an E2E-instrumented production build, rebuilds without test instrumentation, retests the artifact that will actually ship, and publishes `out/`.
+
+To deploy at a root domain on another static host:
+
+```sh
+npm run fetch-data -- 2026
+NEXT_PUBLIC_BASE_PATH= npm run build
+```
+
+Publish the resulting `out/` directory over HTTPS. For a project subpath, set `NEXT_PUBLIC_BASE_PATH` to that prefix before building.
+
+## Data, embargoes, and attribution
+
+City geometry comes from [Burning Man's annual GIS survey](https://github.com/burningmantech/innovate-GIS-data). Camps, art, and events come from the [Burning Man public API](https://innovate.burningman.org/apis-page/) or the official [dataset archive](https://innovate.burningman.org/dataset/) for completed years.
+
+Current-year location data is subject to the [API and dataset terms](https://innovate.burningman.org/terms-of-service-for-burning-man-apis-and-datasets/). The fetch pipeline strips embargoed coordinates and geocodable address strings before they can enter `public/`; the client repeats the check as defense in depth.
+
+The bundled offline map glyphs are Open Sans SDF ranges from [openmaptiles/fonts](https://github.com/openmaptiles/fonts), provided under Apache-2.0. Other brand and generated assets in this repository are original to Dust Compass.
+
+## Contributing
+
+Bug reports and focused pull requests are welcome. Before opening a PR:
+
+1. Run `npm run typecheck`, `npm run lint`, and `npm test`.
+2. Run the relevant production browser suite for user-facing changes.
+3. Keep geographic claims traceable to the official survey or listing source.
+4. Do not commit API keys, fetched embargoed locations, generated `out/` files, or local screenshots.
+
+Use [GitHub Issues](https://github.com/lnorton89/dustcompass/issues) for reproducible bugs and feature requests.
+
+---
+
+<div align="center">
+  Built for the playa, where “works offline” has to mean it.
+</div>

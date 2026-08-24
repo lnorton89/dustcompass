@@ -49,6 +49,7 @@ import { useEventsByHost, usePlayaData, type PartialDataWarning } from './data/u
 import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
 import { useGeolocation } from './data/useGeolocation'
+import { useCompassHeading } from './data/useCompassHeading'
 import { useSavedPlaces } from './data/useSavedPlaces'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
@@ -576,11 +577,24 @@ export default function App() {
 
   const navigation = useMemo(() => {
     if (!heading || !origin || !data) return undefined
+    const bearing = bearingBetween(origin, heading.position)
     return {
       travel: travelBetween(origin, heading.position),
-      clock: bearingToClock(data.layout, bearingBetween(origin, heading.position)),
+      clock: bearingToClock(data.layout, bearing),
+      // Kept alongside the clock string rather than recomputed: it's the same
+      // bearing, and it's what the device-heading compass needle needs
+      // (#63) — `needleAngle(bearing, deviceHeading)` in NavBar/CompassNeedle.
+      bearing,
     }
   }, [heading, origin, data])
+
+  /**
+   * The physical compass sensor — unrelated to the map's own bearing/
+   * orientation controls, which rotate the MapLibre camera and never touch
+   * this. Only listens while there is somewhere to point at, same lifecycle
+   * as the navigation strip that shows its needle.
+   */
+  const compass = useCompassHeading(Boolean(navigation))
   /**
    * Arrival, buzzed once. The whole point of giving the heading as a clock
    * position is that you can act on it without looking at the screen, so the
@@ -1095,6 +1109,9 @@ export default function App() {
                   address={heading.address}
                   travel={navigation.travel}
                   heading={navigation.clock}
+                  bearing={navigation.bearing}
+                  compass={compass}
+                  palette={palette}
                   located={Boolean(usableFix)}
                   status={location.status}
                   accuracy={location.accuracy}

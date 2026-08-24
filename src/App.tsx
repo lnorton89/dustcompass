@@ -23,6 +23,7 @@ import InputAdornment from '@mui/material/InputAdornment'
 import CloseIcon from '@mui/icons-material/Close'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import LinkOffIcon from '@mui/icons-material/LinkOff'
 import TuneIcon from '@mui/icons-material/Tune'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import NightlightIcon from '@mui/icons-material/Nightlight'
@@ -396,6 +397,12 @@ export default function App() {
   }, [data, deepLink, deepLinkResolution])
 
   const [restoredLink, setRestoredLink] = useState<string | null>(null)
+  // A `?poi=` naming a uid that is neither a located POI nor an unplaced
+  // listing — a listing removed/cancelled since the link was shared, or an
+  // old-year link outliving its dataset. Kept separately from `unplaced`
+  // (undefined) so the app can say what happened instead of silently
+  // collapsing to the bare map.
+  const [staleLink, setStaleLink] = useState<string>()
   const linkKey = deepLink.poi ?? deepLink.at ?? null
   // Apply restoration during render so the selection/pin and its guard commit
   // together. This also prevents the URL-mirroring effect from erasing a cold
@@ -423,9 +430,13 @@ export default function App() {
   }
   // A shared link to something with no location still has to land on it. There
   // is no camera move to make, so this sits outside the block above, which
-  // exists to aim one.
+  // exists to aim one. A uid matching neither a located POI nor an unplaced
+  // listing is not a listing to open at all — it is a dead link, and says so
+  // rather than quietly resolving to nothing.
   if (data && !initialTarget && deepLink.poi && restoredLink !== linkKey) {
-    setUnplaced(data.unplaced.find((listing) => listing.uid === deepLink.poi))
+    const listing = data.unplaced.find((entry) => entry.uid === deepLink.poi)
+    if (listing) setUnplaced(listing)
+    else setStaleLink(deepLink.poi)
     setRestoredLink(linkKey)
   }
 
@@ -437,6 +448,12 @@ export default function App() {
     // arrives. Restoration commits first; only then does normal URL mirroring
     // take over.
     if (linkKey && restoredLink !== linkKey) return
+    // A stale link's uid stays in the address bar, unexplained-looking as
+    // that may seem, for as long as the notice explaining it is still up —
+    // publishing here would erase the very link the notice is about before
+    // the reader has done anything with it. Dismissing the notice clears
+    // `staleLink` and lets this effect resume normally on the next run.
+    if (staleLink) return
     if (selected) publish({ poi: selected.uid })
     else if (unplaced) publish({ poi: unplaced.uid })
     // The active navigation destination outranks a leftover dropped pin —
@@ -454,7 +471,7 @@ export default function App() {
       )
     else if (pin) publish({ at: pin.address, ll: pin.position })
     else publish({})
-  }, [data, selected, unplaced, heading, pin, publish, linkKey, restoredLink])
+  }, [data, selected, unplaced, heading, pin, publish, linkKey, restoredLink, staleLink])
 
   const visiblePois = useMemo(() => {
     if (!data) return []
@@ -1054,6 +1071,62 @@ export default function App() {
                   </Typography>
                   <Button size="small" color="warning" onClick={retry}>
                     Retry
+                  </Button>
+                </Paper>
+              )}
+              {staleLink && (
+                // A `?poi=` naming a listing that is neither placed nor
+                // unplaced-but-embargoed — removed/cancelled since the link
+                // was shared, or from a year whose dataset has moved on. The
+                // old behaviour silently erased the link and landed on the
+                // bare map with no explanation; this says what happened and
+                // keeps the link in the address bar (see the URL-mirroring
+                // effect's own `staleLink` guard) until it is dismissed.
+                <Paper
+                  elevation={0}
+                  sx={{
+                    position: 'absolute',
+                    // Stack below whichever of the embargo/partial-data
+                    // banners are also showing, rather than overlapping them.
+                    top:
+                      (!data.embargo.artReleased && !embargoNoticeSeen ? 1 : 0) +
+                        (data.partialDataWarnings.length > 0 ? 1 : 0) ===
+                      2
+                        ? { xs: 'calc(152px + var(--safe-top))', sm: 104 }
+                        : (!data.embargo.artReleased && !embargoNoticeSeen ? 1 : 0) +
+                              (data.partialDataWarnings.length > 0 ? 1 : 0) ===
+                            1
+                          ? { xs: 'calc(104px + var(--safe-top))', sm: 56 }
+                          : { xs: 'calc(56px + var(--safe-top))', sm: 8 },
+                    left: 8,
+                    right: { xs: 8, sm: 'auto' },
+                    maxWidth: { sm: 420 },
+                    zIndex: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    pl: 1.25,
+                    pr: 0.5,
+                    py: 0.25,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                  }}
+                >
+                  <LinkOffIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+                  <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
+                    This shared listing is no longer in the current map.
+                  </Typography>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setStaleLink(undefined)
+                      searchInput.current?.focus()
+                    }}
+                  >
+                    Search
+                  </Button>
+                  <Button size="small" onClick={() => setStaleLink(undefined)}>
+                    Show map
                   </Button>
                 </Paper>
               )}

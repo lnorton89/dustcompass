@@ -713,6 +713,52 @@ await shared.close()
   await linked.close()
 }
 
+// #22: a `?poi=` naming a uid that matches nothing in the current dataset —
+// a removed/cancelled listing, or an old link — used to resolve to nothing
+// and silently collapse to the bare map with no explanation. It has to say
+// what happened instead, keep the dead link in the address bar until
+// dismissed, and offer a way forward. This is also exactly the state an
+// offline `/p/<uid>/` fallback lands in for an unknown uid: the service
+// worker (scripts/build-sw.mjs) redirects an offline listing page straight
+// to `?poi=<uid>`, so a cold load of that URL exercises the same path a
+// stale offline share link would.
+{
+  const stale = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await stale.newPage()
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('dust-compass:first-run:1', 'seen')
+    } catch {
+      /* private-mode storage throws; the dialog is harmless if it appears */
+    }
+  })
+  const staleUid = 'not-a-real-listing-00000'
+  await page.goto(new URL(`?poi=${staleUid}`, url).href, { waitUntil: 'load' })
+  await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+  await page.waitForTimeout(3000)
+
+  assert(
+    await page.getByText(/no longer in the current map/i).isVisible(),
+    'an unknown ?poi= uid shows a stale-link explanation, not a silent bare map (#22)',
+  )
+  assert(
+    new URL(page.url()).searchParams.get('poi') === staleUid,
+    'the dead link stays in the address bar until the notice is dismissed (#22)',
+  )
+
+  await page.getByRole('button', { name: 'Show map' }).click()
+  await page.waitForTimeout(700)
+  assert(
+    !(await page.getByText(/no longer in the current map/i).isVisible()),
+    'dismissing the notice returns to the normal map (#22)',
+  )
+  assert(
+    new URL(page.url()).searchParams.get('poi') !== staleUid,
+    'dismissing the notice resumes normal URL mirroring, clearing the dead link (#22)',
+  )
+  await stale.close()
+}
+
 console.log(problems.length ? `\n${problems.length} problem(s):\n` + problems.join('\n') : '\nno console or network errors')
 await browser.close()
 process.exit(problems.length || process.exitCode ? 1 : 0)

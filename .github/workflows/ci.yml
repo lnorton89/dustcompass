@@ -45,6 +45,18 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
+      # Next.js's own incremental build cache — without this every run
+      # recompiles from nothing, which is what the build step's own "No build
+      # cache found" warning was pointing at. Keyed on the lockfile plus every
+      # source file, so a dependency bump or any code change still gets a
+      # correct (if partial-hit) cache rather than a stale one.
+      - uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*.[jt]s', 'src/**/*.[jt]sx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-
+
       - name: Build
         env:
           NEXT_PUBLIC_BASE_PATH: /dustcompass

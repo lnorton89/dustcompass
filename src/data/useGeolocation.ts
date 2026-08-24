@@ -32,6 +32,18 @@ export function useGeolocation(): Geolocation {
       watchId.current = undefined
     }
     setStatus((current) => (current === 'tracking' || current === 'locating' ? 'idle' : current))
+    // The whole point of `position` is that it tracks where the user is
+    // *right now*. Once nothing is watching any more, it can only get more
+    // wrong as the person keeps moving — leaving it in state let it be read
+    // indefinitely by DetailDrawer/EventDetail/navigation as a live "you"
+    // fix that could in truth be minutes or hours stale (#50). Clearing it
+    // here makes "stopped" behave exactly like "never located" for every
+    // consumer that already treats `Boolean(position)` as "do I know where
+    // they are", rather than needing each of those call sites to separately
+    // reason about staleness.
+    setPosition(undefined)
+    setAccuracy(undefined)
+    setLastFixAt(undefined)
   }, [])
 
   const start = useCallback(() => {

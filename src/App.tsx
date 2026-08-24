@@ -48,7 +48,7 @@ import { playaTheme } from './ui/theme'
 import { useEventsByHost, usePlayaData, type PartialDataWarning } from './data/usePlayaData'
 import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
-import { useGeolocation } from './data/useGeolocation'
+import { useGeolocation, type LocationStatus } from './data/useGeolocation'
 import { useSavedPlaces } from './data/useSavedPlaces'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
@@ -185,6 +185,36 @@ export function readStoredFilters(): Set<Filter> {
   }
 }
 
+/**
+ * Whether a navigation arrival buzz may fire. `origin` (and so
+ * `navigation.travel`) falls back to the Man's own coordinates once
+ * `isNearCity()` rejects a fix as unusable, so `hasUsableFix` — not merely
+ * "some fix exists" — is what stops a destination near the Man from arming
+ * a false arrival from a fix hundreds of miles away (#49). Exported for a
+ * focused unit test rather than exercising it through the whole component.
+ */
+/**
+ * Whether a status transition means the shared geolocation watch has
+ * terminally failed, so any recorded owner in `locationOwners` no longer
+ * represents a real acquired fix — most importantly the map locate
+ * control's owner, which by design has no explicit release action on
+ * success and would otherwise stay recorded forever after a denied/
+ * unavailable attempt, permanently blocking `locationOwners` from ever
+ * returning to empty (#56). Exported for a focused unit test.
+ */
+export function locationWatchHasFailed(status: LocationStatus): boolean {
+  return status === 'denied' || status === 'unavailable'
+}
+
+export function canConfirmArrival(
+  travelMeters: number,
+  hasUsableFix: boolean,
+  accuracy: number | undefined,
+): boolean {
+  if (!hasUsableFix) return false
+  return travelMeters + (accuracy ?? Infinity) <= 25
+}
+
 export default function App() {
   const { data, error, retry } = usePlayaData()
   const { favorites, toggle: toggleFavorite } = useFavorites()
@@ -316,6 +346,20 @@ export default function App() {
     },
     [location.stop],
   )
+  /**
+   * `acquireLocation` records an owner before `watchPosition()` is known to
+   * have succeeded, so a denied/unavailable acquisition — most often the
+   * map's locate control, which by design has no explicit release action on
+   * success — otherwise leaves a phantom owner behind forever. With a
+   * phantom owner never removed, `locationOwners` never returns to empty, so
+   * `location.stop()` above stops firing for the rest of the session even
+   * once every real, successful consumer has released (#56). There is only
+   * ever one shared watch, so once it has terminally failed, nothing in
+   * `locationOwners` still represents a real acquired fix.
+   */
+  useEffect(() => {
+    if (locationWatchHasFailed(location.status)) locationOwners.current.clear()
+  }, [location.status])
   /**
    * `useGeolocation()` returns a fresh object every render, so an inline
    * `() => acquireLocation('events')` at the EventsPanel callsite would be a
@@ -594,24 +638,24 @@ export default function App() {
   const arrived = useRef(false)
   useEffect(() => {
     if (!navigation || arrived.current) return
-    // `origin` falls back to the Man's own coordinates until a real GPS fix
-    // exists, so a destination within 25m of the Man could otherwise arm a
-    // false arrival the instant navigation starts, while the phone is still
-    // locating and the walker may be nowhere near it. Only a fix belonging
-    // to the active session may confirm arrival.
-    if (!here) return
-    // The buzz is trusted without looking at the screen, so a merely nearby
-    // computed point is not enough — the fix has to be accurate enough to
-    // actually support the claim. A conservative, uncertainty-aware check:
-    // even in the worst case implied by the fix's own reported accuracy, the
-    // true position could still be inside the arrival radius. Missing
-    // accuracy (not guaranteed by the Geolocation API, though effectively
-    // always present) is treated as unbounded rather than zero.
-    const accuracy = location.accuracy ?? Infinity
-    if (navigation.travel.meters + accuracy > 25) return
+    // `origin` falls back to the Man's own coordinates until a real,
+    // in-city GPS fix exists, and `navigation.travel` is computed from
+    // `origin` — not from the raw fix. Gating on `here` (any fix at all,
+    // including one hundreds of miles away that `isNearCity()` already
+    // rejected as a navigation origin) let a destination within 25m of the
+    // Man arm a false "arrived" buzz from anywhere on the fallback path.
+    // Only a fix `origin` itself is actually using may confirm arrival. The
+    // buzz is trusted without looking at the screen, so a merely nearby
+    // computed point is not enough either — the fix has to be accurate
+    // enough to actually support the claim. A conservative,
+    // uncertainty-aware check: even in the worst case implied by the fix's
+    // own reported accuracy, the true position could still be inside the
+    // arrival radius. Missing accuracy (not guaranteed by the Geolocation
+    // API, though effectively always present) is treated as unbounded.
+    if (!canConfirmArrival(navigation.travel.meters, Boolean(usableFix), location.accuracy)) return
     arrived.current = true
     haptic('arrive')
-  }, [navigation, here, location.accuracy])
+  }, [navigation, usableFix, location.accuracy])
 
 
   /**

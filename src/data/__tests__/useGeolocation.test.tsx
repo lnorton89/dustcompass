@@ -66,6 +66,29 @@ describe('useGeolocation', () => {
     expect(result.current.status).toBe('tracking')
   })
 
+  /**
+   * #50: `stop()` used to leave `position`/`accuracy`/`lastFixAt` in state
+   * indefinitely once the last owner released the watch, so a detail panel
+   * opened later could present a fix from minutes (or hours) earlier as the
+   * user's current location with no indication tracking had actually
+   * stopped. `stop()` alone — not just the stop-then-start pairing already
+   * covered above — must clear the fix.
+   */
+  it('clears the retained fix once stopped, even without an immediate restart', () => {
+    const { result } = renderHook(() => useGeolocation())
+
+    act(() => result.current.start())
+    act(() => calls[0].success(fix(-119.2, 40.78)))
+    expect(result.current.position).toEqual([-119.2, 40.78])
+
+    act(() => result.current.stop())
+
+    expect(result.current.position).toBeUndefined()
+    expect(result.current.accuracy).toBeUndefined()
+    expect(result.current.lastFixAt).toBeUndefined()
+    expect(result.current.status).toBe('idle')
+  })
+
   it('starts exactly one watch per start() call and pairs each with a clearWatch', () => {
     const { result } = renderHook(() => useGeolocation())
     act(() => result.current.start())

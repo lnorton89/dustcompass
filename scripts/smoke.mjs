@@ -135,7 +135,15 @@ if (await closest.count()) {
     .map((text) => /([\d.]+) mi/.exec(text)?.[1])
     .filter(Boolean)
     .map(Number)
-  assert(miles.length > 2, `events show a distance when located (${miles.length} of them)`)
+  // How many events fall in the window depends entirely on the year's schedule
+  // and on when the test runs — before the gates it previews the opening hour,
+  // which is nearly empty. The invariant worth asserting is that sorting by
+  // distance actually produces distances for the events it does list.
+  const rows = await page.locator('.MuiDrawer-root .MuiListItemText-secondary').count()
+  assert(
+    miles.length > 0 && miles.length === rows,
+    `every listed event shows a distance when sorted by Closest (${miles.length} of ${rows})`,
+  )
   assert(
     miles.every((value, i) => i === 0 || value >= miles[i - 1] - 0.05),
     `closest-first ordering holds (${miles.slice(0, 5).join(' → ')})`,
@@ -148,10 +156,28 @@ await page.screenshot({ path: shot })
 await page.getByLabel('Close events').click()
 await page.waitForTimeout(500)
 
-// Select a known camp by name, star it, and confirm it persists.
+// Pick a camp out of the year's own listings rather than naming one: the
+// placement changes completely between years, and a smoke test that hard-codes
+// last year's camp fails for reasons that have nothing to do with the app.
+const DATA_YEAR = process.env.NEXT_PUBLIC_DATA_YEAR ?? '2026'
+const campName = await page.evaluate(async (year) => {
+  const base = window.location.pathname.replace(/[/]$/, '')
+  const camps = await (await fetch(`${base}/data/${year}/camp.json`)).json()
+  const placed = camps.filter(
+    (camp) =>
+      typeof camp.location_string === 'string' &&
+      camp.location_string.includes('&') &&
+      /^[\w' -]{6,28}$/.test(camp.name ?? ''),
+  )
+  return placed[Math.floor(placed.length / 2)]?.name
+}, DATA_YEAR)
+if (!campName) throw new Error('No addressed camp in the published listings to drive the test with.')
+console.log(`      using camp "${campName}" from this year's listings`)
+
+// Select that camp by name, star it, and confirm it persists.
 const search = page.getByPlaceholder(/Camp, art, or an address/)
 await search.fill('')
-await search.fill('Pink Fuzzy Monkey')
+await search.fill(campName)
 await page.waitForTimeout(700)
 await page.keyboard.press('ArrowDown')
 await page.keyboard.press('Enter')
@@ -210,7 +236,7 @@ await page.waitForTimeout(1200)
 
 // Navigation: pick a camp, head for it, and require a live line and estimate.
 await search.fill('')
-await search.fill('Pink Fuzzy Monkey')
+await search.fill(campName)
 await page.waitForTimeout(700)
 await page.keyboard.press('ArrowDown')
 await page.keyboard.press('Enter')
@@ -222,7 +248,7 @@ assert(await page.getByTestId('navigation-target').isVisible(), 'navigation keep
 assert((await page.getByTestId('selection-target').count()) === 0, 'selection target becomes the navigation target')
 const targetText = await page.getByTestId('navigation-target').innerText()
 assert(
-  targetText.includes('DESTINATION') && targetText.includes('Pink Fuzzy Monkey'),
+  targetText.includes('DESTINATION') && targetText.includes(campName),
   `map callout names the exact destination (${targetText.replace(/\n/g, ' · ')})`,
 )
 const destinationBox = await page.getByTestId('navigation-target').boundingBox()
@@ -235,14 +261,14 @@ assert(
   `destination is recentered in the usable map (${Math.round(destinationBox?.x ?? -1)}, ${Math.round(destinationBox?.y ?? -1)})`,
 )
 
-const nav = await page.evaluate(() => {
+const nav = await page.evaluate((name) => {
   const route = window.__map.queryRenderedFeatures({ layers: ['route-line'] })
-  return { segments: route.length, bar: document.body.innerText.includes('Pink Fuzzy Monkey') }
-})
+  return { segments: route.length, bar: document.body.innerText.includes(name) }
+}, campName)
 assert(nav.segments > 0, `route line drawn (${nav.segments} segment)`)
 assert(nav.bar, 'navigation bar names the destination')
 
-const navText = await page.locator('.MuiPaper-root').filter({ hasText: 'Pink Fuzzy Monkey' }).first().innerText()
+const navText = await page.locator('.MuiPaper-root').filter({ hasText: campName }).first().innerText()
 assert(/\d/.test(navText) && /min/.test(navText), `navigation shows distance and time (${navText.replace(/\n/g, ' · ')})`)
 // Asking to be taken somewhere should start locating, so the heading is
 // measured from the user rather than falling back to the Man.

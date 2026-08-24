@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CityLayout } from '../brc/layout'
 import { buildCity, type CityGeometry } from '../brc/city'
-import { buildServices, toiletPoints, type ServiceSpec } from '../brc/services'
+import { buildServices, toiletPoints } from '../brc/services'
 import { geocode } from '../brc/geocode'
 import type { ArtItem, CampItem, EventItem, Poi } from './types'
 import { applyEmbargo, embargoState, embargoWindowForYear, type EmbargoState } from './embargo'
@@ -53,12 +53,12 @@ export function usePlayaData() {
       loadJson<ArtItem[]>(`${base}/art.json`),
       loadJson<CampItem[]>(`${base}/camp.json`),
       loadJson<EventItem[]>(`${base}/event.json`),
-      loadJson<ServiceSpec[]>(`${base}/services.json`).catch<ServiceSpec[]>(() => []),
+      loadJson<GeoJSON.FeatureCollection>(`${base}/cpns.geojson`).catch(() => empty()),
       loadJson<GeoJSON.FeatureCollection>(`${base}/toilets.geojson`).catch(() => empty()),
       loadJson<{ rangeInfo?: EventRange }>(`${base}/dates_info.json`).catch<{
         rangeInfo?: EventRange
       }>(() => ({})),
-      loadJson<GeoJSON.FeatureCollection>(`${base}/camp_outlines.geojson`).catch(() => empty()),
+      loadJson<GeoJSON.FeatureCollection>(`${base}/city_blocks.geojson`).catch(() => empty()),
     ])
       .then(([layout, rawArt, rawCamps, events, serviceSpecs, rawToilets, dates, outlines]) => {
         if (cancelled) return
@@ -73,7 +73,7 @@ export function usePlayaData() {
           events,
           pois: toPois(layout, art, camps),
           range: dates.rangeInfo,
-          services: buildServices(layout, serviceSpecs),
+          services: buildServices(serviceSpecs),
           toilets: toiletPoints(rawToilets),
           campOutlines: outlines,
           embargo,

@@ -1,10 +1,7 @@
-import type { CityLayout } from './layout'
-import { polarToPosition } from './geo'
-
-/** A named city service as it appears in the layout spec's poi.json. */
-export interface ServiceSpec {
-  properties: { name: string; ref: string }
-  address: { time: string; distance: number }
+/** A named place as Burning Man's survey publishes it in `cpns.geojson`. */
+export interface SurveyedPlace {
+  properties: { NAME?: string; TYPE?: string }
+  geometry: { type: 'Point'; coordinates: GeoJSON.Position }
 }
 
 /**
@@ -13,46 +10,49 @@ export interface ServiceSpec {
  */
 export type ServiceCategory = 'medical' | 'ranger' | 'toilet' | 'ice' | 'civic'
 
-const CATEGORY: Record<string, ServiceCategory> = {
-  emergencyclinic: 'medical',
-  firstaid: 'medical',
-  medical: 'medical',
-  ranger: 'ranger',
-  rangerhq: 'ranger',
-  ice: 'ice',
-  arctica: 'ice',
-}
+/**
+ * Plazas, portals and promenades are already drawn from the layout, the Man is
+ * already a landmark, and the numbered points are survey control marks rather
+ * than anywhere a person goes.
+ */
+const NOT_A_SERVICE = /(plaza|portal|promenade)$|^point \d|^the man$/i
 
-export function categorise(ref: string, name: string): ServiceCategory {
-  const key = ref.toLowerCase()
-  if (CATEGORY[key]) return CATEGORY[key]
+export function categorise(name: string): ServiceCategory {
   const label = name.toLowerCase()
-  if (/ranger|station\s*\d/.test(label)) return 'ranger'
-  if (/medical|clinic|rampart|first aid/.test(label)) return 'medical'
-  if (/ice|arctica/.test(label)) return 'ice'
+  // ESD is Burning Man's Emergency Services Department; Rampart is the field
+  // hospital. Neither word contains "medical", and both are where you go.
+  if (/esd station|rampart|medical|clinic|first aid/.test(label)) return 'medical'
+  if (/ranger/.test(label)) return 'ranger'
+  if (/arctica|\bice\b/.test(label)) return 'ice'
   return 'civic'
 }
 
-/** Geocode the named services from their clock addresses. */
+/**
+ * The survey gives these places real coordinates, so they are used as surveyed
+ * rather than geocoded back from a clock address.
+ */
 export function buildServices(
-  layout: CityLayout,
-  specs: ServiceSpec[],
+  places: GeoJSON.FeatureCollection | { features: SurveyedPlace[] },
 ): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  const features = (places.features ?? []) as SurveyedPlace[]
   return {
     type: 'FeatureCollection',
-    features: specs.map((spec) => ({
-      type: 'Feature',
-      properties: {
-        kind: 'service',
-        name: spec.properties.name,
-        ref: spec.properties.ref,
-        category: categorise(spec.properties.ref, spec.properties.name),
-      },
-      geometry: {
-        type: 'Point',
-        coordinates: polarToPosition(layout, spec.address.time, spec.address.distance),
-      },
-    })),
+    features: features
+      .filter((place) => place.properties?.NAME && !NOT_A_SERVICE.test(place.properties.NAME))
+      .filter((place) => place.geometry?.type === 'Point')
+      .map((place) => {
+        const name = place.properties.NAME as string
+        return {
+          type: 'Feature' as const,
+          properties: {
+            kind: 'service',
+            name,
+            ref: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+            category: categorise(name),
+          },
+          geometry: { type: 'Point' as const, coordinates: place.geometry.coordinates },
+        }
+      }),
   }
 }
 

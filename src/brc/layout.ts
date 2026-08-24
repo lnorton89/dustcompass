@@ -5,8 +5,8 @@
  * Man), a rotation, a set of annular "C" streets at fixed radii, and a set of
  * radial "T" streets named by clock position.
  *
- * This is the same layout format used by iBurn's BlackRockCityPlanner, so a
- * new year is a data drop, never a code change.
+ * `scripts/derive-layout.mjs` recovers this spec from the GIS survey Burning
+ * Man publishes each year, so a new year is a data drop, never a code change.
  */
 
 /** All distances in the layout spec are in feet from the Man. */
@@ -58,7 +58,8 @@ export interface CityLayout {
   center_camp?: {
     distance: Feet
     cafe_plaza_radius: Feet
-    cafe_radius: Feet
+    /** Absent when the year's survey draws no inner cafe ring. */
+    cafe_radius?: Feet
     frontage_arc?: { distance: Feet; start_angle: number; end_angle: number }
   }
   cStreets: AnnularStreet[]

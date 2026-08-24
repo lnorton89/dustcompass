@@ -7,8 +7,9 @@ React 19 + MUI 9 + MapLibre GL JS 6.
 
 **Live: https://lnorton89.github.io/dustcompass/**
 
-iBurn is mobile-only and has no web map; this is that map. It borrows iBurn's
-excellent open data (MPL-2.0) but none of its 2017-era tile pipeline.
+iBurn is mobile-only and has no web map; this is that map. Every byte of city
+geometry comes from Burning Man's own published survey — no third-party data,
+no tile pipeline.
 
 ## Why it works the way it does
 
@@ -19,9 +20,28 @@ rotation, annular streets at fixed radii, and radial streets named by clock
 position. `src/brc/city.ts` turns that into GeoJSON in the browser, so a new
 year is a data drop, not a tile build.
 
+**That spec is measured, not copied.** Burning Man publishes the survey as
+polylines; the app needs the polar geometry behind them. `scripts/derive-layout.mjs`
+fits circles to the annular street centrelines to recover the Man, the rotation
+and every street radius, then refuses to write a layout unless that fitted
+centre agrees with the surveyed "The Man" control point — for 2026 the two land
+**3 cm** apart. Because the fit never sees the control points, they make an
+independent check: every surveyed plaza falls within a foot of the street the
+layout puts it on, and `src/brc/__tests__/survey.test.ts` fails the build if one
+does not. A ring the survey files under the wrong name is trimmed off rather
+than allowed to drag the radius with it.
+
+**The earth is not a sphere, and here that shows.** At this latitude a
+mean-radius sphere misplaces a point 1.5 km out by up to 3.7 m, and the error
+changes sign either side of the 6:00 axis, so no fudge factor removes it.
+Measured against the surveyed plazas, the spherical model put them 12 ft off
+their design radius. `src/brc/geo.ts` works in local WGS84 radii of curvature
+instead, which tracks a true geodesic to 0.4 m at 2.5 km and costs less than
+computing one.
+
 **Addresses are polar, so the geocoder is too.** `bearing = layout.bearing +
 (hour%12·60 + minute)/720·360`, radius in feet from the Man. Verified against
-iBurn's own geocoded camp GPS to sub-metre agreement. `src/brc/geocode.ts`
+Burning Man's own surveyed control points to within a foot. `src/brc/geocode.ts`
 parses the forms that appear in the real data and on street signs — `D & 3:15`,
 `7:30 & Esplanade`, `12:00 2500'` — and reverses them, so clicking bare playa
 answers "where am I?" in the only vocabulary that works out there.
@@ -87,9 +107,9 @@ an empty list that reads as a broken app.
 
 ```sh
 npm install
-npm run fetch-data      # vendors geometry only (defaults to 2025)
-npm run fetch-archive -- 2025                # official historical listings
-BMORG_API_KEY=... npm run fetch-api -- 2026  # keyed current-year listings
+npm run fetch-data      # the published survey, and the layout derived from it
+npm run fetch-api -- 2026                    # listings, needs an API key
+npm run fetch-archive -- 2025                # or a completed year's archive
 npm run dev
 ```
 
@@ -97,11 +117,11 @@ npm run dev
 
 ### Live listings
 
-`fetch-data` vendors iBurn's snapshot, which lags the current year. To pull
-camps, art and events straight from the source:
+Camps, art and events come straight from the source. Put the key in `.env`,
+which is git-ignored, or export it:
 
 ```sh
-export BMORG_API_KEY=...            # https://api.burningman.org/api-key-request/
+export BURNING_MAN_API_KEY=...      # https://api.burningman.org/api-key-request/
 npm run fetch-api 2026
 NEXT_PUBLIC_DATA_YEAR=2026 npm run dev
 ```
@@ -158,7 +178,7 @@ To deploy anywhere else, build with the prefix that host serves from and publish
 `out/`:
 
 ```sh
-npm run fetch-data 2025
+npm run fetch-data -- 2026
 NEXT_PUBLIC_BASE_PATH= npm run build   # a root domain, e.g. Netlify or Cloudflare Pages
 ```
 
@@ -167,18 +187,22 @@ run without it, and those are the two things this app is for.
 
 ## Data and licensing
 
-The compact runtime layout adapter and offline glyphs come from
-[iBurn-Data](https://github.com/iburnapp/iBurn-Data) (MPL-2.0); publishable GIS
-geometry comes from Burning Man's official no-key dataset. Camp, art and
-event listings are fetched directly from Burning Man's official public
-[dataset archive](https://innovate.burningman.org/dataset/) for completed years,
-or from the [Burning Man public API](https://innovate.burningman.org/apis-page/)
-for the current year.
+The city comes from one place: the GIS survey Burning Man publishes each year at
+[burningmantech/innovate-GIS-data](https://github.com/burningmantech/innovate-GIS-data).
+Street lines, plazas, control points, toilets, city blocks and the trash fence
+are taken from it directly, and `layout.json` is derived from the same files by
+`scripts/derive-layout.mjs` rather than copied from anyone. Camp, art and event
+listings come from the [Burning Man public API](https://innovate.burningman.org/apis-page/),
+or from the official [dataset archive](https://innovate.burningman.org/dataset/)
+for a completed year.
 
-The fetch and deploy pipeline intentionally does not copy Event Data from
-iBurn-Data. The current historical build uses Burning Man's no-key 2025 JSON
-archive. A current-year build obtains listings from the official API using the
-key issued for this app, stored only as the masked `BMORG_API_KEY` GitHub Actions
+Nothing is vendored from a third-party project. The one non-Burning-Man asset is
+the offline map typeface — Open Sans (Apache-2.0), prebuilt into SDF ranges by
+[openmaptiles/fonts](https://github.com/openmaptiles/fonts) — because a label
+cannot be drawn offline without glyphs, and Burning Man does not publish any.
+
+A current-year build obtains listings from the official API using the key issued
+for this app, stored only as the masked `BURNING_MAN_API_KEY` GitHub Actions
 secret; the key is never inlined into the client bundle or shipped to browsers. The app is
 free, contains no advertising, uses an original name and compass mark, and
 includes the required non-affiliation disclaimer in the live interface and share image.

@@ -41,9 +41,9 @@ interface PlazaCircle {
 }
 
 function findPlaza(layout: CityLayout, name: string): PlazaCircle | undefined {
-  const wanted = name.trim().toLowerCase()
+  const wanted = normaliseLandmark(name)
 
-  const plaza = layout.plazas.find((p) => p.name.toLowerCase() === wanted)
+  const plaza = layout.plazas.find((p) => normaliseLandmark(p.name) === wanted)
   if (plaza) {
     return {
       centre: polarToPosition(layout, plaza.time, resolve(layout, plaza.distance)),
@@ -74,13 +74,34 @@ const CLOCK = String.raw`\d{1,2}[:.]\d{2}`
  *   "Esplanade & 7:30"    "12:00 2500'"        "4:30 2000 feet"
  *   "9:00 B Plaza"        "3:00 Portal"        "Center Camp Plaza"
  */
+/**
+ * Landmark names are written differently everywhere they appear. The survey
+ * publishes "9:00 & B Plaza" and marks the same place "9 & B Plaza"; camp
+ * addresses say "9:00 B Plaza"; portals are "300 Portal" in the survey and
+ * "3:00 Portal" on a sign. They are one place, so reduce every spelling of a
+ * clock to one before comparing.
+ */
+function normaliseLandmark(name: string): string {
+  return name
+    .toLowerCase()
+    .split(/[\s&]+/)
+    .filter(Boolean)
+    .map((token) => {
+      if (/^\d{1,2}$/.test(token)) return `${Number(token)}:00`
+      if (/^\d{3,4}$/.test(token)) return `${Number(token.slice(0, -2))}:${token.slice(-2)}`
+      const clock = /^(\d{1,2}):(\d{2})$/.exec(token)
+      return clock ? `${Number(clock[1])}:${clock[2]}` : token
+    })
+    .join(' ')
+}
+
 export function parseAddress(input: string, layout: CityLayout): PlayaAddress | undefined {
   const raw = input.trim()
   if (!raw) return undefined
 
   // Named plazas and portals win outright — they are landmarks, not intersections.
   const named = [...layout.plazas, ...layout.portals].find(
-    (p) => p.name.toLowerCase() === raw.toLowerCase(),
+    (p) => normaliseLandmark(p.name) === normaliseLandmark(raw),
   )
   if (named) {
     return {
@@ -88,6 +109,23 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
       distanceFeet: resolve(layout, named.distance),
       street: typeof named.distance === 'string' ? named.distance : undefined,
       label: named.name,
+    }
+  }
+
+  // "2:00 B Plaza & B" — the plaza, named alongside the street it sits on.
+  // The street adds nothing the plaza does not already fix, so drop it.
+  const plazaOnStreet = /^(.*plaza)\s*&\s*(.+)$/i.exec(raw)
+  if (plazaOnStreet && findPlaza(layout, plazaOnStreet[1])) {
+    const plaza = findPlaza(layout, plazaOnStreet[1])!
+    const declared = layout.plazas.find((p) => normaliseLandmark(p.name) === normaliseLandmark(plaza.name))
+    if (declared) {
+      return {
+        clock: declared.time,
+        distanceFeet: resolve(layout, declared.distance),
+        street: typeof declared.distance === 'string' ? declared.distance : undefined,
+        plaza: declared.name,
+        label: declared.name,
+      }
     }
   }
 

@@ -7,23 +7,42 @@ export const metersToFeet = (m: number) => m * FEET_PER_METER
 /** [lon, lat] — GeoJSON order, which is also MapLibre's order. */
 export type Position = [number, number]
 
-const R = 6371008.8 // IUGG mean earth radius, metres
 const rad = (d: number) => (d * Math.PI) / 180
 const deg = (r: number) => (r * 180) / Math.PI
 
-/** Great-circle destination from `origin`, `meters` away along `bearing`. */
+// WGS84, the datum the survey and every GPS receiver already report in.
+//
+// A sphere is the usual shortcut here and it is not good enough for this map.
+// At Black Rock City's latitude a mean-radius sphere misplaces a point 1.5 km
+// out by up to 3.7 m, and the error changes sign either side of the 6:00 axis,
+// so it cannot be calibrated away. Checked against Burning Man's own surveyed
+// plaza markers, the sphere put them 12 ft off their design radius; the local
+// ellipsoidal radii below put them within one.
+const A = 6378137
+const F = 1 / 298.257223563
+const E2 = F * (2 - F)
+
+/**
+ * Metres per radian at a latitude, north and east. The city spans ten
+ * kilometres, so a plane using these is exact far beyond the survey's own
+ * precision — and cheaper than a geodesic the map would recompute constantly.
+ */
+function localScale(latitude: number): { north: number; east: number } {
+  const sin = Math.sin(rad(latitude))
+  const w = Math.sqrt(1 - E2 * sin * sin)
+  return { north: (A * (1 - E2)) / (w * w * w), east: (A / w) * Math.cos(rad(latitude)) }
+}
+
+/** Destination from `origin`, `meters` away along `bearing`. */
 export function destination(origin: Position, meters: number, bearing: number): Position {
-  const d = meters / R
-  const b = rad(bearing)
-  const [lon, lat] = [rad(origin[0]), rad(origin[1])]
-  const lat2 = Math.asin(Math.sin(lat) * Math.cos(d) + Math.cos(lat) * Math.sin(d) * Math.cos(b))
-  const lon2 =
-    lon +
-    Math.atan2(
-      Math.sin(b) * Math.sin(d) * Math.cos(lat),
-      Math.cos(d) - Math.sin(lat) * Math.sin(lat2),
-    )
-  return [deg(lon2), deg(lat2)]
+  const north = meters * Math.cos(rad(bearing))
+  const east = meters * Math.sin(rad(bearing))
+  // Evaluate the scale at the midpoint latitude: the northing shifts the
+  // latitude, which shifts the scale that northing should have been measured at.
+  const first = localScale(origin[1])
+  const midpoint = origin[1] + deg(north / first.north) / 2
+  const scale = localScale(midpoint)
+  return [origin[0] + deg(east / scale.east), origin[1] + deg(north / scale.north)]
 }
 
 export function bearingBetween(from: Position, to: Position): number {
@@ -35,11 +54,8 @@ export function bearingBetween(from: Position, to: Position): number {
 }
 
 export function distanceBetween(from: Position, to: Position): number {
-  const [p1, p2] = [rad(from[1]), rad(to[1])]
-  const dp = rad(to[1] - from[1])
-  const dl = rad(to[0] - from[0])
-  const a = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2
-  return 2 * R * Math.asin(Math.sqrt(a))
+  const scale = localScale((from[1] + to[1]) / 2)
+  return Math.hypot(rad(to[0] - from[0]) * scale.east, rad(to[1] - from[1]) * scale.north)
 }
 
 /* ---------------------------------------------------------------- clock ---- */

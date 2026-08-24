@@ -42,6 +42,17 @@ await page.goto(url, { waitUntil: 'load' })
 const total = await precacheCount(page)
 console.log(`PASS  service worker precached ${total} entries`)
 
+// Read a camp out of this year's own listings while the network is still up.
+// Naming last year's camp would fail for reasons that are not about offline.
+const DATA_YEAR = process.env.NEXT_PUBLIC_DATA_YEAR ?? '2026'
+const campName = await page.evaluate(async (year) => {
+  const root = window.location.pathname.replace(/[/]$/, '')
+  const camps = await (await fetch(`${root}/data/${year}/camp.json`)).json()
+  const placed = camps.filter((camp) => /^[\w' -]{6,28}$/.test(camp.name ?? ''))
+  return placed[Math.floor(placed.length / 2)]?.name
+}, DATA_YEAR)
+if (!campName) throw new Error('No usable camp name in the published listings.')
+
 await context.setOffline(true)
 console.log('      network disabled')
 
@@ -66,10 +77,10 @@ assert(drawn.canvas !== 'none', `map canvas painted offline (${drawn.canvas})`)
 
 // The listings are the part that would silently fail without precaching:
 // search for a camp by name and require the geocoded result.
-await page.getByPlaceholder(/Camp, art, or an address/).fill('Pink Fuzzy Monkey')
+await page.getByPlaceholder(/Camp, art, or an address/).fill(campName)
 await page.waitForTimeout(900)
 const options = await page.locator('[role="option"], .MuiAutocomplete-option').count()
-assert(options > 0, `camp listings searchable offline (${options} match)`)
+assert(options > 0, `camp listings searchable offline ("${campName}", ${options} match)`)
 
 await page.getByPlaceholder(/Camp, art, or an address/).fill('7:30 & Esplanade')
 await page.waitForTimeout(700)

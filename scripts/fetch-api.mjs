@@ -2,7 +2,7 @@
 /**
  * Pull a year's listings straight from the Burning Man public API.
  *
- *   export BMORG_API_KEY=...        # https://api.burningman.org/api-key-request/
+ *   export BURNING_MAN_API_KEY=...  # https://api.burningman.org/api-key-request/
  *   node scripts/fetch-api.mjs 2026
  *
  * The city layout still comes from `npm run fetch-data`, which vendors it from
@@ -13,7 +13,7 @@
  * geocodes `location_string` at load time using the same code that powers
  * search, so doing it twice would just be two places to get it wrong.
  */
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
   embargoNote,
@@ -25,7 +25,8 @@ import {
 } from './lib/api.mjs'
 
 const YEAR = process.argv[2] ?? String(new Date().getFullYear())
-const KEY = process.env.BMORG_API_KEY
+// BMORG_API_KEY is accepted too, for checkouts set up before the rename.
+const KEY = process.env.BURNING_MAN_API_KEY ?? process.env.BMORG_API_KEY
 const BASE = process.env.BMORG_API_BASE ?? 'https://api.burningman.org/api'
 const OUT = resolve(import.meta.dirname, '..', 'public', 'data', YEAR)
 const RELEASE = releaseForYear(YEAR)
@@ -44,7 +45,7 @@ async function fetchKind(kind) {
     headers: { 'X-API-Key': KEY, Accept: 'application/json' },
   })
   if (response.status === 401) {
-    throw new Error('The API rejected the key (401). Check BMORG_API_KEY.')
+    throw new Error('The API rejected the key (401). Check BURNING_MAN_API_KEY.')
   }
   if (response.status === 403) {
     throw new Error('The API refused the request (403). The key may lack access to this year.')
@@ -79,8 +80,30 @@ for (const kind of ENDPOINTS) {
   if (result.problems.length === 0) {
     const publishable = redactEmbargoedLocations(kind, records, now, RELEASE)
     await writeFile(`${OUT}/${kind}.json`, JSON.stringify(publishable))
-    console.log(`  ✓ ${summarize(kind, result)}`)
+    // Summarise what was written, not what arrived. Reporting the API's own
+    // location count next to an embargoed dataset reads as though embargoed
+    // positions had just been published.
+    console.log(`  ✓ ${summarize(kind, validateDataset(kind, publishable))}`)
   }
+}
+
+// The event window used to come from a third-party file. The occurrences the
+// API already returns describe it exactly, and they are the same records the
+// schedule is built from, so the two can never disagree.
+try {
+  const events = JSON.parse(await readFile(`${OUT}/event.json`, 'utf8'))
+  const times = events
+    .flatMap((event) => event.occurrence_set ?? [])
+    .flatMap((slot) => [slot.start_time, slot.end_time])
+    .filter(Boolean)
+    .sort()
+  if (times.length > 0) {
+    const rangeInfo = { startDate: times[0], endDate: times[times.length - 1] }
+    await writeFile(`${OUT}/dates_info.json`, JSON.stringify({ rangeInfo }))
+    console.log(`  ✓ event window ${rangeInfo.startDate.slice(0, 10)} to ${rangeInfo.endDate.slice(0, 10)}`)
+  }
+} catch {
+  console.warn('  · could not derive the event window from the occurrences')
 }
 
 await writeFile(

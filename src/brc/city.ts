@@ -72,10 +72,11 @@ function plazas(layout: CityLayout): GeoJSON.Feature<GeoJSON.Polygon>[] {
   const cc = layout.center_camp
   if (cc) {
     const center = polarToPosition(layout, '6:00', cc.distance)
-    features.push(
-      circle(center, feetToMeters(cc.cafe_plaza_radius), { kind: 'plaza', name: 'Center Camp' }),
-      circle(center, feetToMeters(cc.cafe_radius), { kind: 'plaza', name: 'Center Camp Cafe' }),
-    )
+    features.push(circle(center, feetToMeters(cc.cafe_plaza_radius), { kind: 'plaza', name: 'Center Camp' }))
+    // Only some years' surveys draw an inner cafe ring; do not invent one.
+    if (cc.cafe_radius !== undefined) {
+      features.push(circle(center, feetToMeters(cc.cafe_radius), { kind: 'plaza', name: 'Center Camp Cafe' }))
+    }
   }
   return features
 }

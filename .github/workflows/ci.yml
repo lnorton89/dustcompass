@@ -25,10 +25,16 @@ jobs:
       - run: npm ci
 
       - name: Fetch city geometry
-        run: npm run fetch-data -- 2025
+        run: npm run fetch-data -- 2026
 
-      - name: Fetch official archived listings
-        run: npm run fetch-archive -- 2025
+      - name: Fetch 2026 listings
+        # 2026 listings are only available from the keyed API. Add the key as a
+        # repository secret (Settings -> Secrets and variables -> Actions ->
+        # BURNING_MAN_API_KEY); the fetcher enforces the location embargo before
+        # anything is written, so nothing under embargo reaches the build.
+        env:
+          BURNING_MAN_API_KEY: ${{ secrets.BURNING_MAN_API_KEY }}
+        run: npm run fetch-api -- 2026
 
       - name: Typecheck
         run: npm run typecheck
@@ -39,7 +45,7 @@ jobs:
       - name: Build
         env:
           NEXT_PUBLIC_BASE_PATH: /dustcompass
-          NEXT_PUBLIC_DATA_YEAR: '2025'
+          NEXT_PUBLIC_DATA_YEAR: '2026'
           NEXT_PUBLIC_E2E: '1'
         run: npm run build
 

@@ -1,19 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
+  Button,
   Chip,
   Drawer,
   IconButton,
+  InputAdornment,
   List,
   ListItem,
   ListItemButton,
   ListItemText,
   Stack,
+  TextField,
   ToggleButton,
   ToggleButtonGroup,
   Typography,
 } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
+import SearchIcon from '@mui/icons-material/Search'
+import NearMeIcon from '@mui/icons-material/NearMe'
+import ScheduleIcon from '@mui/icons-material/Schedule'
 import type { EventItem, Poi } from '../data/types'
 import { formatWhen, occurrencesInWindow, type EventWindow } from '../data/events'
 import { formatDistance, travelBetween } from '../brc/travel'
@@ -74,6 +80,13 @@ export function EventsPanel({
     }
   }, [preview])
   const [sort, setSort] = useState<'time' | 'distance'>('time')
+  /**
+   * A window and a sort were the only two questions you could ask of three
+   * thousand listings. "Is my friend's camp doing the pancake thing again" was
+   * not among them. Matched against the title, the host's name and the type, so
+   * "yoga", "Ranger" and "Center Camp" all find something.
+   */
+  const [query, setQuery] = useState('')
 
   /**
    * "What is on now" is only half the question — the other half is whether you
@@ -89,11 +102,23 @@ export function EventsPanel({
       return { ...row, host, travel }
     })
 
+    const term = query.trim().toLowerCase()
+    const matching = term
+      ? located.filter((row) =>
+          [
+            row.event.title,
+            row.host?.name,
+            row.event.other_location,
+            row.event.event_type?.label,
+          ].some((field) => field?.toLowerCase().includes(term)),
+        )
+      : located
+
     if (sort === 'distance' && origin) {
-      located.sort((a, b) => (a.travel?.meters ?? Infinity) - (b.travel?.meters ?? Infinity))
+      matching.sort((a, b) => (a.travel?.meters ?? Infinity) - (b.travel?.meters ?? Infinity))
     }
-    return located.slice(0, 300)
-  }, [events, window, now, sort, origin, hosts])
+    return matching.slice(0, 300)
+  }, [events, window, now, sort, origin, hosts, query])
 
   return (
     <Drawer
@@ -126,38 +151,69 @@ export function EventsPanel({
             <CloseIcon fontSize="small" />
           </IconButton>
         </Stack>
-        <ToggleButtonGroup
-          size="small"
-          exclusive
+        {/* Three thousand events and, until now, no way to ask for one by
+            name — only a time window and a two-way sort. On a phone those two
+            stacked full-width rows also ate most of the sheet before the first
+            event appeared. Search first, window below it, and the sort folded
+            in beside the window as a single toggle. */}
+        <TextField
           fullWidth
-          value={window}
-          onChange={(_, value: EventWindow | null) => value && setWindow(value)}
+          size="small"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search events or camps"
+          aria-label="Search events"
           sx={{ mt: 1.5 }}
-        >
-          {WINDOWS.map((w) => (
-            <ToggleButton key={w.value} value={w.value}>
-              {w.label}
-            </ToggleButton>
-          ))}
-        </ToggleButtonGroup>
-        <ToggleButtonGroup
-          size="small"
-          exclusive
-          fullWidth
-          value={sort}
-          onChange={(_, value: 'time' | 'distance' | null) => {
-            if (!value) return
-            setSort(value)
-            // Choosing "Closest" is the moment asking for location makes
-            // sense — offering the sort only after a fix exists means it is
-            // never there when it is first wanted.
-            if (value === 'distance' && !origin) onNeedLocation()
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+              endAdornment: query ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" aria-label="Clear search" onClick={() => setQuery('')}>
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
+            },
           }}
-          sx={{ mt: 1 }}
-        >
-          <ToggleButton value="time">By time</ToggleButton>
-          <ToggleButton value="distance">Closest</ToggleButton>
-        </ToggleButtonGroup>
+        />
+        <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'stretch' }}>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            fullWidth
+            value={window}
+            onChange={(_, value: EventWindow | null) => value && setWindow(value)}
+            sx={{ flex: 1 }}
+          >
+            {WINDOWS.map((w) => (
+              <ToggleButton key={w.value} value={w.value}>
+                {w.label}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+          <ToggleButton
+            size="small"
+            value="distance"
+            selected={sort === 'distance'}
+            onChange={() => {
+              const next = sort === 'distance' ? 'time' : 'distance'
+              setSort(next)
+              // Choosing "Closest" is the moment asking for location makes
+              // sense — offering the sort only after a fix exists means it is
+              // never there when it is first wanted.
+              if (next === 'distance' && !origin) onNeedLocation()
+            }}
+            sx={{ flexShrink: 0, gap: 0.5, px: 1.25 }}
+          >
+            <NearMeIcon sx={{ fontSize: 17 }} />
+            Closest
+          </ToggleButton>
+        </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
           {rows.length === 300 ? 'showing first 300' : `${rows.length} showing`}
           {sort === 'distance' && !origin && ' · finding you…'}
@@ -171,24 +227,74 @@ export function EventsPanel({
       <List dense sx={{ overflowY: 'auto', flex: '0 1 auto', pb: 1.5 }}>
         {rows.map((row, index) => {
           const host = row.host
+          const live = row.start <= now && row.end > now
           return (
             // A plain <li> wrapping the button: putting role="button" on the
             // <li> itself would strip its list semantics from the a11y tree.
             <ListItem key={`${row.event.uid}-${index}`} disablePadding>
-              <ListItemButton disabled={!host} onClick={() => host && onSelect(host)}>
+              {/*
+               * Events at an unregistered camp used to render as a disabled
+               * row: greyed almost to nothing, with no reason given and no way
+               * to find out. Plenty of the good ones are at a camp that never
+               * filed a location, and the listing is still worth reading. The
+               * row stays at full contrast and says what it cannot do.
+               */}
+              <ListItemButton
+                onClick={() => host && onSelect(host)}
+                disableRipple={!host}
+                sx={{
+                  cursor: host ? 'pointer' : 'default',
+                  alignItems: 'flex-start',
+                  gap: 1,
+                  py: 1,
+                }}
+              >
                 <ListItemText
                   primary={row.event.title}
-                  secondary={[
-                    host?.name ?? row.event.other_location,
-                    formatWhen(row, now),
-                    row.travel && formatDistance(row.travel),
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                  slotProps={{ primary: { variant: 'body2' } }}
+                  secondary={
+                    <>
+                      {/* "On now" is the single most useful fact in this list
+                          and it was buried mid-sentence in grey. */}
+                      {live && (
+                        <Box
+                          component="span"
+                          sx={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 0.35,
+                            mr: 0.75,
+                            color: 'primary.main',
+                            fontWeight: 700,
+                          }}
+                        >
+                          <ScheduleIcon sx={{ fontSize: 14 }} />
+                          {formatWhen(row, now)}
+                        </Box>
+                      )}
+                      {[
+                        host?.name ?? row.event.other_location,
+                        live ? undefined : formatWhen(row, now),
+                        row.travel && formatDistance(row.travel),
+                        host ? undefined : 'location not listed',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </>
+                  }
+                  slotProps={{
+                    primary: { variant: 'body2', sx: { fontWeight: 600 } },
+                    secondary: { variant: 'caption' },
+                  }}
                 />
                 {row.event.event_type && (
-                  <Chip size="small" variant="outlined" label={row.event.event_type.abbr} />
+                  // `abbr` is the API's four-letter code — "prty", "othr",
+                  // "adlt". Nobody outside the dataset knows what those mean.
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={row.event.event_type.label}
+                    sx={{ flexShrink: 0, mt: 0.25, maxWidth: 120 }}
+                  />
                 )}
               </ListItemButton>
             </ListItem>
@@ -196,9 +302,32 @@ export function EventsPanel({
         })}
       </List>
       {rows.length === 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ px: 2, pt: 1, pb: 3 }}>
-          Nothing scheduled in this window.
-        </Typography>
+        // An empty state has to carry its own way out. "Nothing scheduled in
+        // this window" was true, unhelpful, and a dead end.
+        <Box sx={{ px: 2, pt: 1, pb: 3 }}>
+          <Typography variant="body2" color="text.secondary">
+            {query
+              ? `Nothing matching “${query}” in this window.`
+              : 'Nothing scheduled in this window.'}
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 1 }}>
+            {query && (
+              <Button size="small" variant="outlined" onClick={() => setQuery('')}>
+                Clear search
+              </Button>
+            )}
+            {window !== 'today' && (
+              <Button size="small" variant="outlined" onClick={() => setWindow('today')}>
+                Show today
+              </Button>
+            )}
+            {window !== 'all' && (
+              <Button size="small" variant="outlined" onClick={() => setWindow('all')}>
+                Show all events
+              </Button>
+            )}
+          </Stack>
+        </Box>
       )}
     </Drawer>
   )

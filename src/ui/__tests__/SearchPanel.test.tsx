@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SearchPanel, optionIcon } from '../SearchPanel'
 import type { CityLayout } from '../../brc/layout'
+import type { Poi, UnplacedListing } from '../../data/types'
 import type { SavedPlace } from '../../data/useSavedPlaces'
 
 afterEach(() => cleanup())
@@ -114,5 +115,85 @@ describe('SearchPanel · saved-place search result (#21)', () => {
     expect(onGoToPlace).toHaveBeenCalledTimes(1)
     expect(onGoToPlace).toHaveBeenCalledWith(SAVED_PLACE)
     expect(onGo).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Issue #64: search only scored `poi.name` and `poi.address`, so a word
+ * living purely in a camp's description — "coffee", "karaoke" — returned
+ * nothing even though the offline data already has it.
+ */
+describe('SearchPanel · description search (#64)', () => {
+  const CAFE: Poi = {
+    uid: 'camp-cafe',
+    kind: 'camp',
+    name: 'Bag o Dicks',
+    description: 'A quiet spot for coffee and conversation, open all week.',
+    position: [-119.21, 40.79],
+    positionSource: 'address',
+    accuracyClass: 'derived',
+  }
+  const KARAOKE_CAMP: Poi = {
+    uid: 'camp-karaoke',
+    kind: 'camp',
+    name: 'Karaoke Kamp',
+    position: [-119.21, 40.79],
+    positionSource: 'address',
+    accuracyClass: 'derived',
+  }
+  const UNPLACED_ART: UnplacedListing = {
+    uid: 'art-unplaced',
+    kind: 'art',
+    name: 'Whispering Dunes',
+    description: 'An interactive sauna experience lit from within.',
+    reason: 'embargoed',
+  }
+
+  const renderPanel = (pois: Poi[], unplaced: UnplacedListing[] = []) => {
+    const onGo = vi.fn()
+    render(
+      <SearchPanel
+        layout={LAYOUT}
+        pois={pois}
+        unplaced={unplaced}
+        places={[]}
+        onGo={onGo}
+        onGoToPlace={vi.fn()}
+        onOpenUnplaced={vi.fn()}
+      />,
+    )
+    return { onGo }
+  }
+
+  it('finds a POI by a word that only lives in its description', () => {
+    renderPanel([CAFE, KARAOKE_CAMP])
+    const input = screen.getByRole('combobox')
+    fireEvent.change(input, { target: { value: 'coffee' } })
+
+    expect(screen.getByText('Bag o Dicks')).toBeDefined()
+    expect(screen.queryByText('Karaoke Kamp')).toBeNull()
+  })
+
+  it('ranks a name match above a description-only match on the same term', () => {
+    // "karaoke" appears in one camp's name and only in the other's description.
+    const described: Poi = { ...CAFE, name: 'Quiet Corner', description: 'Karaoke happens here too, quietly.' }
+    renderPanel([described, KARAOKE_CAMP])
+    const input = screen.getByRole('combobox')
+    fireEvent.change(input, { target: { value: 'karaoke' } })
+
+    const options = screen.getAllByRole('option').map((el) => el.textContent ?? '')
+    const nameHit = options.findIndex((text) => text.includes('Karaoke Kamp'))
+    const descHit = options.findIndex((text) => text.includes('Quiet Corner'))
+    expect(nameHit).toBeGreaterThanOrEqual(0)
+    expect(descHit).toBeGreaterThanOrEqual(0)
+    expect(nameHit).toBeLessThan(descHit)
+  })
+
+  it('finds an unplaced (embargoed) listing by its description, without adding a position', () => {
+    renderPanel([], [UNPLACED_ART])
+    const input = screen.getByRole('combobox')
+    fireEvent.change(input, { target: { value: 'sauna' } })
+
+    expect(screen.getByText('Whispering Dunes')).toBeDefined()
   })
 })

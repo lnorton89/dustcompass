@@ -48,8 +48,13 @@ import { playaTheme } from './ui/theme'
 import { useEventsByHost, usePlayaData, type PartialDataWarning } from './data/usePlayaData'
 import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
-import { useGeolocation } from './data/useGeolocation'
+import { useGeolocation, type LocationStatus } from './data/useGeolocation'
+import { useWakeLock } from './data/useWakeLock'
+import { useCompassHeading } from './data/useCompassHeading'
+import { nearestOfCategory } from './data/nearest'
+import type { ServiceCategory } from './brc/services'
 import { useSavedPlaces } from './data/useSavedPlaces'
+import { useSavedEvents } from './data/useSavedEvents'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
 import { travelBetween } from './brc/travel'
@@ -185,10 +190,93 @@ export function readStoredFilters(): Set<Filter> {
   }
 }
 
+/**
+ * Whether a navigation arrival buzz may fire. `origin` (and so
+ * `navigation.travel`) falls back to the Man's own coordinates once
+ * `isNearCity()` rejects a fix as unusable, so `hasUsableFix` — not merely
+ * "some fix exists" — is what stops a destination near the Man from arming
+ * a false arrival from a fix hundreds of miles away (#49). Exported for a
+ * focused unit test rather than exercising it through the whole component.
+ */
+/**
+ * Whether a status transition means the shared geolocation watch has
+ * terminally failed, so any recorded owner in `locationOwners` no longer
+ * represents a real acquired fix — most importantly the map locate
+ * control's owner, which by design has no explicit release action on
+ * success and would otherwise stay recorded forever after a denied/
+ * unavailable attempt, permanently blocking `locationOwners` from ever
+ * returning to empty (#56). Exported for a focused unit test.
+ */
+export function locationWatchHasFailed(status: LocationStatus): boolean {
+  return status === 'denied' || status === 'unavailable'
+}
+
+/**
+ * What the live-address snackbar says (#62). A stale/lost fix while it's
+ * open falls back to saying so plainly rather than freezing on the last
+ * address it read — `liveAddressLabel` already goes undefined the instant
+ * `usableFix` does, on the same terms as everywhere else that reads it.
+ * Exported for a focused unit test.
+ */
+export function liveAddressMessage(label: string | undefined): string {
+  return label ? `You are near ${label}` : 'Finding you…'
+}
+
+/**
+ * `map.fitBounds()` treats its two-point array as `[southwest, northeast]`,
+ * not "any two corners" — handing it two arbitrary points in the wrong
+ * order (the reader's own position happens to be east of, or north of, the
+ * destination) makes MapLibre compute a bounding box that wraps the *other*
+ * way around the globe to keep west-to-east positive, landing the camera at
+ * a near-global zoom on the opposite side of the world instead of framing
+ * the two points at all. Sorting into actual min/max corners first avoids
+ * that regardless of which point is which relative to the other. Exported
+ * for a focused unit test.
+ */
+export function boundsOf(a: Position, b: Position): [Position, Position] {
+  return [
+    [Math.min(a[0], b[0]), Math.min(a[1], b[1])],
+    [Math.max(a[0], b[0]), Math.max(a[1], b[1])],
+  ]
+}
+
+/**
+ * A bbox for `fitBounds()` that keeps `anchor` exactly centered once fit,
+ * by mirroring `include` across it — a point plus its own mirror image
+ * straddle their midpoint by construction, and `fitBounds()` centers on its
+ * box's own midpoint. Fitting `anchor`/`include` directly with `boundsOf`
+ * puts whichever one isn't the box's centroid at a corner instead — fine
+ * for "is the reader's own position somewhere on screen", poor for the
+ * destination they're actually trying to navigate toward, which reads as
+ * off to one side rather than the visual anchor it already was before
+ * framing the reader's position was ever added. This keeps that anchor
+ * centered while still guaranteeing `include` ends up inside the fitted
+ * view. Exported for a focused unit test.
+ */
+export function boundsCenteredOn(anchor: Position, include: Position): [Position, Position] {
+  const mirrored: Position = [2 * anchor[0] - include[0], 2 * anchor[1] - include[1]]
+  return boundsOf(include, mirrored)
+}
+
+export function canConfirmArrival(
+  travelMeters: number,
+  hasUsableFix: boolean,
+  accuracy: number | undefined,
+): boolean {
+  if (!hasUsableFix) return false
+  return travelMeters + (accuracy ?? Infinity) <= 25
+}
+
 export default function App() {
   const { data, error, retry } = usePlayaData()
   const { favorites, toggle: toggleFavorite } = useFavorites()
   const { places, save: savePlace, remove: removePlace, restore: restorePlace } = useSavedPlaces()
+  const {
+    savedEvents,
+    isSaved: isEventSaved,
+    save: saveEvent,
+    remove: removeSavedEvent,
+  } = useSavedEvents()
   const [saving, setSaving] = useState<{ position: Position; address: string }>()
   // Night mode is a functional night-vision feature, not decoration, so
   // reloading — or a crash recovering — back to a bright default would be a
@@ -285,6 +373,15 @@ export default function App() {
   // event's own description (issue #20).
   const [selectedEvent, setSelectedEvent] = useState<EventItem>()
   const [probe, setProbe] = useState<string>()
+  // Set while a "nearest toilet/ranger/medical" tap (#66) is waiting on a
+  // usable GPS fix — resolved (or abandoned on watch failure) by the effects
+  // below once one arrives, rather than blocking the tap itself on it.
+  const [pendingNearest, setPendingNearest] = useState<ServiceCategory>()
+  // Set from tapping the live-location marker (#62), rather than stashing a
+  // frozen string into `probe` — computing the snackbar's text fresh on
+  // every render while this stays true is what lets "You are near ..." keep
+  // tracking the shared GPS watch instead of freezing at tap time.
+  const [showingLiveAddress, setShowingLiveAddress] = useState(false)
   const [deletedPlace, setDeletedPlace] = useState<(typeof places)[number]>()
   // The map's own locate control and the "take me there" flow feed the same
   // watch, so a heading stays live however it was started, only one
@@ -301,21 +398,35 @@ export default function App() {
    * owns, or a feature that never releases its own claim (the map's locate
    * button has no "off" control) could never be cleaned up at all.
    */
-  const locationOwners = useRef<Set<'navigation' | 'events' | 'map'>>(new Set())
+  const locationOwners = useRef<Set<'navigation' | 'events' | 'map' | 'nearest'>>(new Set())
   const acquireLocation = useCallback(
-    (owner: 'navigation' | 'events' | 'map') => {
+    (owner: 'navigation' | 'events' | 'map' | 'nearest') => {
       locationOwners.current.add(owner)
       location.start()
     },
     [location.start],
   )
   const releaseLocation = useCallback(
-    (owner: 'navigation' | 'events' | 'map') => {
+    (owner: 'navigation' | 'events' | 'map' | 'nearest') => {
       locationOwners.current.delete(owner)
       if (locationOwners.current.size === 0) location.stop()
     },
     [location.stop],
   )
+  /**
+   * `acquireLocation` records an owner before `watchPosition()` is known to
+   * have succeeded, so a denied/unavailable acquisition — most often the
+   * map's locate control, which by design has no explicit release action on
+   * success — otherwise leaves a phantom owner behind forever. With a
+   * phantom owner never removed, `locationOwners` never returns to empty, so
+   * `location.stop()` above stops firing for the rest of the session even
+   * once every real, successful consumer has released (#56). There is only
+   * ever one shared watch, so once it has terminally failed, nothing in
+   * `locationOwners` still represents a real acquired fix.
+   */
+  useEffect(() => {
+    if (locationWatchHasFailed(location.status)) locationOwners.current.clear()
+  }, [location.status])
   /**
    * `useGeolocation()` returns a fresh object every render, so an inline
    * `() => acquireLocation('events')` at the EventsPanel callsite would be a
@@ -625,14 +736,36 @@ export default function App() {
       ? `you (${reverseGeocode(usableFix, data.layout).label})`
       : 'you'
     : 'the Man'
+  // #62: the same reverse-geocode call originLabel already makes, exposed on
+  // its own so the live-address snackbar can say "You are near ..." without
+  // the "you (...)" framing that reads fine inline in a sentence but not as
+  // a standalone answer to "where am I".
+  const liveAddressLabel = usableFix && data ? reverseGeocode(usableFix, data.layout).label : undefined
 
   const navigation = useMemo(() => {
     if (!heading || !origin || !data) return undefined
+    const bearing = bearingBetween(origin, heading.position)
     return {
       travel: travelBetween(origin, heading.position),
-      clock: bearingToClock(data.layout, bearingBetween(origin, heading.position)),
+      clock: bearingToClock(data.layout, bearing),
+      // Kept alongside the clock string rather than recomputed: it's the same
+      // bearing, and it's what the device-heading compass needle needs
+      // (#63) — `needleAngle(bearing, deviceHeading)` in NavBar/CompassNeedle.
+      bearing,
     }
   }, [heading, origin, data])
+  // Distance and heading are meant to be read hands-free while walking or
+  // biking — a screen that dims mid-route defeats that (#65). `Boolean(heading)`
+  // matches NavBar's own visibility condition below exactly: the lock only
+  // holds while there is an active destination on screen.
+  const wakeLock = useWakeLock(Boolean(heading))
+  /**
+   * The physical compass sensor — unrelated to the map's own bearing/
+   * orientation controls, which rotate the MapLibre camera and never touch
+   * this. Only listens while there is somewhere to point at, same lifecycle
+   * as the navigation strip that shows its needle.
+   */
+  const compass = useCompassHeading(Boolean(navigation))
   /**
    * Arrival, buzzed once. The whole point of giving the heading as a clock
    * position is that you can act on it without looking at the screen, so the
@@ -646,24 +779,24 @@ export default function App() {
   const arrived = useRef(false)
   useEffect(() => {
     if (!navigation || arrived.current) return
-    // `origin` falls back to the Man's own coordinates until a real GPS fix
-    // exists, so a destination within 25m of the Man could otherwise arm a
-    // false arrival the instant navigation starts, while the phone is still
-    // locating and the walker may be nowhere near it. Only a fix belonging
-    // to the active session may confirm arrival.
-    if (!here) return
-    // The buzz is trusted without looking at the screen, so a merely nearby
-    // computed point is not enough — the fix has to be accurate enough to
-    // actually support the claim. A conservative, uncertainty-aware check:
-    // even in the worst case implied by the fix's own reported accuracy, the
-    // true position could still be inside the arrival radius. Missing
-    // accuracy (not guaranteed by the Geolocation API, though effectively
-    // always present) is treated as unbounded rather than zero.
-    const accuracy = location.accuracy ?? Infinity
-    if (navigation.travel.meters + accuracy > 25) return
+    // `origin` falls back to the Man's own coordinates until a real,
+    // in-city GPS fix exists, and `navigation.travel` is computed from
+    // `origin` — not from the raw fix. Gating on `here` (any fix at all,
+    // including one hundreds of miles away that `isNearCity()` already
+    // rejected as a navigation origin) let a destination within 25m of the
+    // Man arm a false "arrived" buzz from anywhere on the fallback path.
+    // Only a fix `origin` itself is actually using may confirm arrival. The
+    // buzz is trusted without looking at the screen, so a merely nearby
+    // computed point is not enough either — the fix has to be accurate
+    // enough to actually support the claim. A conservative,
+    // uncertainty-aware check: even in the worst case implied by the fix's
+    // own reported accuracy, the true position could still be inside the
+    // arrival radius. Missing accuracy (not guaranteed by the Geolocation
+    // API, though effectively always present) is treated as unbounded.
+    if (!canConfirmArrival(navigation.travel.meters, Boolean(usableFix), location.accuracy)) return
     arrived.current = true
     haptic('arrive')
-  }, [navigation, here, location.accuracy])
+  }, [navigation, usableFix, location.accuracy])
 
 
   /**
@@ -716,16 +849,63 @@ export default function App() {
       // effect below, sharing the old pin's address while navigating to
       // somewhere else entirely.
       setPin(undefined)
-      mapRef.current?.flyTo({
-        center: target.position,
-        zoom: 16.5,
-        duration: 900,
-        padding: navigationPadding(),
-      })
+      /**
+       * A fix that's already known by the moment "Take me there" is pressed
+       * gets framed together with the destination in this one motion — the
+       * whole point of the live-location marker (#59) is showing where the
+       * reader is relative to where they're going, not just where they're
+       * going. A fix that ISN'T known yet (the permission prompt and first
+       * GPS read both take a beat) falls back to framing the destination
+       * alone here; the effect below catches it once one does arrive and
+       * re-frames exactly once, rather than leaving the reader's own
+       * position — and the marker built from it — sitting outside the
+       * frame for the rest of the walk. Doing both from a single call site
+       * keeps this to one camera motion in the common case where a fix is
+       * already there, instead of always flying to the destination first
+       * and then immediately re-fitting a moment later.
+       */
+      if (usableFix) {
+        mapRef.current?.fitBounds(boundsCenteredOn(target.position, usableFix), {
+          padding: navigationPadding(),
+          duration: 900,
+          maxZoom: 16.5,
+        })
+        framedNavigationFor.current = `${target.position[0]},${target.position[1]}`
+      } else {
+        mapRef.current?.flyTo({
+          center: target.position,
+          zoom: 16.5,
+          duration: 900,
+          padding: navigationPadding(),
+        })
+        framedNavigationFor.current = undefined
+      }
       acquireLocation('navigation')
     },
-    [acquireLocation, navigationPadding],
+    [acquireLocation, navigationPadding, usableFix],
   )
+
+  const framedNavigationFor = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!heading) {
+      framedNavigationFor.current = undefined
+      return
+    }
+    const key = `${heading.position[0]},${heading.position[1]}`
+    if (!usableFix || framedNavigationFor.current === key) return
+    framedNavigationFor.current = key
+    // An instant jump, not an animated fly: this fires the moment a fix
+    // lands, which in practice is often only a beat after `navigateTo`'s own
+    // 900ms flyTo already started — animating this too stacks a second,
+    // independently-timed camera motion on top of the first instead of
+    // cleanly replacing it, leaving the map settled nowhere in particular
+    // for longer than either transition alone.
+    mapRef.current?.fitBounds(boundsCenteredOn(heading.position, usableFix), {
+      padding: navigationPadding(),
+      duration: 0,
+      maxZoom: 16.5,
+    })
+  }, [heading, usableFix, navigationPadding])
 
   const flyTo = useCallback(
     (position: Position, poi?: Poi) => {
@@ -751,6 +931,53 @@ export default function App() {
     },
     [data, focusPadding],
   )
+
+  /**
+   * One-tap "nearest toilet/ranger/medical" (#66). With a usable fix already
+   * in hand this resolves immediately; otherwise it defers to the two
+   * effects below, which pick it back up once a fix arrives or give up if
+   * the shared watch fails outright — either way the tap itself never
+   * blocks on GPS.
+   */
+  const findNearest = useCallback(
+    (category: ServiceCategory) => {
+      if (!data) return
+      if (usableFix) {
+        const nearest = nearestOfCategory(data.pois, category, usableFix)
+        if (nearest) flyTo(nearest.position, nearest)
+        else setProbe(`No ${category} found in this dataset`)
+        return
+      }
+      setPendingNearest(category)
+      acquireLocation('nearest')
+    },
+    [data, usableFix, flyTo, acquireLocation],
+  )
+  useEffect(() => {
+    if (!pendingNearest || !usableFix || !data) return
+    const category = pendingNearest
+    const fix = usableFix
+    // Deferred a frame rather than run synchronously in the effect body — the
+    // resolution (releasing the watch, moving the camera) is a reaction to a
+    // fix arriving, not itself a value this render should produce.
+    const id = requestAnimationFrame(() => {
+      setPendingNearest(undefined)
+      releaseLocation('nearest')
+      const nearest = nearestOfCategory(data.pois, category, fix)
+      if (nearest) flyTo(nearest.position, nearest)
+      else setProbe(`No ${category} found in this dataset`)
+    })
+    return () => cancelAnimationFrame(id)
+  }, [pendingNearest, usableFix, data, releaseLocation, flyTo])
+  useEffect(() => {
+    if (!pendingNearest || !locationWatchHasFailed(location.status)) return
+    const id = requestAnimationFrame(() => {
+      setPendingNearest(undefined)
+      releaseLocation('nearest')
+      setProbe('Could not get your location')
+    })
+    return () => cancelAnimationFrame(id)
+  }, [pendingNearest, location.status, releaseLocation])
 
   /**
    * Re-frames the currently selected sheet once its real measured height is
@@ -1064,6 +1291,17 @@ export default function App() {
                 // a fix started this way keeps running for the rest of the
                 // session.
                 onLocate={() => acquireLocation('map')}
+                // The same usable fix navigation math and the distance
+                // readout already use — not `here` directly, so a fix
+                // `isNearCity()` has rejected never draws a marker
+                // somewhere off this map (#59).
+                userLocation={usableFix ? { position: usableFix, accuracy: location.accuracy } : undefined}
+                // #62: the survey has unusually strong reverse-geocoder math
+                // already; this is what puts it within reach without opening
+                // navigation at all. `showingLiveAddress` (not a frozen
+                // string in `probe`) is what makes the snackbar's own text
+                // keep tracking the shared watch while it stays open.
+                onLocationClick={usableFix ? () => setShowingLiveAddress(true) : undefined}
                 savedPlaces={places}
                 onSelectPlace={(id) => {
                   const place = places.find((p) => p.id === id)
@@ -1147,10 +1385,14 @@ export default function App() {
                   address={heading.address}
                   travel={navigation.travel}
                   heading={navigation.clock}
+                  bearing={navigation.bearing}
+                  compass={compass}
+                  palette={palette}
                   located={Boolean(usableFix)}
                   status={location.status}
                   accuracy={location.accuracy}
                   approximate={heading.approximate}
+                  screenAwake={wakeLock === 'active'}
                   onRetryLocation={location.start}
                   onClear={() => {
                     setHeading(undefined)
@@ -1425,6 +1667,7 @@ export default function App() {
           setDeletedPlace(place)
           setProbe(`Removed “${place.name}”`)
         }}
+        onFindNearest={findNearest}
         onClose={() => setFiltersOpen(false)}
       />
 
@@ -1443,6 +1686,12 @@ export default function App() {
           onSelectEvent={setSelectedEvent}
           onClose={() => setEventsOpen(false)}
           compact={compact}
+          savedEvents={savedEvents}
+          isEventSaved={isEventSaved}
+          onToggleSaveEvent={(event) =>
+            isEventSaved(event.uid) ? removeSavedEvent(event.uid) : saveEvent(event)
+          }
+          onRemoveSavedEvent={removeSavedEvent}
         />
       )}
 
@@ -1455,6 +1704,12 @@ export default function App() {
           layout={data.layout}
           origin={origin}
           now={clock.now}
+          isSaved={Boolean(selectedEvent && isEventSaved(selectedEvent.uid))}
+          onToggleSave={() => {
+            if (!selectedEvent) return
+            if (isEventSaved(selectedEvent.uid)) removeSavedEvent(selectedEvent.uid)
+            else saveEvent(selectedEvent)
+          }}
           onClose={() => setSelectedEvent(undefined)}
           onNavigate={(target) => {
             setEventsOpen(false)
@@ -1464,10 +1719,17 @@ export default function App() {
       )}
 
       <Snackbar
-        open={Boolean(probe)}
+        open={Boolean(probe) || showingLiveAddress}
         autoHideDuration={6000}
-        onClose={() => setProbe(undefined)}
-        message={probe}
+        onClose={() => {
+          setProbe(undefined)
+          setShowingLiveAddress(false)
+        }}
+        // Out-of-city fixes never reach here at all — the marker this opens
+        // from only exists for `usableFix`, and losing the fix mid-display
+        // (walking out of GPS range, the watch stopping) falls back to
+        // saying so plainly rather than freezing on the last address.
+        message={showingLiveAddress ? liveAddressMessage(liveAddressLabel) : probe}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         action={
           deletedPlace && probe === `Removed “${deletedPlace.name}”` ? (

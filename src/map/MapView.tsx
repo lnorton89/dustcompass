@@ -40,6 +40,7 @@ import { SERVICE_LAYER_ID, ServiceLayers, TOILET_LAYER_ID } from './ServiceLayer
 import { pickByPriority } from './pick'
 import { baseStyle, paletteFor, type ThemeMode } from './style'
 import { FocusMarker } from './FocusMarker'
+import { UserLocationMarker } from './UserLocationMarker'
 import { PlayaScene } from './PlayaScene'
 import { assetUrl } from '../config'
 
@@ -75,6 +76,14 @@ interface Props {
   onProbe: (address: string, position: Position) => void
   /** Fires when the map's locate control is pressed. */
   onLocate: () => void
+  /**
+   * The shared GPS watch's current fix (#59) — the same one navigation math
+   * already uses, not a second independent tracker. `undefined` whenever the
+   * watch isn't producing a usable fix, in which case no marker is drawn.
+   */
+  userLocation?: { position: Position; accuracy?: number }
+  /** Reads out the current playa address when the live-location marker is tapped (#62). */
+  onLocationClick?: () => void
   /** A dropped or shared location to mark, if any. */
   pin?: { position: Position; address: string }
   /** Fires when the pin marker itself is tapped, to reopen its actions. */
@@ -153,6 +162,8 @@ export function MapView({
   onSelectStack,
   onProbe,
   onLocate,
+  userLocation,
+  onLocationClick,
   pin,
   onPinClick,
   initialTarget,
@@ -465,6 +476,15 @@ export function MapView({
            * Otherwise inert once the six-second Save/Share snackbar that
            * created it auto-hides: the pin stayed on the map with no way
            * back to those actions short of dropping a fresh one on top of it.
+           *
+           * The button itself is the app's 44x44 mobile touch-target floor
+           * (#57) — this is raw HTML inside a MapLibre marker, not a MUI
+           * component, so none of the theme's IconButton/ToggleButton
+           * sizing rules reach it. The visible 16px teardrop stays exactly
+           * the size it was; it just sits flush against the bottom-centre
+           * of the enlarged, transparent hit area, which is what keeps the
+           * marker's `anchor="bottom"` pointing at the same geographic spot
+           * the visible tip already indicated.
            */}
           <button
             type="button"
@@ -472,17 +492,31 @@ export function MapView({
             aria-label={`Marked location: ${pin.address}. Reopen save and share options.`}
             onClick={onPinClick}
             style={{
-              width: 16,
-              height: 16,
+              width: 44,
+              height: 44,
               padding: 0,
-              border: `2px solid ${palette.playa}`,
-              borderRadius: '50% 50% 50% 0',
-              transform: 'rotate(-45deg)',
-              background: palette.art,
-              boxShadow: '0 1px 4px rgba(0,0,0,0.6)',
+              border: 'none',
+              background: 'transparent',
               cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'flex-end',
+              justifyContent: 'center',
             }}
-          />
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                display: 'block',
+                width: 16,
+                height: 16,
+                border: `2px solid ${palette.playa}`,
+                borderRadius: '50% 50% 50% 0',
+                transform: 'rotate(-45deg)',
+                background: palette.art,
+                boxShadow: '0 1px 4px rgba(0,0,0,0.6)',
+              }}
+            />
+          </button>
         </Marker>
       )}
 
@@ -504,6 +538,14 @@ export function MapView({
           palette={palette}
         />
       )}
+      {userLocation && (
+        <UserLocationMarker
+          position={userLocation.position}
+          accuracy={userLocation.accuracy}
+          palette={palette}
+          onClick={onLocationClick}
+        />
+      )}
 
       {/* The drawn desert, under everything the survey put on it. */}
       <PlayaScene layout={data.layout} palette={palette} />
@@ -512,6 +554,7 @@ export function MapView({
         campOutlines={data.campOutlines}
         palette={palette}
         labelScale={labelScale}
+        baseRoadWidth={data.layout.road_width}
       />
       <RouteLayer from={route?.from} to={route?.to} palette={palette} />
       <SavedPlacesLayer places={savedPlaces} palette={palette} labelScale={labelScale} />

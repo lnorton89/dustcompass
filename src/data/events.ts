@@ -40,7 +40,7 @@ export function resolveEventLocation(
   return located ? { kind: 'geocoded', label, position: located.position } : { kind: 'unmapped', label }
 }
 
-export type EventWindow = 'now' | 'next3h' | 'today' | 'all'
+export type EventWindow = 'now' | 'next3h' | 'today' | 'all' | 'saved'
 
 /**
  * Flatten events to individual occurrences and pick the ones inside a window.

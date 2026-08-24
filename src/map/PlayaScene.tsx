@@ -15,8 +15,13 @@ interface Props {
  * Zoomed out, a single flat colour leaves the city floating in a void with no
  * basin around it and no sense of which way the open playa runs. This draws
  * that ground: the alkali pan, the tonal mottling a playa actually has from
- * above, the vehicle tracks worn across it, and the ranges standing round the
- * rim with the south left open toward Gerlach.
+ * above, and the ranges standing round the rim with the south left open
+ * toward Gerlach.
+ *
+ * Deliberately absent: any generated line feature. A line reads as a
+ * navigable path, and everything here is scenery, not survey — see
+ * `buildPlaya()` for why fabricated vehicle tracks were removed rather than
+ * disclosed some other way.
  *
  * Vectors rather than an image, for the same reason the city is generated
  * rather than tiled — it stays sharp at every zoom, costs a few kilobytes of
@@ -58,18 +63,6 @@ export function PlayaScene({ layout, palette }: Props) {
               palette.patchShade,
             ],
             'fill-opacity': sceneryOpacity(0.55),
-          }}
-        />
-      </Source>
-
-      <Source id="playa-tracks" type="geojson" data={scene.tracks}>
-        <Layer
-          id="playa-tracks"
-          type="line"
-          paint={{
-            'line-color': palette.track,
-            'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1.2, 15, 3],
-            'line-opacity': sceneryOpacity(0.7),
           }}
         />
       </Source>

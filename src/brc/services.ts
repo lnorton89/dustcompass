@@ -35,6 +35,23 @@ export type ServiceCategory =
   | 'civic'
 
 /**
+ * `landmark`, `arrival` and `info` places are not services at all — see the
+ * type comment above — but until #45 they were still labelled "Service"
+ * everywhere downstream because that label came from `Poi.kind`, which stays
+ * `'service'` for all of `civic.ts`'s survey-derived places (see civicPois()
+ * — kept as one kind so filters/favorites keep treating them as one group).
+ * Anywhere that label is shown to a person, it must be read from `category`
+ * through this set first, falling back to the generic kind label only for
+ * the categories that genuinely are services (medical, ranger, ice, toilet,
+ * civic's own honest "we don't know").
+ */
+export const NON_SERVICE_CATEGORIES: ReadonlySet<ServiceCategory> = new Set([
+  'landmark',
+  'arrival',
+  'info',
+])
+
+/**
  * Plazas, portals and promenades are already drawn from the layout, the Man is
  * already a landmark, and the numbered points are survey control marks rather
  * than anywhere a person goes.
@@ -109,12 +126,16 @@ export function buildServices(
     .filter((place) => place.geometry?.type === 'Point')
 
   // Two stations can carry the same name in a survey, and a uid that collides
-  // sends the second one's detail drawer to the first one's dot. The suffix
-  // used to be assigned by encounter order in the source array, so a reordered
-  // survey refresh silently reassigned every duplicate's uid — a shared link
-  // or a favourite would start resolving to a different physical station with
-  // no sign anything had changed. Sorting by coordinate first makes the Nth
-  // station at a given name always the same physical one, survey order or not.
+  // sends the second one's detail drawer to the first one's dot. Sorting by
+  // coordinate before assigning a suffix (rather than by encounter order in
+  // the source array) stopped a reordered survey refresh from reassigning
+  // uids, but a *rank* among peers is still not a stable identity: inserting
+  // or removing a same-name station shifts every rank after it, so every
+  // later station's uid — and every deep link or favourite pointing at one —
+  // changed even though that station itself never moved (#46). The suffix is
+  // derived from the station's own coordinates instead, so it depends on
+  // nothing but that one station: unaffected by what else in the group is
+  // added, removed, or reordered.
   const byName = new Map<string, SurveyedPlace[]>()
   for (const place of named) {
     const ref = slug(place.properties.NAME as string)
@@ -122,11 +143,10 @@ export function buildServices(
     if (group) group.push(place)
     else byName.set(ref, [place])
   }
-  const suffixOf = new Map<SurveyedPlace, number>()
+  const suffixOf = new Map<SurveyedPlace, string>()
   for (const group of byName.values()) {
     if (group.length < 2) continue
-    const ordered = [...group].sort((a, b) => coordinateKey(a).localeCompare(coordinateKey(b)))
-    ordered.forEach((place, i) => suffixOf.set(place, i + 1))
+    for (const place of group) suffixOf.set(place, coordinateSuffix(place))
   }
 
   return {
@@ -139,7 +159,7 @@ export function buildServices(
         type: 'Feature' as const,
         properties: {
           kind: 'service',
-          uid: suffix && suffix > 1 ? `${SERVICE_UID}${ref}-${suffix}` : `${SERVICE_UID}${ref}`,
+          uid: suffix ? `${SERVICE_UID}${ref}-${suffix}` : `${SERVICE_UID}${ref}`,
           name,
           ref,
           category: categorise(name),
@@ -159,6 +179,24 @@ export function buildServices(
 function coordinateKey(place: SurveyedPlace): string {
   const [lng, lat] = place.geometry.coordinates
   return `${lng.toFixed(5)},${lat.toFixed(5)}`
+}
+
+/**
+ * A short, order-independent identity for a duplicate-name station, derived
+ * only from its own rounded coordinates — never from its rank among peers.
+ * Two stations only ever collide here if they round to the same point at
+ * `coordinateKey`'s precision, i.e. this file's own definition of "the same
+ * station". FNV-1a needs no crypto import and 32 bits is ample dispersion
+ * for the handful of same-name stations a real survey ever has.
+ */
+function coordinateSuffix(place: SurveyedPlace): string {
+  const key = coordinateKey(place)
+  let hash = 0x811c9dc5
+  for (let i = 0; i < key.length; i += 1) {
+    hash ^= key.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(36)
 }
 
 function slug(name: string) {

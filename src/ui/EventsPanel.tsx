@@ -20,18 +20,23 @@ import CloseIcon from '@mui/icons-material/Close'
 import SearchIcon from '@mui/icons-material/Search'
 import NearMeIcon from '@mui/icons-material/NearMe'
 import ScheduleIcon from '@mui/icons-material/Schedule'
+import BookmarkIcon from '@mui/icons-material/Bookmark'
+import BookmarkBorderIcon from '@mui/icons-material/BookmarkBorder'
 import type { EventItem, Poi } from '../data/types'
 import {
   PLAYA_TIME_ZONE,
   formatWhen,
   occurrencesInWindow,
+  relevantOccurrence,
   resolveEventLocation,
   type EventWindow,
+  type LiveEvent,
 } from '../data/events'
 import { formatDistance, travelBetween } from '../brc/travel'
 import type { Position } from '../brc/geo'
 import type { CityLayout } from '../brc/layout'
 import type { LocationStatus } from '../data/useGeolocation'
+import type { SavedEvent } from '../data/useSavedEvents'
 
 interface Props {
   open: boolean
@@ -61,13 +66,23 @@ interface Props {
   onClose: () => void
   /** Phone layout: come up from the bottom instead of in from the side. */
   compact?: boolean
+  /** The saved-events snapshot backing the "Saved" window — see `useSavedEvents`. */
+  savedEvents: SavedEvent[]
+  isEventSaved: (uid: string) => boolean
+  onToggleSaveEvent: (event: EventItem) => void
+  /** Drops a saved uid that no longer matches anything in `events`. */
+  onRemoveSavedEvent: (uid: string) => void
 }
+
+/** How many matching events are rendered at once — a rendering choice, not a limit on what's reachable (#54). */
+const PAGE_SIZE = 300
 
 const WINDOWS: { value: EventWindow; label: string }[] = [
   { value: 'now', label: 'Now' },
   { value: 'next3h', label: 'Next 3h' },
   { value: 'today', label: 'Today' },
   { value: 'all', label: 'All' },
+  { value: 'saved', label: 'Saved' },
 ]
 
 /**
@@ -89,6 +104,10 @@ export function EventsPanel({
   onSelectEvent,
   onClose,
   compact,
+  savedEvents,
+  isEventSaved,
+  onToggleSaveEvent,
+  onRemoveSavedEvent,
 }: Props) {
   // "Now" is the right question during the event and a useless one before it:
   // scrubbed to the opening minute of the burn, one thing is running out of
@@ -156,8 +175,51 @@ export function EventsPanel({
    * can get there before it ends. Sorting by distance answers both at once, and
    * only makes sense once there is somewhere to measure from.
    */
-  const rows = useMemo(() => {
-    const found = occurrencesInWindow(events, window, now)
+  /**
+   * "Saved" is not a time window like the others — it is a fixed set of
+   * events, one row each, shown at whichever showing is relevant right now.
+   * Reuses the same `relevantOccurrence` helper `EventDetail` and hosted-event
+   * rows already use for "which showing of this repeating event matters right
+   * now", rather than inventing a second way to pick one.
+   */
+  const savedLive = useMemo(() => {
+    if (window !== 'saved') return []
+    const byUid = new Map(events.map((event) => [event.uid, event] as const))
+    const live: LiveEvent[] = []
+    for (const saved of savedEvents) {
+      const event = byUid.get(saved.uid)
+      if (!event) continue
+      const relevant = relevantOccurrence(event, now)
+      if (!relevant) continue
+      live.push({
+        event,
+        occurrence: relevant.occurrence,
+        start: new Date(relevant.occurrence.start_time),
+        end: new Date(relevant.occurrence.end_time),
+      })
+    }
+    return live.sort((a, b) => a.start.getTime() - b.start.getTime())
+  }, [window, events, savedEvents, now])
+
+  /**
+   * A saved uid a later data refresh dropped (event deleted, cancelled, or
+   * replaced) has to degrade to a harmless row, not vanish or resolve to
+   * whatever unrelated event now happens to reuse that uid string. Matched by
+   * uid against the *current* `events`, never against anything remembered
+   * from the save — a stale match would be exactly the silent-reuse failure
+   * this is guarding against.
+   */
+  const missingSavedEvents = useMemo(() => {
+    if (window !== 'saved') return []
+    const presentUids = new Set(events.map((event) => event.uid))
+    const term = query.trim().toLowerCase()
+    return savedEvents.filter(
+      (saved) => !presentUids.has(saved.uid) && (!term || saved.title.toLowerCase().includes(term)),
+    )
+  }, [window, events, savedEvents, query])
+
+  const matching = useMemo(() => {
+    const found = window === 'saved' ? savedLive : occurrencesInWindow(events, window, now)
     const located = found.map((row) => {
       const hostId = row.event.hosted_by_camp ?? row.event.located_at_art ?? ''
       const host = hosts.get(hostId)
@@ -177,22 +239,47 @@ export function EventsPanel({
     })
 
     const term = query.trim().toLowerCase()
-    const matching = term
+    const filtered = term
       ? located.filter((row) =>
           [
             row.event.title,
             row.host?.name,
             row.event.other_location,
             row.event.event_type?.label,
+            // A word that lives only in what an event is about — "coffee",
+            // "karaoke" — used to be unfindable even though the description
+            // is right there in the offline data.
+            row.event.description,
+            row.event.print_description,
           ].some((field) => field?.toLowerCase().includes(term)),
         )
       : located
 
     if (sort === 'distance' && origin) {
-      matching.sort((a, b) => (a.travel?.meters ?? Infinity) - (b.travel?.meters ?? Infinity))
+      filtered.sort((a, b) => (a.travel?.meters ?? Infinity) - (b.travel?.meters ?? Infinity))
     }
-    return matching.slice(0, 300)
-  }, [events, window, now, sort, origin, hosts, layout, query])
+    return filtered
+  }, [events, window, now, sort, origin, hosts, layout, query, savedLive])
+
+  /**
+   * `matching` is the complete set — sorting/filtering above already runs
+   * across all of it, not just a visible slice. What used to be a hard
+   * `.slice(0, 300)` with no way past it (issue #54) is now how much of that
+   * complete set is actually rendered, so thousands of events don't all
+   * become DOM nodes at once on a low-end phone, but every one past the
+   * first page stays reachable with "Load more" rather than vanishing.
+   *
+   * Reset to the first page whenever the window, sort, having a live origin,
+   * or the search term changes — a stale "loaded 900" position from a
+   * completely different filter is not a page anyone asked to keep. `now`
+   * ticking is deliberately not part of that key: it reshuffles `matching`'s
+   * contents without changing what the reader is looking for, and resetting
+   * on every tick would snap someone's loaded-more list back to page one.
+   */
+  const pageKey = `${window}|${sort}|${Boolean(origin)}|${query}`
+  const [paging, setPaging] = useState({ key: pageKey, shown: PAGE_SIZE })
+  if (paging.key !== pageKey) setPaging({ key: pageKey, shown: PAGE_SIZE })
+  const rows = matching.slice(0, paging.shown)
 
   return (
     <Drawer
@@ -290,7 +377,9 @@ export function EventsPanel({
           </ToggleButton>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-          {rows.length === 300 ? 'showing first 300' : `${rows.length} showing`}
+          {rows.length < matching.length
+            ? `${rows.length} of ${matching.length} showing`
+            : `${rows.length + missingSavedEvents.length} showing`}
           {sort === 'distance' && !origin && ' · finding you…'}
           {preview &&
             ` · previewing from ${now.toLocaleDateString(undefined, { timeZone: PLAYA_TIME_ZONE, weekday: 'long', month: 'short', day: 'numeric' })}`}
@@ -392,10 +481,25 @@ export function EventsPanel({
             </>
           )
           const rowSx = { alignItems: 'flex-start', gap: 1, py: 1 }
+          const saved = isEventSaved(row.event.uid)
           return (
             // A plain <li> wrapping the button: putting role="button" on the
             // <li> itself would strip its list semantics from the a11y tree.
-            <ListItem key={`${row.event.uid}-${index}`} disablePadding>
+            <ListItem
+              key={`${row.event.uid}-${index}`}
+              disablePadding
+              secondaryAction={
+                <IconButton
+                  edge="end"
+                  size="small"
+                  aria-label={saved ? 'Remove from saved events' : 'Save this event'}
+                  color={saved ? 'primary' : 'default'}
+                  onClick={() => onToggleSaveEvent(row.event)}
+                >
+                  {saved ? <BookmarkIcon fontSize="small" /> : <BookmarkBorderIcon fontSize="small" />}
+                </IconButton>
+              }
+            >
               {/*
                * Every row opens the event's own detail — description, full
                * occurrence list, and (when available) navigation — whether
@@ -404,21 +508,78 @@ export function EventsPanel({
                * handler did nothing at all; now there is always something
                * for the tap to do, located or not (issue #20).
                */}
-              <ListItemButton onClick={() => onSelectEvent(row.event)} sx={{ cursor: 'pointer', ...rowSx }}>
+              <ListItemButton
+                onClick={() => onSelectEvent(row.event)}
+                sx={{ cursor: 'pointer', pr: 6, ...rowSx }}
+              >
                 {content}
               </ListItemButton>
             </ListItem>
           )
         })}
+        {window === 'saved' &&
+          missingSavedEvents.map((saved) => (
+            // A saved uid a later data refresh no longer has anything for —
+            // deleted or cancelled, not just currently outside this window.
+            // Rendered as its own harmless row, using the title snapshotted
+            // at save time, rather than being silently dropped or (worse)
+            // resolved against a different event that happens to reuse the
+            // uid.
+            <ListItem
+              key={`missing-${saved.uid}`}
+              disablePadding
+              secondaryAction={
+                <IconButton
+                  edge="end"
+                  size="small"
+                  aria-label={`Remove ${saved.title} from saved events`}
+                  onClick={() => onRemoveSavedEvent(saved.uid)}
+                >
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              }
+            >
+              <Box sx={{ width: '100%', py: 1, pl: 2, pr: 6 }}>
+                <ListItemText
+                  primary={saved.title}
+                  secondary="No longer listed this year"
+                  slotProps={{
+                    primary: {
+                      variant: 'body2',
+                      sx: { fontWeight: 600, color: 'text.secondary' },
+                    },
+                    secondary: { variant: 'caption', sx: { color: 'text.secondary' } },
+                  }}
+                />
+              </Box>
+            </ListItem>
+          ))}
       </List>
-      {rows.length === 0 && (
+      {rows.length < matching.length && (
+        // The initial cap is a rendering choice, not a limit on what is
+        // reachable — every matching event past the first page stays
+        // reachable here rather than becoming invisible the way a hard
+        // `.slice(0, 300)` with no continuation used to (issue #54).
+        <Box sx={{ px: 2, pb: 1.5 }}>
+          <Button
+            size="small"
+            fullWidth
+            onClick={() => setPaging({ key: pageKey, shown: paging.shown + PAGE_SIZE })}
+          >
+            Load {Math.min(PAGE_SIZE, matching.length - rows.length)} more ({matching.length - rows.length} left)
+          </Button>
+        </Box>
+      )}
+      {rows.length === 0 && missingSavedEvents.length === 0 && (
         // An empty state has to carry its own way out. "Nothing scheduled in
         // this window" was true, unhelpful, and a dead end.
         <Box sx={{ px: 2, pt: 1, pb: 3 }}>
           <Typography variant="body2" color="text.secondary">
             {query
               ? `Nothing matching “${query}” in this window.`
-              : 'Nothing scheduled in this window.'}
+              : window === 'saved'
+                ? 'No saved events yet — tap the bookmark icon on an event to add it here.'
+                : 'Nothing scheduled in this window.'}
           </Typography>
           <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 1 }}>
             {query && (

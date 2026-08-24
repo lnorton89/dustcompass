@@ -139,10 +139,16 @@ describe('buildServices', () => {
     expect(uidFor(forward, stationA.geometry.coordinates)).not.toBe(
       uidFor(forward, stationB.geometry.coordinates),
     )
-    expect(uidFor(forward, stationA.geometry.coordinates)).toBe(`${SERVICE_UID}ranger-outpost`)
+    expect(uidFor(forward, stationA.geometry.coordinates)).toMatch(
+      new RegExp(`^${SERVICE_UID}ranger-outpost-[0-9a-z]+$`),
+    )
   })
 
-  it('keeps existing duplicates stable when another same-name station is added', () => {
+  // #46: a rank-based suffix (even one made order-independent by sorting on
+  // coordinate first, as #30 did) still shifts every later station's uid
+  // whenever a same-name station is inserted before or removed — a coordinate
+  // -derived suffix must not, in either direction.
+  it('keeps existing duplicates stable when another same-name station is added after them', () => {
     const before = buildServices({ features: [stationA, stationB] })
     const uidABefore = uidFor(before, stationA.geometry.coordinates)
     const uidBBefore = uidFor(before, stationB.geometry.coordinates)
@@ -155,6 +161,33 @@ describe('buildServices', () => {
     expect(uidC).not.toBe(uidABefore)
     expect(uidC).not.toBe(uidBBefore)
     expect(new Set(after.features.map((f) => f.properties?.uid)).size).toBe(3)
+  })
+
+  it('keeps existing duplicates stable when a same-name station is inserted before them by coordinate', () => {
+    // stationZ sorts before stationA by coordinateKey — exactly the ordering
+    // that renumbered a rank-based scheme, since it becomes the new "first".
+    const stationZ = place('Ranger Outpost', [9.9999, 20.0])
+
+    const before = buildServices({ features: [stationA, stationB] })
+    const uidABefore = uidFor(before, stationA.geometry.coordinates)
+    const uidBBefore = uidFor(before, stationB.geometry.coordinates)
+
+    const after = buildServices({ features: [stationZ, stationA, stationB] })
+    expect(uidFor(after, stationA.geometry.coordinates)).toBe(uidABefore)
+    expect(uidFor(after, stationB.geometry.coordinates)).toBe(uidBBefore)
+    const uidZ = uidFor(after, stationZ.geometry.coordinates)
+    expect(uidZ).not.toBe(uidABefore)
+    expect(uidZ).not.toBe(uidBBefore)
+  })
+
+  it('does not renumber the surviving station when a same-name station is removed', () => {
+    const before = buildServices({ features: [stationA, stationB, stationC] })
+    const uidBBefore = uidFor(before, stationB.geometry.coordinates)
+    const uidCBefore = uidFor(before, stationC.geometry.coordinates)
+
+    const after = buildServices({ features: [stationB, stationC] })
+    expect(uidFor(after, stationB.geometry.coordinates)).toBe(uidBBefore)
+    expect(uidFor(after, stationC.geometry.coordinates)).toBe(uidCBefore)
   })
 
   // Issue #43: the CPNS survey names plenty of real places that are not

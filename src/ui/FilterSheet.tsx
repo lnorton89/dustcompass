@@ -15,10 +15,21 @@ import {
 } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 import CloseIcon from '@mui/icons-material/Close'
+import WcIcon from '@mui/icons-material/Wc'
+import LocalHospitalIcon from '@mui/icons-material/LocalHospital'
+import ShieldIcon from '@mui/icons-material/Shield'
 import { alpha } from '@mui/material/styles'
 import type { ReactElement } from 'react'
+import type { ServiceCategory } from '../brc/services'
 import type { SavedPlace } from '../data/useSavedPlaces'
 import type { PlayaPalette, ReadingSize } from '../map/style'
+
+/** The three categories worth a one-tap "nearest" lookup (#66) — the ones someone actually needs in a hurry. */
+const NEARBY: { category: ServiceCategory; label: string; icon: ReactElement }[] = [
+  { category: 'toilet', label: 'Nearest toilet', icon: <WcIcon fontSize="small" /> },
+  { category: 'ranger', label: 'Nearest ranger', icon: <ShieldIcon fontSize="small" /> },
+  { category: 'medical', label: 'Nearest medical', icon: <LocalHospitalIcon fontSize="small" /> },
+]
 
 export interface FilterOption<T extends string> {
   key: T
@@ -42,6 +53,8 @@ interface Props<T extends string> {
   onToggleReading: () => void
   onGoToPlace: (place: SavedPlace) => void
   onRemovePlace: (id: string) => void
+  /** One-tap "nearest toilet/ranger/medical" (#66) — the shared GPS position answers it locally, no routing backend needed. */
+  onFindNearest: (category: ServiceCategory) => void
   onClose: () => void
 }
 
@@ -63,6 +76,7 @@ export function FilterSheet<T extends string>({
   onToggleReading,
   onGoToPlace,
   onRemovePlace,
+  onFindNearest,
   onClose,
 }: Props<T>) {
   return (
@@ -150,6 +164,33 @@ export function FilterSheet<T extends string>({
           label="Bigger text and labels"
         />
       </Box>
+
+      <Divider sx={{ my: 1.5 }} />
+      <Typography variant="subtitle2">Nearby</Typography>
+      <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mt: 1, mb: 1 }}>
+        {NEARBY.map(({ category, label, icon }) => (
+          <Chip
+            key={category}
+            icon={icon}
+            label={label}
+            variant="outlined"
+            onClick={() => {
+              onFindNearest(category)
+              onClose()
+            }}
+            sx={{
+              height: 44,
+              borderRadius: '12px',
+              px: 0.5,
+              fontSize: 14,
+              fontWeight: 600,
+              borderColor: 'divider',
+              color: 'text.primary',
+              '&:hover': { bgcolor: 'action.hover' },
+            }}
+          />
+        ))}
+      </Stack>
 
       <Divider sx={{ my: 1.5 }} />
       <Typography variant="subtitle2">Saved spots</Typography>

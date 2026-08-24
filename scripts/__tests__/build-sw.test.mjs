@@ -17,14 +17,28 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
 
-/** Generates the real service worker once against a minimal `out/` tree. */
-function generateWorker() {
+/**
+ * Generates the real service worker against a minimal `out/` tree.
+ *
+ * Includes an attribution Markdown file alongside the data JSON by default —
+ * `fetch-data.mjs`/`fetch-api.mjs` always write one in a real build — so
+ * every test generated this way is, by construction, exercising the same
+ * "data directory has non-JSON members" shape a real deploy has (#71), not a
+ * hand-picked fixture that happens to avoid it.
+ */
+function generateWorker({ basePath, includeAttribution = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dustcompass-sw-'))
   mkdirSync(join(dir, 'out', 'data', '2025'), { recursive: true })
   writeFileSync(join(dir, 'out', 'index.html'), '<html></html>')
   writeFileSync(join(dir, 'out', 'data', '2025', 'layout.json'), '{}')
   writeFileSync(join(dir, 'out', 'data', '2025', 'camp.json'), '[]')
-  execFileSync(process.execPath, [join(repoRoot, 'scripts', 'build-sw.mjs')], { cwd: dir })
+  if (includeAttribution) {
+    writeFileSync(join(dir, 'out', 'data', '2025', 'ATTRIBUTION.md'), '# Attribution\n')
+  }
+  execFileSync(process.execPath, [join(repoRoot, 'scripts', 'build-sw.mjs')], {
+    cwd: dir,
+    env: { ...process.env, NEXT_PUBLIC_BASE_PATH: basePath ?? '' },
+  })
   const source = readFileSync(join(dir, 'out', 'sw.js'), 'utf8')
   rmSync(dir, { recursive: true, force: true })
   return source
@@ -53,13 +67,28 @@ const keyFor = (request) => {
 }
 
 class FakeCache {
-  constructor() {
+  constructor({ failPutAfter } = {}) {
     this.store = new Map()
+    // Lets a test simulate a `cache.put()` that fails independently of a
+    // successful fetch (storage quota, eviction) — the failure mode #47 is
+    // about. `undefined` means puts never fail; otherwise this many succeed
+    // before every later one throws.
+    this.failPutAfter = failPutAfter
+    this.putCount = 0
   }
   async match(request) {
-    return this.store.get(keyFor(request))
+    // A real Cache.match() hands back a Response whose body has never been
+    // read, independent of any earlier match() call — cloning here mirrors
+    // that so a stored entry can be matched (and its body read) more than
+    // once, the way the pointer record and revision entries both are here.
+    const stored = this.store.get(keyFor(request))
+    return stored ? stored.clone() : undefined
   }
   async put(request, response) {
+    if (this.failPutAfter !== undefined && this.putCount >= this.failPutAfter) {
+      throw new Error('simulated storage failure')
+    }
+    this.putCount += 1
     this.store.set(keyFor(request), response)
   }
   async keys() {
@@ -68,11 +97,15 @@ class FakeCache {
 }
 
 class FakeCacheStorage {
-  constructor() {
+  /** `failPut` is an optional `(cacheName) => number | undefined` deciding each new cache's `failPutAfter`. */
+  constructor({ failPut } = {}) {
     this.byName = new Map()
+    this.failPut = failPut
   }
   async open(name) {
-    if (!this.byName.has(name)) this.byName.set(name, new FakeCache())
+    if (!this.byName.has(name)) {
+      this.byName.set(name, new FakeCache({ failPutAfter: this.failPut?.(name) }))
+    }
     return this.byName.get(name)
   }
   async has(name) {
@@ -100,8 +133,14 @@ class FakeRequest {
   }
 }
 
+// Two refreshLiveData() calls in the same test can otherwise land in the
+// same real millisecond and mint the identical revision cache name, which
+// would make a "second refresh" silently reuse the first revision's cache
+// object instead of a fresh one.
+let fakeClock = 1700000000000
+
 /** Runs the generated worker source in a fresh sandboxed scope. */
-function loadWorker({ fetchImpl }) {
+function loadWorker({ fetchImpl, cacheStorage, source = workerSource, origin = ORIGIN }) {
   const handlers = {}
   const notifications = []
   const sandbox = {
@@ -111,8 +150,9 @@ function loadWorker({ fetchImpl }) {
     AbortSignal,
     URL,
     setTimeout,
+    Date: { now: () => (fakeClock += 1) },
     fetch: (...args) => fetchImpl(...args),
-    caches: new FakeCacheStorage(),
+    caches: cacheStorage ?? new FakeCacheStorage(),
     self: undefined,
   }
   sandbox.self = {
@@ -123,11 +163,11 @@ function loadWorker({ fetchImpl }) {
       matchAll: async () => [{ postMessage: (message) => notifications.push(message) }],
       claim: async () => {},
     },
-    location: { origin: ORIGIN },
+    location: { origin },
     skipWaiting: async () => {},
   }
   vm.createContext(sandbox)
-  vm.runInContext(workerSource, sandbox)
+  vm.runInContext(source, sandbox)
 
   const fireInstall = async () => {
     let promise
@@ -142,7 +182,7 @@ function loadWorker({ fetchImpl }) {
   const fireFetch = async (path, init) => {
     let promise
     // A real intercepted fetch event's request.url is always absolute.
-    const request = new FakeRequest(new URL(path, ORIGIN).href, init)
+    const request = new FakeRequest(new URL(path, origin).href, init)
     await handlers.fetch({
       request,
       respondWith: (p) => (promise = p),
@@ -150,11 +190,35 @@ function loadWorker({ fetchImpl }) {
     })
     return promise
   }
+  const fireMessage = async (data) => {
+    let promise = Promise.resolve()
+    await handlers.message({ data, waitUntil: (p) => (promise = p) })
+    return promise
+  }
 
-  return { caches: sandbox.caches, notifications, fireInstall, fireActivate, fireFetch }
+  // Separate `vm.runInContext` calls against the same contextified sandbox
+  // share top-level `const`/`let` bindings — the same mechanism the Node
+  // REPL uses — so this reads the worker's own live globals straight out of
+  // the executed source rather than re-deriving a copy of its filtering
+  // logic here, which could drift from (or simply repeat a mistake in) the
+  // real implementation.
+  const dataFiles = vm.runInContext('DATA_FILES', sandbox)
+  const cacheName = vm.runInContext('CACHE_NAME', sandbox)
+
+  return { caches: sandbox.caches, notifications, dataFiles, cacheName, origin, fireInstall, fireActivate, fireFetch, fireMessage }
 }
 
 const dataUrl = (name) => `/data/2025/${name}`
+
+const POINTER_CACHE = 'dust-compass-live-pointer'
+const POINTER_URL = `${ORIGIN}/__dust-compass-live-revision`
+
+/** The revision cache the pointer currently names, or undefined if none has ever promoted. */
+async function currentLiveRevision(worker) {
+  const pointer = await worker.caches.open(POINTER_CACHE)
+  const record = await pointer.match(POINTER_URL)
+  return record ? record.text() : undefined
+}
 
 describe('generated service worker', () => {
   it('is valid, executable JavaScript', () => {
@@ -225,9 +289,11 @@ describe('generated service worker', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
 
     expect(worker.notifications.some((m) => m.type === 'DATA_REFRESHED')).toBe(true)
-    const live = await worker.caches.open('dust-compass-live-data')
-    expect(await live.match(dataUrl('layout.json'))).toBeDefined()
-    expect(await live.match(dataUrl('camp.json'))).toBeDefined()
+    const revisionName = await currentLiveRevision(worker)
+    expect(revisionName).toBeDefined()
+    const revision = await worker.caches.open(revisionName)
+    expect(await revision.match(dataUrl('layout.json'))).toBeDefined()
+    expect(await revision.match(dataUrl('camp.json'))).toBeDefined()
   })
 
   it('does not promote a partial revision when one file in it fails', async () => {
@@ -252,24 +318,241 @@ describe('generated service worker', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
 
     expect(worker.notifications.some((m) => m.type === 'DATA_REFRESHED')).toBe(false)
-    const live = await worker.caches.open('dust-compass-live-data')
-    // Neither file was promoted — not layout.json (which did succeed) and
-    // certainly not camp.json (which did not). A half-applied revision is
-    // exactly the mixed snapshot this is meant to prevent.
-    expect(await live.match(dataUrl('layout.json'))).toBeUndefined()
-    expect(await live.match(dataUrl('camp.json'))).toBeUndefined()
+    // No revision was ever complete, so the pointer was never written and
+    // there is nothing for a reader to find.
+    expect(await currentLiveRevision(worker)).toBeUndefined()
   })
 
-  it('keeps the live-data cache through activate\'s stale-cache cleanup', async () => {
-    const worker = loadWorker({ fetchImpl: async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) })
-    const live = await worker.caches.open('dust-compass-live-data')
-    await live.put(dataUrl('layout.json'), new Response('{"kept":true}'))
-
+  it('keeps the live pointer and its revision through activate\'s stale-cache cleanup', async () => {
+    const worker = loadWorker({
+      fetchImpl: async (req) => {
+        const url = typeof req === 'string' ? req : req.url
+        if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+        return new Response('<html></html>', { status: 200 })
+      },
+    })
     await worker.fireInstall()
+    await worker.fireFetch(dataUrl('layout.json'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const revisionName = await currentLiveRevision(worker)
+    expect(revisionName).toBeDefined()
+
     await worker.fireActivate()
 
-    expect(await worker.caches.has('dust-compass-live-data')).toBe(true)
-    expect(await live.match(dataUrl('layout.json'))).toBeDefined()
+    expect(await worker.caches.has(POINTER_CACHE)).toBe(true)
+    expect(await worker.caches.has(revisionName)).toBe(true)
+    expect(await currentLiveRevision(worker)).toBe(revisionName)
+  })
+
+  /**
+   * The bug behind #71: `DATA_FILES` used to be every precached URL under
+   * `DATA_PREFIX`, which also caught `ATTRIBUTION.md`/`LISTINGS-
+   * ATTRIBUTION.md` — real files `fetch-data.mjs`/`fetch-api.mjs` always
+   * write alongside the JSON. `refreshLiveData()` requires every `DATA_FILES`
+   * member to report a JSON content-type before promoting anything, so a
+   * manifest containing a Markdown file made that impossible to satisfy for
+   * any real build — live-data promotion was silently disabled entirely.
+   * `generateWorker()` includes an attribution file by default (see its own
+   * doc comment), so this isn't a hand-picked fixture engineered to catch
+   * the bug — every other test in this file already exercises this shape.
+   */
+  describe('attribution files excluded from the live-data manifest (#71)', () => {
+    it('keeps the real manifest scoped to JSON/GeoJSON, not every precached data-directory member', () => {
+      const worker = loadWorker({ fetchImpl: async () => new Response('should not be fetched', { status: 200 }) })
+      expect(worker.dataFiles.some((url) => url.endsWith('.md'))).toBe(false)
+      expect(worker.dataFiles.some((url) => url.endsWith('layout.json'))).toBe(true)
+      expect(worker.dataFiles.some((url) => url.endsWith('camp.json'))).toBe(true)
+    })
+
+    it('promotes a live-data refresh and never even fetches the attribution file, despite it being precached', async () => {
+      const fetched = []
+      const worker = loadWorker({
+        fetchImpl: async (req) => {
+          const url = typeof req === 'string' ? req : req.url
+          fetched.push(url)
+          if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+          if (url.endsWith('camp.json')) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+          // The install-time precache asset (the app shell, and — critically
+          // — ATTRIBUTION.md itself, which install() still fetches to keep
+          // the credit text available offline) responds with plain HTML,
+          // deliberately not JSON: if refreshLiveData() ever tried to treat
+          // this as a data file, `type.includes('json')` would be false and
+          // promotion would fail exactly the way #71 describes.
+          return new Response('<html></html>', { status: 200 })
+        },
+      })
+      await worker.fireInstall()
+      expect(fetched.some((url) => url.endsWith('.md'))).toBe(true) // precached, so install() does fetch it once
+
+      fetched.length = 0
+      await worker.fireFetch(dataUrl('layout.json'))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      expect(worker.notifications.some((m) => m.type === 'DATA_REFRESHED')).toBe(true)
+      expect(fetched.some((url) => url.endsWith('.md'))).toBe(false)
+      const revisionName = await currentLiveRevision(worker)
+      const revision = await worker.caches.open(revisionName)
+      expect(await revision.match(dataUrl('layout.json'))).toBeDefined()
+      expect(await revision.match(dataUrl('camp.json'))).toBeDefined()
+    })
+  })
+
+  /**
+   * The bug behind #72: the pointer cache and every revision cache are
+   * deliberately preserved across worker activations (see the pointer
+   * architecture's own comment above `LIVE_POINTER_CACHE`), with nothing
+   * checking which build actually populated them. A newer worker shipping
+   * newer bundled data activated over an older worker's still-named pointer
+   * and inherited that older, by-definition-unvetted-by-this-build live
+   * revision — preferring it forever over its own freshly bundled,
+   * guaranteed-current precache.
+   */
+  it('clears a live pointer left by a different build on activate, so a new build reads its own bundled data (#72)', async () => {
+    const cacheStorage = new FakeCacheStorage()
+    const buildA = loadWorker({
+      source: generateWorker(),
+      cacheStorage,
+      fetchImpl: async (req) => {
+        const url = typeof req === 'string' ? req : req.url
+        if (url.endsWith('layout.json')) return new Response('{"build":"A"}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response('["A"]', { status: 200, headers: { 'content-type': 'application/json' } })
+        return new Response('<html>A</html>', { status: 200 })
+      },
+    })
+    await buildA.fireInstall()
+    await buildA.fireActivate()
+    await buildA.fireFetch(dataUrl('layout.json'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const aRevision = await currentLiveRevision(buildA)
+    expect(aRevision).toBeDefined()
+    expect(await (await buildA.caches.open(aRevision)).match(dataUrl('layout.json'))).toBeDefined()
+
+    // Build B: distinguishable generated source (different precache content,
+    // so a real, different CACHE_NAME digest), sharing the same persistent
+    // Cache Storage the way a real browser's storage survives a worker
+    // update. B's own bundled precache is fetched with build-B content.
+    const bWorkDir = mkdtempSync(join(tmpdir(), 'dustcompass-sw-b-'))
+    mkdirSync(join(bWorkDir, 'out', 'data', '2025'), { recursive: true })
+    writeFileSync(join(bWorkDir, 'out', 'index.html'), '<html>B build marker</html>')
+    writeFileSync(join(bWorkDir, 'out', 'data', '2025', 'layout.json'), '{"build":"B-bundled"}')
+    writeFileSync(join(bWorkDir, 'out', 'data', '2025', 'camp.json'), '["B-bundled"]')
+    execFileSync(process.execPath, [join(repoRoot, 'scripts', 'build-sw.mjs')], {
+      cwd: bWorkDir,
+      env: { ...process.env, NEXT_PUBLIC_BASE_PATH: '' },
+    })
+    const bSource = readFileSync(join(bWorkDir, 'out', 'sw.js'), 'utf8')
+    rmSync(bWorkDir, { recursive: true, force: true })
+
+    const buildB = loadWorker({
+      source: bSource,
+      cacheStorage,
+      fetchImpl: async (req) => {
+        const url = typeof req === 'string' ? req : req.url
+        if (url.endsWith('layout.json')) return new Response('{"build":"B-bundled"}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response('["B-bundled"]', { status: 200, headers: { 'content-type': 'application/json' } })
+        return new Response('<html>B build marker</html>', { status: 200 })
+      },
+    })
+    expect(buildB.cacheName).not.toBe(buildA.cacheName)
+    await buildB.fireInstall()
+    await buildB.fireActivate()
+
+    // A's pointer/revision belonged to a different build — activation must
+    // have cleared it rather than leaving B pointed at A's data.
+    expect(await currentLiveRevision(buildB)).toBeUndefined()
+
+    const response = await buildB.fireFetch(dataUrl('layout.json'))
+    expect(await response.text()).toBe('{"build":"B-bundled"}')
+  })
+
+  /**
+   * The bug behind #75: `Response.redirect()` requires an absolute URL.
+   * `SHELL` is root-relative on a project-subpath deployment (e.g.
+   * "/dustcompass/"), which threw a `TypeError` with no base to resolve
+   * against — breaking the entire offline listing-share fallback on exactly
+   * the deployment this app actually uses (GitHub Pages project sites).
+   */
+  describe('offline listing-page redirect target is always absolute (#75)', () => {
+    it.each([
+      { label: 'a project-subpath deployment', basePath: '/dustcompass' },
+      { label: 'a root-domain deployment', basePath: '' },
+    ])('produces a redirect Response.redirect() can accept for $label', async ({ basePath }) => {
+      const source = generateWorker({ basePath })
+      const worker = loadWorker({
+        source,
+        // Install must still succeed (its own precache fetches never carry
+        // `mode: 'navigate'`) — only the later runtime navigation fetch is
+        // made to fail, to force the offline listing-redirect fallback
+        // under test without also breaking the install this test needs
+        // to have already completed.
+        fetchImpl: async (req) => {
+          const mode = req && typeof req === 'object' ? req.mode : undefined
+          if (mode === 'navigate') throw new Error('network unreachable — forces the offline fallback')
+          const url = typeof req === 'string' ? req : req.url
+          if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+          if (url.endsWith('camp.json')) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+          return new Response('<html></html>', { status: 200 })
+        },
+      })
+      await worker.fireInstall()
+
+      const shellPath = basePath ? `${basePath}/` : '/'
+      const response = await worker.fireFetch(`${shellPath}p/some-uid/`, { mode: 'navigate' })
+      expect(response.status).toBe(302)
+      const location = response.headers.get('location')
+      expect(location).toBeTruthy()
+      // The real bug threw before a Response was ever constructed — merely
+      // getting here proves Response.redirect() accepted the target. This
+      // also checks it resolved to the intended absolute URL, not just any
+      // absolute one.
+      const resolved = new URL(location)
+      expect(resolved.href).toBe(`${ORIGIN}${shellPath}?poi=some-uid`)
+    })
+  })
+
+  /**
+   * The bug behind #47: promotion used to delete the fixed 'dust-compass-
+   * live-data' cache and copy files into it one at a time, so a `cache.put`
+   * that failed partway through — independently of every fetch having
+   * succeeded — could leave that cache holding neither the old nor the new
+   * revision complete. Each refresh now builds a freshly named revision
+   * cache and only switches the pointer once every file in it is confirmed
+   * present, so a failing `cache.put` here must leave the previously
+   * promoted revision exactly as it was.
+   */
+  it('leaves the previously promoted revision untouched when a cache.put fails partway through a later refresh', async () => {
+    const cacheStorage = new FakeCacheStorage()
+    const worker = loadWorker({
+      cacheStorage,
+      fetchImpl: async (req) => {
+        const url = typeof req === 'string' ? req : req.url
+        if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+        return new Response('<html></html>', { status: 200 })
+      },
+    })
+    await worker.fireInstall()
+
+    // First refresh: nothing fails, this becomes the "previously promoted"
+    // complete revision.
+    await worker.fireFetch(dataUrl('layout.json'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const firstRevision = await currentLiveRevision(worker)
+    expect(firstRevision).toBeDefined()
+    const firstLayout = await (await worker.caches.open(firstRevision)).match(dataUrl('layout.json'))
+    expect(firstLayout).toBeDefined()
+
+    // Second refresh: both fetches succeed, but the *second* destination
+    // cache.put() into the new revision cache throws (simulated quota).
+    cacheStorage.failPut = (name) => (name.startsWith('dust-compass-live-data-rev-') && name !== firstRevision ? 1 : undefined)
+    await worker.fireFetch(dataUrl('layout.json'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    // The pointer never moved: the same first revision is still the one served.
+    expect(await currentLiveRevision(worker)).toBe(firstRevision)
+    const stillLayout = await (await worker.caches.open(firstRevision)).match(dataUrl('layout.json'))
+    expect(await stillLayout.text()).toBe(await firstLayout.text())
   })
 
   /**
@@ -283,6 +566,68 @@ describe('generated service worker', () => {
    * ahead of the exact-URL check, must return the cached shell for these
    * with no network attempt at all.
    */
+  /**
+   * The bug behind #58: `PwaStatus` used to treat an active service-worker
+   * registration alone as proof the offline map was still complete, even
+   * though Cache Storage can be evicted under storage pressure while the
+   * worker registration stays active. `CHECK_OFFLINE_READY` is the
+   * verification (and self-repair) handshake that replaces that assumption.
+   */
+  describe('CHECK_OFFLINE_READY (#58)', () => {
+    it('reports OFFLINE_READY straight away when every precache entry is already present', async () => {
+      const worker = loadWorker({ fetchImpl: async () => new Response('should not be fetched', { status: 200 }) })
+      await worker.fireInstall()
+      worker.notifications.length = 0
+
+      await worker.fireMessage({ type: 'CHECK_OFFLINE_READY' })
+
+      expect(worker.notifications).toEqual([{ type: 'OFFLINE_READY', total: expect.any(Number) }])
+    })
+
+    it('repairs a precache entry that was evicted after install, then reports OFFLINE_READY', async () => {
+      const worker = loadWorker({ fetchImpl: async () => new Response('refetched', { status: 200 }) })
+      await worker.fireInstall()
+
+      const cacheNameMatch = /CACHE_NAME = "(dust-compass-[a-f0-9]+)"/.exec(workerSource)
+      const cache = await worker.caches.open(cacheNameMatch[1])
+      // Simulate the browser evicting one entry under storage pressure —
+      // the registration itself (and this cache) is still active.
+      const [evictedUrl] = await cache.keys()
+      cache.store.delete(evictedUrl)
+      expect(await cache.match(evictedUrl)).toBeUndefined()
+
+      worker.notifications.length = 0
+      await worker.fireMessage({ type: 'CHECK_OFFLINE_READY' })
+
+      expect(await cache.match(evictedUrl)).toBeDefined()
+      expect(worker.notifications.some((m) => m.type === 'CACHE_PROGRESS')).toBe(true)
+      expect(worker.notifications.at(-1)).toEqual({ type: 'OFFLINE_READY', total: expect.any(Number) })
+    })
+
+    it('reports CACHE_FAILED, not OFFLINE_READY, when a missing entry cannot be re-fetched', async () => {
+      let installed = false
+      const worker = loadWorker({
+        fetchImpl: async () => {
+          if (!installed) return new Response('ok', { status: 200 })
+          throw new Error('network down')
+        },
+      })
+      await worker.fireInstall()
+      installed = true
+
+      const cacheNameMatch = /CACHE_NAME = "(dust-compass-[a-f0-9]+)"/.exec(workerSource)
+      const cache = await worker.caches.open(cacheNameMatch[1])
+      const [evictedUrl] = await cache.keys()
+      cache.store.delete(evictedUrl)
+
+      worker.notifications.length = 0
+      await worker.fireMessage({ type: 'CHECK_OFFLINE_READY' })
+
+      expect(worker.notifications.some((m) => m.type === 'OFFLINE_READY')).toBe(false)
+      expect(worker.notifications.some((m) => m.type === 'CACHE_FAILED')).toBe(true)
+    })
+  })
+
   describe('root deep-link navigations (#25)', () => {
     it('serves the cached shell for a warm ?poi= deep link without touching the network', async () => {
       const calls = []

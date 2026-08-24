@@ -62,6 +62,12 @@ interface Option {
   /** Only set for `kind: 'saved'` results — the saved place's own identity. */
   savedPlace?: SavedPlace
   score: number
+  /**
+   * Set only when the term matched inside the description/subtitle and not
+   * the name or address — so a description-only hit can say why it showed up
+   * instead of looking unexplained next to a plain name match.
+   */
+  matchedIn?: 'description'
 }
 
 /**
@@ -81,6 +87,37 @@ export function SearchPanel({
   compact = false,
 }: Props) {
   const [query, setQuery] = useState('')
+
+  // Normalizing a name is cheap; normalizing thousands of camp/art
+  // descriptions on every keystroke is not. Doing it once here, keyed on the
+  // POI/listing arrays themselves rather than the query, means typing only
+  // ever re-scores already-normalized strings.
+  const poiIndex = useMemo(
+    () =>
+      pois
+        // Forty banks of toilets all answer to "Toilets", so as search
+        // results they are forty ways of saying nothing. The map has a
+        // switch for them, and out there you want the nearest one, not a list.
+        .filter((poi) => poi.category !== 'toilet')
+        .map((poi) => ({
+          poi,
+          name: normalize(poi.name),
+          address: normalize(poi.address ?? ''),
+          subtitle: normalize(poi.subtitle ?? ''),
+          description: normalize(poi.description ?? ''),
+        })),
+    [pois],
+  )
+  const unplacedIndex = useMemo(
+    () =>
+      unplaced.map((listing) => ({
+        listing,
+        name: normalize(listing.name),
+        subtitle: normalize(listing.subtitle ?? ''),
+        description: normalize(listing.description ?? ''),
+      })),
+    [unplaced],
+  )
 
   const options = useMemo<Option[]>(() => {
     const term = normalize(query)
@@ -114,42 +151,60 @@ export function SearchPanel({
       })
     }
 
-    for (const poi of pois) {
-      // Forty banks of toilets all answer to "Toilets", so as search results
-      // they are forty ways of saying nothing. The map has a switch for them,
-      // and out there you want the nearest one, not a list.
-      if (poi.category === 'toilet') continue
-      const score = Math.max(matchScore(poi.name, term), matchScore(poi.address ?? '', term) - 20)
+    for (const entry of poiIndex) {
+      const poi = entry.poi
+      const nameScore = scoreNormalized(entry.name, term)
+      const addressScore = scoreNormalized(entry.address, term) - 20
+      // Below both a name and an address match: "coffee" or "karaoke" living
+      // only in a camp's description is worth surfacing, but a strong name
+      // hit for a different camp must still win.
+      const descScore = Math.max(scoreNormalized(entry.subtitle, term), scoreNormalized(entry.description, term)) - 45
+      const score = Math.max(nameScore, addressScore, descScore)
       if (score > 0) {
+        const matchedIn = nameScore <= 0 && addressScore <= 0 && descScore > 0 ? ('description' as const) : undefined
+        const hit = matchedIn && matchedText(poi.description, entry.description, poi.subtitle, entry.subtitle, term)
         results.push({
           label: poi.name,
-          detail: poi.subtitle ? [poi.subtitle, poi.address].filter(Boolean).join(' · ') : (poi.address ?? ''),
+          detail: hit
+            ? excerpt(hit, term)
+            : poi.subtitle
+              ? [poi.subtitle, poi.address].filter(Boolean).join(' · ')
+              : (poi.address ?? ''),
           kind: optionKind(poi.kind),
           category: poi.category,
           position: poi.position,
           poi,
           score,
+          matchedIn,
         })
       }
     }
     // Below the placed results on purpose: something you can walk to beats
     // something you can only read about. `- 15` keeps a strong name match on
     // an embargoed piece ahead of a weak address match on a camp.
-    for (const listing of unplaced) {
-      const score = matchScore(listing.name, term)
+    for (const entry of unplacedIndex) {
+      const listing = entry.listing
+      const nameScore = scoreNormalized(entry.name, term)
+      const descScore = Math.max(scoreNormalized(entry.subtitle, term), scoreNormalized(entry.description, term)) - 45
+      const score = Math.max(nameScore, descScore)
       if (score > 0) {
+        const matchedIn = nameScore <= 0 && descScore > 0 ? ('description' as const) : undefined
+        const hit = matchedIn && matchedText(listing.description, entry.description, listing.subtitle, entry.subtitle, term)
         results.push({
           label: listing.name,
-          detail: [listing.subtitle, LOCATION_PENDING[listing.reason]].filter(Boolean).join(' · '),
+          detail: hit
+            ? excerpt(hit, term)
+            : [listing.subtitle, LOCATION_PENDING[listing.reason]].filter(Boolean).join(' · '),
           kind: listing.kind,
           unplaced: listing,
           score: score - 15,
+          matchedIn,
         })
       }
     }
 
     return results.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label)).slice(0, 40)
-  }, [query, layout, pois, places, unplaced])
+  }, [query, layout, poiIndex, unplacedIndex, places])
 
   return (
     <Autocomplete
@@ -235,13 +290,48 @@ function normalize(value: string) {
 }
 
 function matchScore(value: string, term: string) {
-  const candidate = normalize(value)
+  return scoreNormalized(normalize(value), term)
+}
+
+/** `matchScore`, given a candidate that has already been through `normalize`. */
+function scoreNormalized(candidate: string, term: string) {
   if (!candidate || !term) return 0
   if (candidate === term) return 120
   if (candidate.startsWith(term)) return 105
   if (candidate.split(/\s+/).some((word) => word.startsWith(term))) return 92
   if (candidate.includes(term)) return 70
   return 0
+}
+
+/**
+ * Which of a listing's raw description-ish fields actually contains the
+ * term — description preferred over subtitle, since it is usually the more
+ * informative one to excerpt. Takes each field's already-normalized form
+ * alongside its raw value so it doesn't have to re-normalize to check.
+ */
+function matchedText(
+  description: string | undefined,
+  normalizedDescription: string,
+  subtitle: string | undefined,
+  normalizedSubtitle: string,
+  term: string,
+): string | undefined {
+  if (description && scoreNormalized(normalizedDescription, term) > 0) return description
+  if (subtitle && scoreNormalized(normalizedSubtitle, term) > 0) return subtitle
+  return undefined
+}
+
+/**
+ * A short window of text around the match, so a description-only result
+ * shows why it matched rather than looking unexplained next to a name.
+ */
+function excerpt(text: string, term: string, radius = 36) {
+  const idx = normalize(text).indexOf(term)
+  if (idx < 0) return text.length > 90 ? `${text.slice(0, 90).trimEnd()}…` : text
+  const start = Math.max(0, idx - radius)
+  const end = Math.min(text.length, idx + term.length + radius)
+  const snippet = text.slice(start, end).trim()
+  return `${start > 0 ? '…' : ''}${snippet}${end < text.length ? '…' : ''}`
 }
 
 function optionKind(kind: Poi['kind']): Option['kind'] {

@@ -1,5 +1,5 @@
-import type { CityLayout, Feet } from './layout'
-import { findAnnular } from './layout'
+import type { CityLayout, Feet, RadialStreet } from './layout'
+import { findAnnular, resolveRadius } from './layout'
 import {
   clockToBearing,
   clockToMinutes,
@@ -101,6 +101,82 @@ function normaliseLandmark(name: string): string {
     .join(' ')
 }
 
+/**
+ * Whether `targetMinutes` falls within the arc `[fromClock, toClock]` spans,
+ * clockwise from `fromClock`, wrapping past 12:00 exactly the way `arc()` in
+ * `city.ts` interprets the same pair when it draws the segment. Keeping the
+ * two in agreement matters: a clock this says is covered but `arc()` does
+ * not actually draw would resolve an address to a street that isn't there.
+ */
+function withinArc(fromClock: string, toClock: string, targetMinutes: number): boolean {
+  const start = clockToMinutes(fromClock)
+  let end = clockToMinutes(toClock)
+  if (end <= start) end += 720
+  const span = end - start
+  const rel = ((targetMinutes - start) % 720 + 720) % 720
+  return rel <= span
+}
+
+/**
+ * Whether a `clock & street` address names a place that actually exists.
+ * Annular streets have real gaps — Center Camp, a plaza, open playa — so the
+ * street has to cover this clock, not merely exist somewhere on the ring.
+ * And the clock itself has to be a real radial whose own segments reach out
+ * far enough to meet this annular street's radius; a radial can stop short
+ * of the outer rings, and a clock with no radial at all names no
+ * intersection regardless of what the annular street does there.
+ */
+function radialReaches(layout: CityLayout, radial: RadialStreet, streetDistance: Feet): boolean {
+  return radial.segments.some(([from, to]) => {
+    const lo = resolveRadius(layout, from)
+    const hi = resolveRadius(layout, to)
+    return streetDistance >= Math.min(lo, hi) && streetDistance <= Math.max(lo, hi)
+  })
+}
+
+export function intersectionExists(layout: CityLayout, clock: string, streetRef: string): boolean {
+  const street = layout.cStreets.find((s) => s.ref === streetRef)
+  if (!street) return false
+  const target = clockToMinutes(clock)
+
+  const findRadial = (minutes: number) =>
+    layout.tStreets.find((r) => r.refs.some((ref) => clockToMinutes(ref) === minutes))
+  const radial = findRadial(target)
+
+  const annularCovers = street.segments.some(([from, to]) => withinArc(from, to, target))
+  if (annularCovers && radial && radialReaches(layout, radial, street.distance)) return true
+
+  // A radial whose own segment names this exact street as one of its
+  // endpoints is direct structural evidence of a real junction there,
+  // whether or not the annular street's own arc list happens to enumerate
+  // that clock as covered. Center Camp's own Esplanade entrance is exactly
+  // this shape in real survey data: the 6:00 radial's segments run
+  // `[2223, "esplanade"]`, a real recorded junction, even though Esplanade's
+  // own arc list shows a gap spanning that clock — the ring's arc and a
+  // radial's junction points are derived separately and do not always agree
+  // on exactly where a gap starts and ends.
+  if (radial?.segments.some(([from, to]) => from === streetRef || to === streetRef)) return true
+
+  // Minor quarter-hour spokes are frequently surveyed only from the outer
+  // blocks in — real BRC road infrastructure only exists there, not a gap
+  // in the address grid. A camp addressed "D & 7:15" is real even where the
+  // 7:15 spoke itself is only drawn from F outward: the block between the
+  // flanking hour/half-hour radials belongs to the ring the moment both of
+  // them reach it, whether or not the minor cross-spoke between them — or
+  // the ring's own arc list, which has the same coarse-derivation gaps as
+  // above — was separately traced all the way to it.
+  if (target % 30 !== 0) {
+    const lowerMinutes = Math.floor(target / 30) * 30
+    const upperMinutes = (lowerMinutes + 30) % 720
+    const lower = findRadial(lowerMinutes)
+    const upper = findRadial(upperMinutes)
+    return Boolean(
+      lower && radialReaches(layout, lower, street.distance) && upper && radialReaches(layout, upper, street.distance),
+    )
+  }
+  return false
+}
+
 export function parseAddress(input: string, layout: CityLayout): PlayaAddress | undefined {
   const raw = input.trim()
   if (!raw) return undefined
@@ -181,24 +257,30 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
       const street = findAnnular(layout, streetPart)
       if (street) {
         const clock = normaliseClock(clockPart)
-        return {
-          clock,
-          distanceFeet: street.distance,
-          street: street.ref,
-          label: `${street.name} & ${clock}`,
+        // The street exists somewhere on the ring, but that clock may sit in
+        // a gap it does not actually cover, or reach a radial that stops
+        // short of this radius. Either way there is no intersection here.
+        if (intersectionExists(layout, clock, street.ref)) {
+          return {
+            clock,
+            distanceFeet: street.distance,
+            street: street.ref,
+            label: `${street.name} & ${clock}`,
+          }
         }
-      }
-      // Some listings name a plaza on the far side of the ampersand —
-      // "10:00 & 10:00 B Plaza". The plaza is the more specific place, and it
-      // already knows where it is.
-      const plaza = findPlaza(layout, streetPart)
-      if (plaza) {
-        const clock = normaliseClock(clockPart)
-        return {
-          clock,
-          distanceFeet: plaza.radiusFeet,
-          plaza: plaza.name,
-          label: `${plaza.name} @ ${clock}`,
+      } else {
+        // Some listings name a plaza on the far side of the ampersand —
+        // "10:00 & 10:00 B Plaza". The plaza is the more specific place, and it
+        // already knows where it is.
+        const plaza = findPlaza(layout, streetPart)
+        if (plaza) {
+          const clock = normaliseClock(clockPart)
+          return {
+            clock,
+            distanceFeet: plaza.radiusFeet,
+            plaza: plaza.name,
+            label: `${plaza.name} @ ${clock}`,
+          }
         }
       }
     }
@@ -247,8 +329,11 @@ export function reverseGeocode(position: Position, layout: CityLayout): PlayaAdd
     }
   }
 
-  // Half a city block is ~140 ft; beyond that, call it open playa.
-  if (nearest && best <= 140) {
+  // Half a city block is ~140 ft; beyond that, call it open playa. Even
+  // within that, the nearest ring by radius alone can still be a street that
+  // does not run at this clock — a gap, or no radial reaching this far out —
+  // so the same coverage check forward geocoding uses applies here too.
+  if (nearest && best <= 140 && intersectionExists(layout, clock, nearest.ref)) {
     return {
       clock,
       distanceFeet: nearest.distance,

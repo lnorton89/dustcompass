@@ -50,12 +50,50 @@ describe('deep links', () => {
     expect(resolveDeepLink({}, layout)).toEqual({ status: 'none' })
   })
 
-  it('prefers an exact ll coordinate over geocoding the address', () => {
+  it('prefers an exact ll coordinate over geocoding the address, once the two agree', () => {
     // A tapped point rarely lands exactly on the geocoder's rounding grid, so
     // any position off that grid proves ll — not a re-geocoded at — won.
-    const position = polarToPosition(layout, '4:52', 2860)
-    const link = { at: 'somewhere over there', ll: position }
-    expect(resolveDeepLink(link, layout)).toEqual({ status: 'resolved', position })
+    const original = polarToPosition(layout, '4:52', 2860)
+    const address = reverseGeocode(original, layout).label
+    const link = { at: address, ll: original }
+    expect(resolveDeepLink(link, layout)).toEqual({ status: 'resolved', position: original })
+  })
+
+  /**
+   * #74: `ll` used to win outright, with no relationship to `at` required at
+   * all — a bare or contradictory `ll` could fly the opening camera anywhere
+   * on Earth, or label a real address's pin with a coordinate for somewhere
+   * else entirely. `ll` only earns trust once `at` itself both geocodes to a
+   * real place and lands close enough to `ll` to plausibly be the same tap.
+   */
+  describe('ll is a constrained refinement of at, not an independent coordinate', () => {
+    it('is dropped entirely from a link with no at at all', () => {
+      expect(readDeepLink('?ll=0,0')).toEqual({})
+    })
+
+    it('never resolves to an out-of-city ll, address or not', () => {
+      const link = { at: 'somewhere over there', ll: [0, 0] as [number, number] }
+      expect(resolveDeepLink(link, layout)).toEqual({ status: 'unresolvable' })
+    })
+
+    it('falls back to the geocoded address when ll disagrees with it', () => {
+      const original = polarToPosition(layout, '4:52', 2860)
+      const address = reverseGeocode(original, layout).label
+      const geocoded = geocode(address, layout)
+      expect(geocoded).toBeDefined()
+      // Near the city in general, but nowhere near this address specifically —
+      // the shape of a hand-edited or otherwise contradictory link.
+      const farWithinCity = polarToPosition(layout, '10:00', 2860)
+      expect(distanceBetween(geocoded!.position, farWithinCity)).toBeGreaterThan(250)
+      const link = { at: address, ll: farWithinCity }
+      expect(resolveDeepLink(link, layout)).toEqual({ status: 'resolved', position: geocoded!.position })
+    })
+
+    it('never trusts ll when at does not geocode, even if ll is near the city', () => {
+      const nearCity = polarToPosition(layout, '4:52', 2860)
+      const link = { at: 'somewhere over there', ll: nearCity }
+      expect(resolveDeepLink(link, layout)).toEqual({ status: 'unresolvable' })
+    })
   })
 
   it('round-trips an exact pin position through ll, unlike the lossy address alone', () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CityLayout } from '../layout'
 import { buildCity } from '../city'
-import { destination, distanceBetween, feetToMeters, metersToFeet, type Position } from '../geo'
+import { distanceBetween, metersToFeet, type Position } from '../geo'
 
 /**
  * A minimal synthetic layout — not the real survey — just enough shape to
@@ -25,6 +25,31 @@ function baseLayout(): CityLayout {
     portals: [],
   }
 }
+
+describe('streets', () => {
+  it('falls back to the layout road_width when a radial carries none', () => {
+    const layout: CityLayout = {
+      ...baseLayout(),
+      tStreets: [{ refs: ['3:00'], segments: [['esplanade', 3000]] }],
+    }
+    const city = buildCity(layout)
+    const radial = city.streets.features.find((f) => f.properties?.orientation === 'radial')
+    expect(radial?.properties?.width).toBe(40)
+  })
+
+  // #48: the 2026 survey's narrower "path" radials carry their own surveyed
+  // width, and buildCity() must draw them at it rather than the generic
+  // road_width every other radial falls back to.
+  it('uses a radial\'s own surveyed width over the generic road_width', () => {
+    const layout: CityLayout = {
+      ...baseLayout(),
+      tStreets: [{ refs: ['4:15'], width: 20, segments: [['esplanade', 3000]] }],
+    }
+    const city = buildCity(layout)
+    const radial = city.streets.features.find((f) => f.properties?.orientation === 'radial')
+    expect(radial?.properties?.width).toBe(20)
+  })
+})
 
 describe('dmz', () => {
   it('renders a band of features at roughly the right radius when the survey supplies one', () => {
@@ -60,29 +85,34 @@ describe('dmz', () => {
 })
 
 describe('entranceRoad', () => {
-  it('renders a line at the surveyed compass bearing when the survey supplies one', () => {
+  it('renders the surveyed gate-road geometry verbatim, curves and all', () => {
+    // A curved, two-segment gate road, as the real survey publishes it —
+    // not a distance/angle pair that this function would have to synthesize
+    // a straight line from.
+    const lineA: Position[] = [
+      [-119.21, 40.795],
+      [-119.207, 40.7925],
+      [-119.204, 40.79],
+    ]
+    const lineB: Position[] = [
+      [-119.2105, 40.7952],
+      [-119.2075, 40.7927],
+    ]
     const layout: CityLayout = {
       ...baseLayout(),
-      entrance_road: { distance: 9000, angle: 315 },
+      entrance_road: { lines: [lineA, lineB] },
     }
     const city = buildCity(layout)
-    expect(city.entranceRoad.features).toHaveLength(1)
+    expect(city.entranceRoad.features).toHaveLength(2)
 
-    const [feature] = city.entranceRoad.features
-    expect(feature.geometry.type).toBe('LineString')
-    const [from, to] = feature.geometry.coordinates as Position[]
-    const center = layout.center.geometry.coordinates as Position
-
-    // Both ends should sit close to the marked distance, straddling it.
-    const feetFrom = metersToFeet(distanceBetween(center, from))
-    const feetTo = metersToFeet(distanceBetween(center, to))
-    expect(Math.min(feetFrom, feetTo)).toBeLessThan(9000)
-    expect(Math.max(feetFrom, feetTo)).toBeGreaterThan(9000)
-
-    // And it should sit on the given compass bearing, not on a clock position
-    // rotated by layout.bearing — a point straight out along 315 should match.
-    const expected = destination(center, feetToMeters(9000), 315)
-    expect(distanceBetween(to, expected)).toBeLessThan(feetToMeters(310))
+    // The rendered coordinates are exactly the surveyed ones — no bearing
+    // math, no synthesized half-length, no lost intermediate vertices.
+    expect(city.entranceRoad.features[0].geometry.coordinates).toEqual(lineA)
+    expect(city.entranceRoad.features[1].geometry.coordinates).toEqual(lineB)
+    for (const feature of city.entranceRoad.features) {
+      expect(feature.geometry.type).toBe('LineString')
+      expect(feature.properties?.kind).toBe('entrance-road')
+    }
   })
 
   it('produces no features when the survey has no entrance road', () => {

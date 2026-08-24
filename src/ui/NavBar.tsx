@@ -1,9 +1,16 @@
-import { Box, Button, IconButton, Paper, Stack, Typography } from '@mui/material'
+import { useState } from 'react'
+import { Box, Button, IconButton, Paper, Stack, Tooltip, Typography } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk'
 import DirectionsBikeIcon from '@mui/icons-material/DirectionsBike'
+import ExploreIcon from '@mui/icons-material/Explore'
 import NearMeIcon from '@mui/icons-material/NearMe'
+import VisibilityIcon from '@mui/icons-material/Visibility'
 import { formatDistance, formatMinutes, type Travel } from '../brc/travel'
+import { needleAngle } from '../brc/geo'
+import type { CompassHeading } from '../data/useCompassHeading'
+import type { PlayaPalette } from '../map/style'
+import { CompassNeedle } from './CompassNeedle'
 
 interface Props {
   name: string
@@ -16,8 +23,20 @@ interface Props {
   status: 'idle' | 'locating' | 'tracking' | 'denied' | 'unavailable'
   accuracy?: number
   approximate?: boolean
+  /** True while a Screen Wake Lock is actually held for this navigation (#65) — not merely supported. */
+  screenAwake?: boolean
   onRetryLocation: () => void
   onClear: () => void
+  /** Target bearing in degrees — the same value `heading`'s clock position is
+   * derived from (`bearingBetween`/`bearingToClock`, src/brc/geo.ts). Needed
+   * alongside `compass` to point the needle; omit either and the strip falls
+   * back to today's text-only navigation, unchanged. */
+  bearing?: number
+  /** Device-orientation state from `useCompassHeading` (#63). This is a
+   * physical compass sensor, not the map's own bearing/orientation controls
+   * — the two are unrelated and this never touches the map camera. */
+  compass?: CompassHeading
+  palette?: PlayaPalette
 }
 
 /**
@@ -26,7 +45,31 @@ interface Props {
  * city is built in — "head toward 4:30" is something you can act on without
  * looking at the screen again.
  */
-export function NavBar({ name, address, travel, heading, located, status, accuracy, approximate, onRetryLocation, onClear }: Props) {
+export function NavBar({
+  name,
+  address,
+  travel,
+  heading,
+  located,
+  status,
+  accuracy,
+  approximate,
+  screenAwake,
+  onRetryLocation,
+  onClear,
+  bearing,
+  compass,
+  palette,
+}: Props) {
+  // Dismissing the denial note is purely local UI state — it says nothing
+  // about the sensor itself, so it does not live in useCompassHeading.
+  const [deniedNoteDismissed, setDeniedNoteDismissed] = useState(false)
+  const showCompassControl = compass && palette && compass.support !== 'unsupported'
+  const showNeedle =
+    compass?.support === 'active' && palette && bearing != null && compass.heading != null
+  const showTurnOn = compass?.support === 'idle' || compass?.support === 'needs-permission'
+  const showDeniedNote = compass?.support === 'denied' && !deniedNoteDismissed
+
   return (
     <Paper
       elevation={8}
@@ -115,6 +158,21 @@ export function NavBar({ name, address, travel, heading, located, status, accura
             GPS accuracy ±{Math.round(accuracy)} m
           </Typography>
         )}
+        {showDeniedNote && (
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', mt: 0.25 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.2 }}>
+              Compass permission denied — heading and distance above still update as you walk.
+            </Typography>
+            <IconButton
+              onClick={() => setDeniedNoteDismissed(true)}
+              size="small"
+              aria-label="Dismiss compass permission note"
+              sx={{ p: 0.25 }}
+            >
+              <CloseIcon sx={{ fontSize: 14 }} />
+            </IconButton>
+          </Stack>
+        )}
         {(status === 'denied' || status === 'unavailable') && (
           // A real MuiButton rather than a bare `<Typography component="button">`
           // so it picks up theme.ts's 44px touch floor (MuiButton styleOverrides,
@@ -146,6 +204,51 @@ export function NavBar({ name, address, travel, heading, located, status, accura
           </Button>
         )}
       </Box>
+      {/*
+       * The only feedback that this is holding the screen open at all —
+       * otherwise the reason the phone never dims mid-route is invisible.
+       * Shown only while a lock is actually held, not merely supported: a
+       * refused/unsupported request keeps navigation working exactly as it
+       * did before this existed, silently.
+       */}
+      {screenAwake && (
+        <Tooltip title="Keeping the screen on while you navigate">
+          <VisibilityIcon
+            fontSize="small"
+            aria-label="Screen staying on during navigation"
+            sx={{ color: 'text.secondary', flexShrink: 0 }}
+          />
+        </Tooltip>
+      )}
+      {showCompassControl && compass && palette && (
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+          {showNeedle && bearing != null && compass.heading != null ? (
+            <CompassNeedle angle={needleAngle(bearing, compass.heading)} accuracy={compass.accuracy} palette={palette} />
+          ) : (
+            showTurnOn && (
+              // A real tap target, not automatic — iOS requires
+              // `requestPermission()` to run inside this exact click handler,
+              // and other platforms get the same explicit "turn it on"
+              // affordance rather than a silent listener nobody asked for.
+              <Button
+                onClick={() => void compass.requestPermission()}
+                type="button"
+                size="small"
+                startIcon={<ExploreIcon fontSize="small" />}
+                sx={{
+                  minWidth: 0,
+                  px: 1,
+                  py: 0.25,
+                  fontSize: (theme) => theme.typography.caption.fontSize,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Compass
+              </Button>
+            )
+          )}
+        </Box>
+      )}
       <IconButton onClick={onClear} size="small" aria-label="Stop navigating">
         <CloseIcon fontSize="small" />
       </IconButton>

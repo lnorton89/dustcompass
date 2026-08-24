@@ -24,6 +24,7 @@ import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk'
 import DirectionsBikeIcon from '@mui/icons-material/DirectionsBike'
 import type { Position } from '../brc/geo'
 import { formatDistance, formatMinutes, travelBetween } from '../brc/travel'
+import { CATEGORY_LABEL, NON_SERVICE_CATEGORIES } from '../brc/services'
 import { PLAYA_TIME_ZONE, relevantOccurrence } from '../data/events'
 import type { EventItem, Poi } from '../data/types'
 
@@ -64,6 +65,19 @@ const KIND_LABEL: Record<Poi['kind'], string> = {
   event: 'Event',
   service: 'Service',
   landmark: 'Landmark',
+}
+
+/**
+ * The label shown on a POI's kind chip. `civicPois()` keeps every
+ * survey-derived place at `kind: 'service'` so filters/favorites treat them
+ * as one group, but a Temple or an Airport is not a service — #45. Anywhere
+ * the survey's own classification says so (`category` in
+ * `NON_SERVICE_CATEGORIES`), that classification is what gets shown instead
+ * of the generic kind label.
+ */
+function kindLabel(poi: Poi): string {
+  if (poi.category && NON_SERVICE_CATEGORIES.has(poi.category)) return CATEGORY_LABEL[poi.category]
+  return KIND_LABEL[poi.kind]
 }
 
 export function DetailDrawer({
@@ -178,7 +192,7 @@ export function DetailDrawer({
       <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 1 }}>
         <Chip
           size="small"
-          label={KIND_LABEL[poi.kind]}
+          label={kindLabel(poi)}
           color={poi.kind === 'art' ? 'primary' : poi.kind === 'camp' ? 'secondary' : 'default'}
         />
         {poi.address && <Chip size="small" variant="outlined" label={poi.address} />}
@@ -222,7 +236,7 @@ export function DetailDrawer({
        * listing has surveyed coordinates this year: said twice on every camp
        * the reader opens, it stops being read at all.
        */}
-      {poi.positionSource === 'address' && (
+      {poi.accuracyClass === 'derived' && (
         <Typography
           variant="caption"
           color="warning.main"
@@ -230,6 +244,26 @@ export function DetailDrawer({
         >
           Approximate pin at {poi.address ?? 'the listed address'}. Nearby camps can share this same
           map point.
+        </Typography>
+      )}
+      {/*
+       * #61: a camp/art record's `gps_latitude`/`gps_longitude` is a real
+       * coordinate, but Burning Man's own API documentation describes it as
+       * best-effort and published ahead of Placement finishing — a camp can
+       * still move after this location was published. That is a materially
+       * weaker claim than the GIS survey's own civic points (rangers,
+       * toilets, portals), which really are surveyed and get no caveat at
+       * all. Conflating the two by dropping this note the moment any GPS
+       * field existed is what #61 is about.
+       */}
+      {poi.accuracyClass === 'published' && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: 'block', mt: 0.75 }}
+        >
+          Officially published location — not surveyed. Camps and art can move after this was
+          published; if you can't find it, ask a Ranger.
         </Typography>
       )}
       {/*

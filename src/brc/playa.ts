@@ -11,11 +11,20 @@ import { destination, feetToMeters, type Position } from './geo'
  * same way the city is, from a handful of numbers, and drawn as vectors that
  * stay sharp at every zoom and cost nothing to ship.
  *
- * It is scenery, not survey. The basin outline, the ranges and the tracks are
- * shaped to read like Black Rock Desert from above — the playa opening south
- * toward Gerlach, ranges close on the east and west — but no coordinate here is
+ * It is scenery, not survey. The basin outline and the ranges are shaped to
+ * read like Black Rock Desert from above — the playa opening south toward
+ * Gerlach, ranges close on the east and west — but no coordinate here is
  * surveyed and nothing in the app navigates by it. Everything the app answers
  * questions with comes from `layout.json` and the listings.
+ *
+ * Deliberately absent: vehicle tracks. An earlier version of this scenery
+ * generated nine fictional tracks with real-looking bearings and curvature
+ * and drew them as ordinary lines. A line has cartographic meaning a filled
+ * polygon does not — it reads as a navigable path — so on an app whose whole
+ * trust claim is that geometry comes from Burning Man's survey, a fabricated
+ * line risked being mistaken for a real road with no way for a user to tell
+ * the difference. The basin and ranges stay because they are unmistakably
+ * texture: filled shading, not something anyone would try to walk along.
  */
 
 /** Deterministic and cheap: the same ground everywhere, on every device. */
@@ -67,8 +76,6 @@ export interface PlayaScenery {
   basin: GeoJSON.FeatureCollection<GeoJSON.Polygon>
   /** Broad tonal variation across the flat, as it looks from above. */
   patches: GeoJSON.FeatureCollection<GeoJSON.Polygon>
-  /** Vehicle tracks worn across the open playa. */
-  tracks: GeoJSON.FeatureCollection<GeoJSON.LineString>
   /** The ranges standing around the basin. */
   ranges: GeoJSON.FeatureCollection<GeoJSON.Polygon>
 }
@@ -103,27 +110,6 @@ export function buildPlaya(layout: CityLayout, seed = 20260830): PlayaScenery {
         tone: i % 3 === 0 ? 'pale' : 'shade',
       }),
     )
-  }
-
-  // Tracks. Everything that drives in leaves a line, and from above they are
-  // the most legible thing on the playa after the city itself.
-  const tracks: GeoJSON.Feature<GeoJSON.LineString>[] = []
-  for (let i = 0; i < 9; i += 1) {
-    const bearing = (i / 9) * 360 + random() * 18
-    const from = fenceMeters * (0.7 + random() * 0.35)
-    const to = 9000 + random() * 2600
-    const steps = 14
-    const line: Position[] = []
-    for (let step = 0; step <= steps; step += 1) {
-      const t = step / steps
-      const drift = Math.sin(t * Math.PI * (1.5 + random() * 0.4)) * (140 + random() * 220)
-      line.push(destination(centre, from + (to - from) * t, bearing + drift / 90))
-    }
-    tracks.push({
-      type: 'Feature',
-      properties: { kind: 'track' },
-      geometry: { type: 'LineString', coordinates: line },
-    })
   }
 
   // The ranges. Black Rock Desert is a basin: mountains close on most sides,
@@ -163,7 +149,6 @@ export function buildPlaya(layout: CityLayout, seed = 20260830): PlayaScenery {
   return {
     basin: fc([basin]),
     patches: fc(patches),
-    tracks: fc(tracks),
     ranges: fc(ranges),
   }
 }

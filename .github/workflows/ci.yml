@@ -64,22 +64,39 @@ jobs:
           NEXT_PUBLIC_E2E: '1'
         run: npm run build
 
-      - name: Production browser, accessibility, and offline tests
-        # GitHub Actions runs each `run:` block under `bash -e`, so the first
-        # of these four that exits non-zero stops the rest cold — a failing
-        # test:smoke silently means test:a11y/test:ui/test:offline never run
-        # at all, not that they passed. That let real, unrelated bugs in the
-        # later scripts (a broken theme switch, an undersized touch target)
-        # sit invisible in CI for a long time behind an earlier failure.
+      # Each browser-test suite below is its own step (rather than one shell
+      # block running all four in sequence) so that a failing test:smoke does
+      # not stop test:a11y/test:ui/test:offline from also running and
+      # reporting their own pass/fail in the Actions UI. GitHub Actions runs
+      # every `run:` block under `bash -e`, which used to abort the whole
+      # block at the first non-zero exit — that let real, unrelated bugs in
+      # the later scripts (a broken theme switch, an undersized touch target)
+      # sit invisible behind an earlier failure. Each test step below is
+      # gated on the preview server having started successfully, not on the
+      # other test steps, so one suite's failure can't hide another's.
+      - name: Start preview server
+        id: start-server
         env:
           NEXT_PUBLIC_BASE_PATH: /dustcompass
         run: |
           node scripts/serve-export.mjs &
           npx wait-on -t 60000 http://127.0.0.1:4173/dustcompass/
-          npm run test:smoke http://127.0.0.1:4173/dustcompass/
-          npm run test:a11y http://127.0.0.1:4173/dustcompass/
-          npm run test:ui http://127.0.0.1:4173/dustcompass/
-          npm run test:offline http://127.0.0.1:4173/dustcompass/
+
+      - name: Smoke tests
+        if: steps.start-server.outcome == 'success'
+        run: npm run test:smoke http://127.0.0.1:4173/dustcompass/
+
+      - name: Accessibility tests
+        if: steps.start-server.outcome == 'success'
+        run: npm run test:a11y http://127.0.0.1:4173/dustcompass/
+
+      - name: UI invariant tests
+        if: steps.start-server.outcome == 'success'
+        run: npm run test:ui http://127.0.0.1:4173/dustcompass/
+
+      - name: Offline tests
+        if: steps.start-server.outcome == 'success'
+        run: npm run test:offline http://127.0.0.1:4173/dustcompass/
 
       - name: Upload failure screenshots
         if: failure()

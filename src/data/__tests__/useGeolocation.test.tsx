@@ -66,6 +66,29 @@ describe('useGeolocation', () => {
     expect(result.current.status).toBe('tracking')
   })
 
+  /**
+   * #50: `stop()` used to leave `position`/`accuracy`/`lastFixAt` in state
+   * indefinitely once the last owner released the watch, so a detail panel
+   * opened later could present a fix from minutes (or hours) earlier as the
+   * user's current location with no indication tracking had actually
+   * stopped. `stop()` alone — not just the stop-then-start pairing already
+   * covered above — must clear the fix.
+   */
+  it('clears the retained fix once stopped, even without an immediate restart', () => {
+    const { result } = renderHook(() => useGeolocation())
+
+    act(() => result.current.start())
+    act(() => calls[0].success(fix(-119.2, 40.78)))
+    expect(result.current.position).toEqual([-119.2, 40.78])
+
+    act(() => result.current.stop())
+
+    expect(result.current.position).toBeUndefined()
+    expect(result.current.accuracy).toBeUndefined()
+    expect(result.current.lastFixAt).toBeUndefined()
+    expect(result.current.status).toBe('idle')
+  })
+
   it('starts exactly one watch per start() call and pairs each with a clearWatch', () => {
     const { result } = renderHook(() => useGeolocation())
     act(() => result.current.start())
@@ -79,21 +102,32 @@ describe('useGeolocation', () => {
   })
 
   /**
-   * A transient (non-permission) error used to drop the watch ID reference
-   * without telling the browser to stop watching, leaving lifecycle
-   * ownership of that watch ambiguous for any retry that followed.
+   * A transient (non-permission) error — POSITION_UNAVAILABLE or TIMEOUT —
+   * used to clear the watch outright, silently ending tracking for good on
+   * a single blip with nothing left to restart it, since `start()` no-ops
+   * while a (now-stale) `watchId` still looks active. Real devices throw
+   * these transiently — a moment of lost signal, a slow first fix — while
+   * the browser's own watch keeps running and calls back again once a fix
+   * is available, exactly like Chromium's mocked geolocation does when a
+   * test moves the override mid-watch. The watch must survive it.
    */
-  it('clears the active watch on error before dropping ownership of it', () => {
+  it('keeps the same watch alive through a transient error rather than ending tracking', () => {
     const { result } = renderHook(() => useGeolocation())
     act(() => result.current.start())
+    act(() => calls[0].success(fix(-119.2, 40.78)))
     act(() => calls[0].error(error(2)))
 
-    expect(clearWatch).toHaveBeenCalledWith(1)
-    expect(result.current.status).toBe('unavailable')
+    expect(clearWatch).not.toHaveBeenCalled()
+    expect(result.current.status).toBe('locating')
+    // The last known fix is still the most recent real information available
+    // — a momentary blip should not make it look like tracking never started.
+    expect(result.current.position).toEqual([-119.2, 40.78])
 
-    // A retry after the error starts a fresh watch rather than accumulating.
-    act(() => result.current.start())
-    expect(watchPosition).toHaveBeenCalledTimes(2)
+    // The same watch recovering on its own, as the real browser's would.
+    act(() => calls[0].success(fix(-119.21, 40.79)))
+    expect(result.current.position).toEqual([-119.21, 40.79])
+    expect(result.current.status).toBe('tracking')
+    expect(watchPosition).toHaveBeenCalledTimes(1)
   })
 
   it('distinguishes permission denial from other failures', () => {
@@ -101,5 +135,12 @@ describe('useGeolocation', () => {
     act(() => result.current.start())
     act(() => calls[0].error(error(1)))
     expect(result.current.status).toBe('denied')
+
+    // Permission denial is terminal — the browser will never call this watch
+    // back again, so it is torn down the same way stop() does, and a retry
+    // starts a genuinely fresh one rather than accumulating.
+    expect(clearWatch).toHaveBeenCalledWith(1)
+    act(() => result.current.start())
+    expect(watchPosition).toHaveBeenCalledTimes(2)
   })
 })

@@ -8,7 +8,6 @@ export interface PlayaPalette {
   basin: string
   patchPale: string
   patchShade: string
-  track: string
   range: string
   street: string
   streetCasing: string
@@ -24,7 +23,11 @@ export interface PlayaPalette {
   medical: string
   ranger: string
   civic: string
+  /** The Temple and other named deep-playa reference points — see ServiceCategory's 'landmark'. */
+  landmark: string
   saved: string
+  /** The live current-location marker (#59) — deliberately not `saved`'s colour, which already means something else on the same map. */
+  location: string
 }
 
 export const DARK: PlayaPalette = {
@@ -32,7 +35,6 @@ export const DARK: PlayaPalette = {
   basin: '#241f17',
   patchPale: '#2d2619',
   patchShade: '#1d1913',
-  track: '#3a3226',
   range: '#0b0908',
   street: '#625b50',
   streetCasing: '#302c27',
@@ -47,7 +49,9 @@ export const DARK: PlayaPalette = {
   medical: '#ef4444',
   ranger: '#22c55e',
   civic: '#cbb994',
+  landmark: '#a78bfa',
   saved: '#facc15',
+  location: '#38bdf8',
 }
 
 /**
@@ -60,7 +64,6 @@ export const NIGHT: PlayaPalette = {
   basin: '#150404',
   patchPale: '#1c0707',
   patchShade: '#100202',
-  track: '#230909',
   range: '#060000',
   street: '#5c1212',
   streetCasing: '#1f0505',
@@ -75,7 +78,14 @@ export const NIGHT: PlayaPalette = {
   medical: '#ff8080',
   ranger: '#d95555',
   civic: '#a03535',
+  // Its own shade of the same night-mode red, not a different hue — see the
+  // file comment above on why every colour here stays on one low-luminance red.
+  landmark: '#cc6666',
+  // The most saturated red in the palette: this is a live, moving indicator
+  // rather than static chrome, and it needs to read as "you" at a glance
+  // among everything else that stays on the same hue.
   saved: '#ff9b9b',
+  location: '#ff3b3b',
 }
 
 export const LIGHT: PlayaPalette = {
@@ -83,7 +93,6 @@ export const LIGHT: PlayaPalette = {
   basin: '#ded4bf',
   patchPale: '#eae2d1',
   patchShade: '#d2c6ad',
-  track: '#c6b99d',
   range: '#b3a184',
   street: '#ffffff',
   streetCasing: '#c9bda2',
@@ -98,7 +107,9 @@ export const LIGHT: PlayaPalette = {
   medical: '#b91c1c',
   ranger: '#15803d',
   civic: '#7a6a45',
+  landmark: '#6d28d9',
   saved: '#a16207',
+  location: '#0284c7',
 }
 
 /**

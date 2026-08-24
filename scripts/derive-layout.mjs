@@ -119,6 +119,25 @@ export function checkAnnularResidual(cStreets) {
 }
 
 /**
+ * The centre and rotation checks above operate on rings; this is the same
+ * defence for radials. `tStreets` is built by filtering the same `streets`
+ * array this compares against, so under correct code the two sets always
+ * agree — the value of asserting it anyway is catching the next edit that
+ * decouples them, the way #48's dropped `kind: "path"` radials did before
+ * `streetShape()` recognized them at all.
+ */
+export function checkRadialCoverage(surveyedNames, generatedNames) {
+  const generated = new Set(generatedNames)
+  const missing = surveyedNames.filter((name) => !generated.has(name))
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.length} surveyed radial(s) missing from the derived layout: ${missing.join(', ')}. ` +
+        'Refusing to publish a layout that silently drops surveyed radial geometry.',
+    )
+  }
+}
+
+/**
  * `JSON.stringify(NaN)` silently becomes `null`, which must never stand in
  * for validation: a NaN or Infinity anywhere in the derived geometry (a
  * fence radius with no corners, a plaza whose ring didn't fit, ...) has to
@@ -256,21 +275,35 @@ async function main() {
   }
 
   // --- Radial streets -------------------------------------------------------
+  // Width is carried per clock position, the same way cStreets carries it per
+  // ring: the 2026 survey's 20 ft "path" radials are real geometry, not the
+  // 40 ft "avenue" width buildCity() would otherwise stamp on every radial.
   const radialExtents = new Map()
   for (const feature of streets) {
     const shape = streetShape(feature)
     if (!shape.isRadial || parseClock(shape.name) === null) continue
     const radii = feature.geometry.coordinates.map(toXY).map(([x, y]) => Math.hypot(x - cx, y - cy))
-    const entry = radialExtents.get(shape.name) ?? []
-    entry.push([Math.min(...radii), Math.max(...radii)])
+    const entry = radialExtents.get(shape.name) ?? { spans: [], width: shape.width }
+    entry.spans.push([Math.min(...radii), Math.max(...radii)])
+    entry.width ??= shape.width
     radialExtents.set(shape.name, entry)
   }
   const tStreets = [...radialExtents]
     .sort((a, b) => parseClock(a[0]) - parseClock(b[0]))
-    .map(([name, spans]) => ({
+    .map(([name, entry]) => ({
       refs: [name],
-      segments: spans.sort((a, b) => a[0] - b[0]).map(([from, to]) => [snap(from), snap(to)]),
+      ...(entry.width ? { width: entry.width } : {}),
+      segments: entry.spans.sort((a, b) => a[0] - b[0]).map(([from, to]) => [snap(from), snap(to)]),
     }))
+
+  // Same defence as checkAnnularResidual, for the other axis: a surveyed
+  // radial that the classification above fails to recognize would otherwise
+  // vanish from the layout with nothing to say so. See #48 — a "path" kind
+  // radial did exactly this until streetShape() learned to check `source`.
+  checkRadialCoverage(
+    [...new Set(streets.filter((f) => { const s = streetShape(f); return s.isRadial && parseClock(s.name) !== null }).map((f) => streetShape(f).name))],
+    tStreets.flatMap((t) => t.refs),
+  )
 
   // --- Everything else the spec carries -------------------------------------
   const widths = streets.map((f) => streetShape(f).width).filter(Boolean)
@@ -351,12 +384,16 @@ async function main() {
     }
   }
 
+  // The gate road survey is carried through as-published rather than reduced
+  // to a distance/angle: it curves and runs as parallel edges, none of which
+  // a single polar approximation can represent. Raw lon/lat needs no
+  // conversion on the way in or the way out — city.ts turns it straight into
+  // a GeoJSON LineString.
   let entrance_road
   if (data.gate_road.features.length > 0) {
-    const radii = data.gate_road.features
-      .flatMap((f) => f.geometry.coordinates.map(toXY))
-      .map(([x, y]) => Math.hypot(x - cx, y - cy))
-    entrance_road = { distance: Math.round(Math.min(...radii)), angle: 108 }
+    entrance_road = {
+      lines: data.gate_road.features.map((f) => f.geometry.coordinates),
+    }
   }
 
   const layout = {

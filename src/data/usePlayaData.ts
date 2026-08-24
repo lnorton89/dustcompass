@@ -275,6 +275,11 @@ export function toPois(
         address: item.location_string,
         position,
         positionSource: hasGps(item.location) ? 'gps' : 'address',
+        // Published API GPS is best-effort, not surveyed — Burning Man's own
+        // documentation says a camp/art piece can still move after
+        // Placement finishes publishing coordinates (#61). Only the GIS
+        // survey's own civic points (see civic.ts) earn 'surveyed'.
+        accuracyClass: hasGps(item.location) ? 'published' : 'derived',
         thumbnail: item.images?.[0]?.thumbnail_url,
       })
       return

@@ -43,7 +43,66 @@ const baseProps = {
   onClose: vi.fn(),
   onNeedLocation: vi.fn(),
   onDoneWithLocation: vi.fn(),
+  savedEvents: [],
+  isEventSaved: () => false,
+  onToggleSaveEvent: vi.fn(),
+  onRemoveSavedEvent: vi.fn(),
 }
+
+/**
+ * Issue #54: `EventsPanel` used to hard-cap its result set at 300 with no
+ * way to browse the rest — `matching.slice(0, 300)` with no continuation.
+ * Sorting/filtering still run across the complete set; only how much of it
+ * is rendered at once is now paged, with the remainder reachable via
+ * "Load more" rather than invisible.
+ */
+describe('EventsPanel · browsing past the initial page (#54)', () => {
+  const manyEvents = Array.from({ length: 350 }, (_, i) => event(`Event ${String(i).padStart(3, '0')}`))
+
+  it('caps the initial render at 300 but reports the full match count and offers to load more', () => {
+    render(<EventsPanel {...baseProps} events={manyEvents} origin={undefined} locationStatus="idle" />)
+
+    expect(screen.getByText('300 of 350 showing')).toBeDefined()
+    expect(screen.queryByText('Event 300')).toBeNull()
+    expect(screen.getByRole('button', { name: /load 50 more/i })).toBeDefined()
+  })
+
+  it(
+    'makes every record past index 300 reachable by loading more',
+    () => {
+      render(<EventsPanel {...baseProps} events={manyEvents} origin={undefined} locationStatus="idle" />)
+
+      fireEvent.click(screen.getByRole('button', { name: /load 50 more/i }))
+
+      expect(screen.getByText('Event 300')).toBeDefined()
+      expect(screen.getByText('Event 349')).toBeDefined()
+      expect(screen.getByText('350 showing')).toBeDefined()
+      expect(screen.queryByRole('button', { name: /load.*more/i })).toBeNull()
+    },
+    // The initial 300-item mount plus the re-render this click triggers for
+    // all 350 is a genuinely heavy synchronous jsdom render — real MUI
+    // ListItem/Typography/Chip trees, not a mock — and vitest's 5s default
+    // has been observed to trip under CI/sandbox load even though nothing
+    // here is actually waiting on anything async. A longer ceiling costs
+    // nothing when the runner isn't under load and avoids exactly that flake.
+    15000,
+  )
+
+  it('resets back to the first page when the search term changes', () => {
+    render(<EventsPanel {...baseProps} events={manyEvents} origin={undefined} locationStatus="idle" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /load 50 more/i }))
+    expect(screen.getByText('350 showing')).toBeDefined()
+
+    // "Event 3" matches only "Event 300".."Event 349" (50 events, all under
+    // the page size) — a stale "everything loaded" position from the
+    // unfiltered 350 would be meaningless against this much smaller set.
+    fireEvent.change(screen.getByPlaceholderText('Search events or camps'), { target: { value: 'Event 3' } })
+
+    expect(screen.getByText('50 showing')).toBeDefined()
+    expect(screen.queryByText(/of 350 showing/)).toBeNull()
+  })
+})
 
 describe('EventsPanel · location failure for "Closest"', () => {
   it('does not leave "Closest" selected while silently falling back to time order on denial', () => {
@@ -169,7 +228,14 @@ describe('EventsPanel · event rows (#20, #29)', () => {
   it('opens the event detail for a located row too — navigation is no longer the row\'s only action', () => {
     const onSelectEvent = vi.fn()
     const hosted = { ...event('Pancakes'), hosted_by_camp: 'camp-1' }
-    const host = { uid: 'camp-1', kind: 'camp' as const, name: 'Test Camp', position: [-119.2, 40.78] as [number, number], positionSource: 'gps' as const }
+    const host = {
+      uid: 'camp-1',
+      kind: 'camp' as const,
+      name: 'Test Camp',
+      position: [-119.2, 40.78] as [number, number],
+      positionSource: 'gps' as const,
+      accuracyClass: 'surveyed' as const,
+    }
     render(
       <EventsPanel
         {...baseProps}
@@ -199,5 +265,115 @@ describe('EventsPanel · event rows (#20, #29)', () => {
     )
     expect(screen.getByText(/ask around at the tiki bar/)).toBeDefined()
     expect(screen.queryByText(/location not listed/i)).toBeNull()
+  })
+
+  it('offers a bookmark toggle on each row, reflecting saved state', () => {
+    const onToggleSaveEvent = vi.fn()
+    render(
+      <EventsPanel
+        {...baseProps}
+        events={[event('yoga')]}
+        origin={undefined}
+        locationStatus="idle"
+        isEventSaved={(uid) => uid === 'yoga'}
+        onToggleSaveEvent={onToggleSaveEvent}
+      />,
+    )
+    const toggle = screen.getByRole('button', { name: /remove from saved events/i })
+    fireEvent.click(toggle)
+    expect(onToggleSaveEvent).toHaveBeenCalledWith(expect.objectContaining({ uid: 'yoga' }))
+  })
+})
+
+describe('EventsPanel · Saved window (#60)', () => {
+  it('shows only saved events, ordered by their relevant occurrence', () => {
+    const yoga = event('yoga')
+    const pancakes = { ...event('pancakes'), occurrence_set: [{ start_time: '2026-09-02T12:00:00-07:00', end_time: '2026-09-02T13:00:00-07:00' }] }
+    const unsaved = event('unsaved bbq')
+    render(
+      <EventsPanel
+        {...baseProps}
+        events={[unsaved, pancakes, yoga]}
+        origin={undefined}
+        locationStatus="idle"
+        savedEvents={[
+          { uid: 'pancakes', title: 'pancakes', savedAt: 1 },
+          { uid: 'yoga', title: 'yoga', savedAt: 2 },
+        ]}
+        isEventSaved={(uid) => uid === 'pancakes' || uid === 'yoga'}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /^saved$/i }))
+
+    expect(screen.getByText('yoga')).toBeDefined()
+    expect(screen.getByText('pancakes')).toBeDefined()
+    expect(screen.queryByText('unsaved bbq')).toBeNull()
+  })
+
+  it('degrades a saved uid that no longer matches any current event to a harmless row instead of crashing', () => {
+    const onRemoveSavedEvent = vi.fn()
+    render(
+      <EventsPanel
+        {...baseProps}
+        // The uid isn't present in `events` at all — the realistic shape of
+        // "deleted/cancelled in a later data refresh". `uid` is the sole
+        // identity every part of this app uses (host lookups, row keys), and
+        // the officially issued ids aren't recycled within a year, so a
+        // *present* uid is trusted as the same event throughout — same as it
+        // is everywhere else in the app.
+        events={[event('unrelated current event')]}
+        origin={undefined}
+        locationStatus="idle"
+        savedEvents={[{ uid: 'ghost-uid', title: 'Deleted campfire chat', savedAt: 1 }]}
+        isEventSaved={() => true}
+        onRemoveSavedEvent={onRemoveSavedEvent}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /^saved$/i }))
+
+    // The snapshotted title shows up, and nothing crashes.
+    expect(screen.getByText('Deleted campfire chat')).toBeDefined()
+    expect(screen.getByText(/no longer listed this year/i)).toBeDefined()
+    expect(screen.queryByText('unrelated current event')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /remove deleted campfire chat from saved events/i }))
+    expect(onRemoveSavedEvent).toHaveBeenCalledWith('ghost-uid')
+  })
+
+  it('shows an explicit empty state rather than "nothing scheduled" when nothing is saved', () => {
+    render(
+      <EventsPanel {...baseProps} events={[event('yoga')]} origin={undefined} locationStatus="idle" savedEvents={[]} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /^saved$/i }))
+    expect(screen.getByText(/no saved events yet/i)).toBeDefined()
+  })
+})
+
+/**
+ * Issue #64: the search box only matched `title`, `event_type.label`, the
+ * host's name and `other_location` — a word that only appears in an event's
+ * own description ("coffee", "karaoke") returned nothing.
+ */
+describe('EventsPanel · description search (#64)', () => {
+  it('finds an event by a word that only lives in its description', () => {
+    const described = { ...event('Morning gathering'), description: 'Fresh coffee and quiet conversation.' }
+    render(
+      <EventsPanel {...baseProps} events={[described, event('Unrelated thing')]} origin={undefined} locationStatus="idle" />,
+    )
+    fireEvent.change(screen.getByPlaceholderText(/search events or camps/i), { target: { value: 'coffee' } })
+
+    expect(screen.getByText('Morning gathering')).toBeDefined()
+    expect(screen.queryByText('Unrelated thing')).toBeNull()
+  })
+
+  it('finds an event by a word that only lives in its print_description', () => {
+    const printed = { ...event('Evening set'), print_description: 'A karaoke session under the stars.' }
+    render(
+      <EventsPanel {...baseProps} events={[printed, event('Unrelated thing')]} origin={undefined} locationStatus="idle" />,
+    )
+    fireEvent.change(screen.getByPlaceholderText(/search events or camps/i), { target: { value: 'karaoke' } })
+
+    expect(screen.getByText('Evening set')).toBeDefined()
+    expect(screen.queryByText('Unrelated thing')).toBeNull()
   })
 })

@@ -14,6 +14,7 @@ const poi = (uid: string, name: string): Poi => ({
   name,
   position: [-119.2, 40.78],
   positionSource: 'gps',
+  accuracyClass: 'surveyed',
 })
 
 const baseProps = {
@@ -30,6 +31,84 @@ const baseProps = {
   onClose: vi.fn(),
   compact: true,
 }
+
+/**
+ * Issue #45: `civicPois()` keeps every survey-derived place at `kind:
+ * 'service'` so filters/favorites keep treating them as one group, but The
+ * Temple, Gate Actual and Yellow Bike Project are not services — the CPNS
+ * survey's own `category` already says so. The kind chip has to read that
+ * classification instead of falling back to the generic "Service" label.
+ */
+describe('DetailDrawer · kind chip for CPNS categories (#45)', () => {
+  const civicPoi = (category: Poi['category'], name: string): Poi => ({
+    uid: 'service:test',
+    kind: 'service',
+    name,
+    category,
+    position: [-119.2, 40.78],
+    positionSource: 'gps',
+    accuracyClass: 'surveyed',
+  })
+
+  it('labels a landmark as Landmark, not Service', () => {
+    render(<DetailDrawer {...baseProps} poi={civicPoi('landmark', 'The Temple')} />)
+    expect(screen.getByText('Landmark')).toBeDefined()
+    expect(screen.queryByText('Service')).toBeNull()
+  })
+
+  it('labels arrival infrastructure as Arrival, not Service', () => {
+    render(<DetailDrawer {...baseProps} poi={civicPoi('arrival', 'Gate Actual')} />)
+    expect(screen.getByText('Arrival')).toBeDefined()
+    expect(screen.queryByText('Service')).toBeNull()
+  })
+
+  it('labels participant info as Info, not Service', () => {
+    render(<DetailDrawer {...baseProps} poi={civicPoi('info', 'Yellow Bike Project')} />)
+    expect(screen.getByText('Info')).toBeDefined()
+    expect(screen.queryByText('Service')).toBeNull()
+  })
+
+  it('still labels a genuine service (ranger station) as Service', () => {
+    render(<DetailDrawer {...baseProps} poi={civicPoi('ranger', 'Ranger HQ')} />)
+    expect(screen.getByText('Service')).toBeDefined()
+  })
+})
+
+/**
+ * Issue #61: a camp/art record's API-published GPS is best-effort per
+ * Burning Man's own documentation, not surveyed — but the detail view used
+ * to drop its approximation caveat entirely the moment any GPS field
+ * existed, the same as it does for the GIS survey's genuinely surveyed
+ * civic points. `accuracyClass` now distinguishes the three cases.
+ */
+describe('DetailDrawer · position accuracy caveat (#61)', () => {
+  const campPoi = (accuracyClass: Poi['accuracyClass'], address?: string): Poi => ({
+    uid: 'camp:test',
+    kind: 'camp',
+    name: 'Test Camp',
+    address,
+    position: [-119.2, 40.78],
+    positionSource: accuracyClass === 'derived' ? 'address' : 'gps',
+    accuracyClass,
+  })
+
+  it('shows the address caveat for a derived (geocoded) pin', () => {
+    render(<DetailDrawer {...baseProps} poi={campPoi('derived', '6:00 & Esplanade')} />)
+    expect(screen.getByText(/Approximate pin at/)).toBeDefined()
+  })
+
+  it('shows a distinct best-effort caveat for API-published GPS, not the address one', () => {
+    render(<DetailDrawer {...baseProps} poi={campPoi('published')} />)
+    expect(screen.getByText(/Officially published location/)).toBeDefined()
+    expect(screen.queryByText(/Approximate pin at/)).toBeNull()
+  })
+
+  it('shows no position caveat for a genuinely surveyed civic point', () => {
+    render(<DetailDrawer {...baseProps} poi={campPoi('surveyed')} />)
+    expect(screen.queryByText(/Approximate pin at/)).toBeNull()
+    expect(screen.queryByText(/Officially published location/)).toBeNull()
+  })
+})
 
 /**
  * Issue #19: a plain ref callback on the sheet's Paper only fires when that

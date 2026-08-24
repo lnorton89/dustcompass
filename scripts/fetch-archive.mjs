@@ -10,6 +10,7 @@ import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { commitAtomically, discardStaged, stageTempDir } from './lib/atomic-write.mjs'
 import { summarize, validateDataset } from './lib/api.mjs'
+import { deriveEventRange } from './lib/event-range.mjs'
 
 const YEAR = process.argv[2] ?? '2025'
 const FIRST_ARCHIVE_YEAR = 2015
@@ -45,40 +46,12 @@ try {
     console.log(`  ✓ ${summarize(kind, result)}`)
   }
 
-  const occurrences = events
-    .flatMap((event) => event.occurrence_set ?? [])
-    .map((occurrence) => ({
-      start: Date.parse(occurrence.start_time),
-      end: Date.parse(occurrence.end_time),
-    }))
-    .filter(({ start, end }) => Number.isFinite(start) && Number.isFinite(end))
-
-  if (occurrences.length) {
-    // A few archive records are rehearsals or data-entry outliers months before
-    // the event. Anchor preview mode to the month containing most occurrences,
-    // then allow the event week to run into the following month.
-    const months = new Map()
-    for (const { start } of occurrences) {
-      const key = new Date(start).toISOString().slice(0, 7)
-      months.set(key, (months.get(key) ?? 0) + 1)
+  const range = deriveEventRange(events)
+  if (range) {
+    await writeFile(resolve(stage, 'dates_info.json'), JSON.stringify({ rangeInfo: range.rangeInfo }))
+    for (const outlier of range.outliers) {
+      console.warn(`  · outside the event range, excluded from preview: ${outlier.title ?? outlier.uid} (${outlier.start})`)
     }
-    const eventMonth = [...months].sort((a, b) => b[1] - a[1])[0][0]
-    const starts = occurrences
-      .filter(({ start }) => new Date(start).toISOString().startsWith(eventMonth))
-      .map(({ start }) => start)
-    const start = Math.min(...starts)
-    const ends = occurrences
-      .filter(({ end }) => end >= start && end <= start + 14 * 24 * 60 * 60 * 1000)
-      .map(({ end }) => end)
-    await writeFile(
-      resolve(stage, 'dates_info.json'),
-      JSON.stringify({
-        rangeInfo: {
-          startDate: new Date(start).toISOString(),
-          endDate: new Date(Math.max(...ends)).toISOString(),
-        },
-      }),
-    )
   }
 
   await writeFile(

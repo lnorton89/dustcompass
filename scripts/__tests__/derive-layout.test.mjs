@@ -19,6 +19,7 @@ import {
   assertFiniteNumbers,
   checkAnnularResidual,
   checkCentreFit,
+  checkRadialCoverage,
   checkRotationSpread,
 } from '../derive-layout.mjs'
 
@@ -90,6 +91,20 @@ describe('checkAnnularResidual', () => {
   })
 })
 
+describe('checkRadialCoverage', () => {
+  it('accepts when every surveyed radial made it into the generated set', () => {
+    expect(() => checkRadialCoverage(['3:00', '9:00'], ['3:00', '9:00', '6:00'])).not.toThrow()
+  })
+
+  // The bug behind #48: a "path" kind radial was surveyed but never made it
+  // into tStreets because streetShape() didn't recognize the kind.
+  it('rejects a surveyed radial missing from the generated set', () => {
+    expect(() => checkRadialCoverage(['3:00', '4:15'], ['3:00'])).toThrow(
+      /missing from the derived layout.*4:15/,
+    )
+  })
+})
+
 describe('assertFiniteNumbers', () => {
   it('accepts a layout with only finite numbers', () => {
     const layout = { fence_distance: 2500, bearing: 45.5, cStreets: [{ distance: 200, segments: [[1, 2]] }] }
@@ -141,15 +156,29 @@ function radialCoordinates(clock, nearFt, farFt) {
   return [at(nearFt), at(farFt)]
 }
 
+/**
+ * A curved multi-point gate-road spoke, well outside the fence, standing in
+ * for the real survey's LineString. Not a straight two-point segment: a
+ * derivation that reduced this to a distance/angle would lose the bend.
+ */
+function gateRoadCoordinates() {
+  return [
+    [3400 * Math.sin(-0.05), 3400 * Math.cos(-0.05)],
+    [3800 * Math.sin(0.02), 3800 * Math.cos(0.02)],
+    [4200 * Math.sin(0.08), 4200 * Math.cos(0.08)],
+    [4600 * Math.sin(0.11), 4600 * Math.cos(0.11)],
+  ].map(toLonLat)
+}
+
 const ring = (name, radius, jitterFt) => ({
   type: 'Feature',
   properties: { kind: 'annular', name },
   geometry: { type: 'LineString', coordinates: ringCoordinates(radius, jitterFt) },
 })
 
-const radial = (clock) => ({
+const radial = (clock, extraProps = {}) => ({
   type: 'Feature',
-  properties: { kind: 'radial', name: clock },
+  properties: { kind: 'radial', name: clock, ...extraProps },
   geometry: { type: 'LineString', coordinates: radialCoordinates(clock, 20, 2500) },
 })
 
@@ -165,6 +194,9 @@ function surveyLayers({ worstRingJitter }) {
       radial('3:00'),
       radial('6:00'),
       radial('9:00'),
+      // A 2026-style narrower radial "path" — see #48, where this kind was
+      // silently dropped instead of being drawn at its own surveyed width.
+      radial('4:15', { kind: 'path', source: 'radial', width_ft: 20 }),
     ],
   }
   const cpns = {
@@ -180,7 +212,20 @@ function surveyLayers({ worstRingJitter }) {
     features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [fenceCorners] } }],
   }
   const empty = { type: 'FeatureCollection', features: [] }
-  return { street_lines: streetLines, cpns, trash_fence: trashFence, plazas: empty, dmz: empty, gate_road: empty }
+  const gateRoad = {
+    type: 'FeatureCollection',
+    features: [
+      { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: gateRoadCoordinates() } },
+    ],
+  }
+  return {
+    street_lines: streetLines,
+    cpns,
+    trash_fence: trashFence,
+    plazas: empty,
+    dmz: empty,
+    gate_road: gateRoad,
+  }
 }
 
 /** Serves `surveyLayers(...)` at GET /<name>.geojson, the exact shape `layer()` in the script expects. */
@@ -237,6 +282,41 @@ describe('derive-layout.mjs, end to end against a synthetic survey', () => {
     expect(layout.cStreets).toHaveLength(3)
     expect(Number.isFinite(layout.fence_distance)).toBe(true)
     expect(Number.isFinite(layout.bearing)).toBe(true)
+
+    // #48: a "path" kind radial must survive derivation with its own surveyed
+    // width, not be dropped or rendered at the generic road_width.
+    const path = layout.tStreets.find((t) => t.refs.includes('4:15'))
+    expect(path).toBeDefined()
+    expect(path.width).toBe(20)
+  })
+
+  /**
+   * #53: the gate road used to be collapsed into a single `{ distance, angle
+   * }` — a synthetic straight segment with a hard-coded 108° bearing that had
+   * nothing to do with the surveyed alignment. It must now carry the real
+   * surveyed coordinates through untouched, curve and all, not a
+   * distance/angle summary derived from them.
+   */
+  it('preserves the real surveyed gate-road geometry rather than reducing it to a distance and angle', async () => {
+    const { outPath, runScript } = await run(0.1)
+    await expect(runScript()).resolves.toBeDefined()
+    const layout = JSON.parse(readFileSync(outPath, 'utf8'))
+
+    expect(layout.entrance_road).toBeDefined()
+    expect(layout.entrance_road.distance).toBeUndefined()
+    expect(layout.entrance_road.angle).toBeUndefined()
+
+    expect(layout.entrance_road.lines).toHaveLength(1)
+    const [line] = layout.entrance_road.lines
+    const expected = gateRoadCoordinates()
+    expect(line).toHaveLength(expected.length)
+    // Round-tripped through the same tangent-plane conversion the script
+    // itself uses on the way in, so this checks against the survey's own
+    // coordinates, not a re-derivation of them.
+    line.forEach(([lon, lat], i) => {
+      expect(lon).toBeCloseTo(expected[i][0], 6)
+      expect(lat).toBeCloseTo(expected[i][1], 6)
+    })
   })
 
   /**

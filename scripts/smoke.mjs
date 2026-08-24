@@ -831,6 +831,15 @@ await shared.close()
     await page.waitForTimeout(2000)
     const detailSearch = page.getByPlaceholder(/Camp, art, or an address|Search the playa/)
     const bottomPaddingFor = async (name) => {
+      // At this compact width the sheet is a modal bottom Drawer, not the
+      // non-modal side column the wide-viewport tests search past — left
+      // open, its backdrop made the second search's interactions land
+      // nowhere, so the second camp silently never opened.
+      const closeDetail = page.getByLabel('Close details')
+      if (await closeDetail.count()) {
+        await closeDetail.click()
+        await page.waitForTimeout(400)
+      }
       await detailSearch.fill('')
       await detailSearch.fill(name)
       await page.waitForTimeout(700)

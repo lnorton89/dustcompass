@@ -371,24 +371,106 @@ if (contested) {
 }
 
 // Tapping bare playa drops a shareable pin and puts the address in the URL.
-// Which pixels are bare playa depends on where the map has ended up and on
-// where this year put its camps, so try a few rather than trusting one.
-let pinned = null
-for (const spot of [
-  { x: 700, y: 420 },
-  { x: 1040, y: 300 },
-  { x: 420, y: 660 },
-  { x: 900, y: 700 },
-  { x: 300, y: 250 },
-]) {
-  await page.locator('canvas').click({ position: spot, force: true })
-  await page.waitForTimeout(700)
-  pinned = new URL(page.url()).searchParams.get('at')
-  if (pinned) break
+/**
+ * Ask the map where there is nothing, rather than guessing pixels. Hard-coded
+ * coordinates land on a camp as soon as the placement changes, and the whole
+ * point of the assertion is what happens when you tap ground with nothing on it.
+ */
+const bareSpot = async () => {
+  return page.evaluate(() => {
+    const map = window.__map
+    const layers = ['poi-dot', 'poi-cluster', 'poi-label', 'saved-dot', 'toilet-dot', 'service-dot']
+      .filter((id) => map.getLayer(id))
+    const { x, y } = map.project(map.getCenter())
+    for (let radius = 60; radius <= 320; radius += 40) {
+      for (let step = 0; step < 12; step += 1) {
+        const angle = (step / 12) * Math.PI * 2
+        const at = { x: Math.round(x + Math.cos(angle) * radius), y: Math.round(y + Math.sin(angle) * radius) }
+        if (at.x < 40 || at.y < 120) continue
+        const hit = map.queryRenderedFeatures(
+          [[at.x - 14, at.y - 14], [at.x + 14, at.y + 14]],
+          { layers },
+        )
+        if (hit.length === 0) return at
+      }
+    }
+    return undefined
+  })
 }
-assert(Boolean(pinned), `tapping playa puts an address in the URL (${pinned})`)
+
+/** Asking a moving map where there is nothing gives an answer that has moved. */
+const settle = () =>
+  page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const map = window.__map
+        if (!map.isMoving() && !map.isZooming() && map.loaded()) return resolve(undefined)
+        map.once('idle', () => resolve(undefined))
+        setTimeout(() => resolve(undefined), 4000)
+      }),
+  )
+
+/**
+ * Tap bare ground. The popover it opens hides itself after six seconds, so
+ * "worked" means the address reached the URL *and* the Save action is still on
+ * screen for the caller to use.
+ */
+const tapBarePlaya = async () => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await settle()
+    const at = await bareSpot()
+    if (!at) continue
+    await page.locator('canvas').click({ position: at, force: true })
+    await page.waitForTimeout(700)
+    const address = new URL(page.url()).searchParams.get('at')
+    if (address && (await page.getByRole('button', { name: /^Save$/ }).count()) > 0) {
+      return { at, address }
+    }
+  }
+  return undefined
+}
+
+const probe = await tapBarePlaya()
+assert(Boolean(probe), 'found a patch of bare playa to tap')
+assert(
+  Boolean(probe?.address),
+  `tapping playa puts an address in the URL (${probe?.address ?? 'nothing'})`,
+)
+
+// Deleting a saved spot is the only destructive thing here, and what it
+// destroys is where somebody's tent is. The undo has to be reachable.
+await page.getByRole('button', { name: /^Save$/ }).click()
+await page.waitForTimeout(600)
+await page.getByRole('textbox').last().fill('Undo probe')
+await page.getByRole('button', { name: /^Save$/ }).last().click()
+await page.waitForTimeout(900)
+await page.getByLabel('Filters and saved spots').click()
+await page.waitForTimeout(800)
+assert(await page.getByText('Undo probe').count() > 0, 'saved spot is listed to delete')
+await page.getByLabel('Delete Undo probe').click()
+await page.waitForTimeout(800)
+// The snackbar announcing the removal names the spot too, so ask the list
+// itself: its delete control is the thing that goes away.
+assert(
+  (await page.getByLabel('Delete Undo probe').count()) === 0,
+  'deleting a saved spot removes it from the list',
+)
+const undo = page.getByRole('button', { name: /^Undo$/ })
+assert(await undo.count() > 0, 'deleting a saved spot offers an undo')
+await undo.click()
+await page.waitForTimeout(900)
+assert(
+  (await page.getByLabel('Delete Undo probe').count()) > 0,
+  'undo puts the deleted spot back',
+)
+await page.getByLabel('Delete Undo probe').click()
+await page.waitForTimeout(600)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(400)
 
 // Saving a spot and getting back to it — the thing this app is for at 4am.
+// The undo check above used up the previous probe, so ask for bare ground again.
+assert(Boolean(await tapBarePlaya()), 'bare playa is tappable again after the undo check')
 await page.getByRole('button', { name: 'Save', exact: true }).click()
 await page.waitForTimeout(500)
 await page.getByRole('button', { name: 'My camp' }).click()

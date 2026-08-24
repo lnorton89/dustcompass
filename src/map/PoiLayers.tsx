@@ -14,10 +14,20 @@ interface Props {
   focusPosition?: Position
 }
 
+/**
+ * Two listings are on the same point when they round to the same spot at the
+ * precision the geocoder works to. Exported so the map picks stacks by the
+ * same rule this layer draws them by.
+ */
+export const stackKey = (position: Position) =>
+  `${position[0].toFixed(7)},${position[1].toFixed(7)}`
+
 export const POI_LAYER_ID = 'poi-dot'
 export const POI_CLUSTER_LAYER_ID = 'poi-cluster'
 /** The label layer decides which of several coincident camps is named. */
 export const POI_LABEL_LAYER_ID = 'poi-label'
+/** How many listings share a dot, drawn on the dot itself. */
+export const POI_STACK_COUNT_LAYER_ID = 'poi-stack-count'
 
 function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace('#', '')
@@ -68,30 +78,42 @@ export function clusterColor(palette: PlayaPalette) {
  * earn its weight an order of magnitude above this.
  */
 export function PoiLayers({ pois, visible, palette, labelScale, focusPosition }: Props) {
-  const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
-    () => ({
+  const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(() => {
+    const shown = pois.filter((poi) => visible.has(poi.kind))
+    /*
+     * A playa address names an intersection, not a plot, and until the survey
+     * publishes coordinates every listing is placed from its address — so most
+     * of the city arrives as stacks. Three quarters of the camps share a point
+     * with at least one other, the deepest nine deep. Drawn as plain dots those
+     * stacks are a lie of omission: eight of those nine camps cannot be tapped,
+     * and nothing on the map admits they are there.
+     */
+    const depth = new Map<string, number>()
+    for (const poi of shown) {
+      const key = stackKey(poi.position)
+      depth.set(key, (depth.get(key) ?? 0) + 1)
+    }
+    return {
       type: 'FeatureCollection',
-      features: pois
-        .filter((poi) => visible.has(poi.kind))
-        .map((poi) => ({
-          type: 'Feature',
-          id: poi.uid,
-          properties: {
-            uid: poi.uid,
-            kind: poi.kind,
-            name: poi.name,
-            address: poi.address ?? '',
-            focusOverlap: Boolean(
-              focusPosition &&
-                Math.abs(poi.position[0] - focusPosition[0]) < 1e-7 &&
-                Math.abs(poi.position[1] - focusPosition[1]) < 1e-7,
-            ),
-          },
-          geometry: { type: 'Point', coordinates: poi.position },
-        })),
-    }),
-    [focusPosition, pois, visible],
-  )
+      features: shown.map((poi) => ({
+        type: 'Feature',
+        id: poi.uid,
+        properties: {
+          uid: poi.uid,
+          kind: poi.kind,
+          name: poi.name,
+          address: poi.address ?? '',
+          stack: depth.get(stackKey(poi.position)) ?? 1,
+          focusOverlap: Boolean(
+            focusPosition &&
+              Math.abs(poi.position[0] - focusPosition[0]) < 1e-7 &&
+              Math.abs(poi.position[1] - focusPosition[1]) < 1e-7,
+          ),
+        },
+        geometry: { type: 'Point', coordinates: poi.position },
+      })),
+    }
+  }, [focusPosition, pois, visible])
 
   const colorByKind = ['match', ['get', 'kind'], 'art', palette.art, palette.camp] as const
 
@@ -146,11 +168,39 @@ export function PoiLayers({ pois, visible, palette, labelScale, focusPosition }:
         type="circle"
         filter={['!', ['has', 'point_count']]}
         paint={{
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 3, 17, 7],
+          // A stacked dot is drawn bigger so its count has somewhere to sit,
+          // and so a thumb aiming at nine camps has more than seven pixels of
+          // target. The size difference is itself the signal that there is more
+          // here than one place.
+          'circle-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            13,
+            ['case', ['>', ['get', 'stack'], 1], 4, 3],
+            17,
+            ['case', ['>', ['get', 'stack'], 1], 11, 7],
+          ],
           'circle-color': colorByKind as unknown as string,
           'circle-stroke-color': palette.playa,
           'circle-stroke-width': 1.5,
         }}
+      />
+      <Layer
+        id={POI_STACK_COUNT_LAYER_ID}
+        type="symbol"
+        minzoom={15.5}
+        filter={['all', ['!', ['has', 'point_count']], ['>', ['get', 'stack'], 1]]}
+        layout={{
+          'text-field': ['to-string', ['get', 'stack']],
+          'text-font': ['Open Sans Regular'],
+          'text-size': labelSize(labelScale, 10),
+          // Part of the dot, not a label: it must never be collided away, and
+          // it must never push a place name out of the way either.
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        }}
+        paint={{ 'text-color': palette.playa }}
       />
       <Layer
         id={POI_LABEL_LAYER_ID}

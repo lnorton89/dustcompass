@@ -39,6 +39,7 @@ import { MapView } from './map/MapView'
 import { SearchPanel } from './ui/SearchPanel'
 import { DetailDrawer } from './ui/DetailDrawer'
 import { UnplacedSheet } from './ui/UnplacedSheet'
+import { StackSheet } from './ui/StackSheet'
 import { EventsPanel } from './ui/EventsPanel'
 import { EventDetail } from './ui/EventDetail'
 import { FilterSheet } from './ui/FilterSheet'
@@ -204,6 +205,19 @@ export default function App() {
   useEffect(() => writeStored(MODE_KEY, mode), [mode])
   useEffect(() => writeStored(ACTIVE_FILTERS_KEY, [...active]), [active])
   /**
+   * How tall the footnote is, so the embargo notice can sit under it on a
+   * phone where both are pinned to the top. This was a hard-coded 56px, which
+   * the notice outgrew the moment the survey credit joined the footnote — and
+   * which the reader's own text-size control would have broken again anyway.
+   */
+  const [footnoteHeight, setFootnoteHeight] = useState(0)
+  const footnoteRef = useCallback((node: HTMLElement | null) => {
+    if (!node) return
+    const observer = new ResizeObserver(() => setFootnoteHeight(node.offsetHeight))
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+  /**
    * The map's own current bearing, reported by MapView on every rotate —
    * gesture, MapLibre's built-in compass control, or our own `easeTo` calls
    * all go through the same event. `cityUp`/`northUp` below are derived from
@@ -261,6 +275,8 @@ export default function App() {
     )
   }, [theme])
   const [selected, setSelected] = useState<Poi>()
+  /** Everything sharing one tapped point, when that is more than one place. */
+  const [stack, setStack] = useState<Poi[]>()
   // A listing with no location to open on — before Gates, all of the art.
   const [unplaced, setUnplaced] = useState<UnplacedListing>()
   // The event itself, opened from an Events row or a hosted-event row in a
@@ -980,6 +996,10 @@ export default function App() {
                   if (poi) flyTo(poi.position, poi)
                   else setSelected(undefined)
                 }}
+                onSelectStack={(sharing) => {
+                  setSelected(undefined)
+                  setStack(sharing)
+                }}
                 onProbe={(address, position) => {
                   setProbe(address)
                   setPin({ position, address })
@@ -1012,6 +1032,7 @@ export default function App() {
                 destination={heading}
               />
               <Box
+                ref={footnoteRef}
                 data-testid="api-disclaimer"
                 sx={{
                   position: 'absolute',
@@ -1099,8 +1120,13 @@ export default function App() {
                   sx={{
                     position: 'absolute',
                     // Below the non-affiliation footnote on a phone, which now
-                    // occupies the top-left corner.
-                    top: { xs: 'calc(56px + var(--safe-top))', sm: 8 },
+                    // occupies the top-left corner. Measured, not guessed: the
+                    // footnote grows with the credit line and with whatever text
+                    // size the reader has asked for.
+                    top: {
+                      xs: `calc(${footnoteHeight + 16}px + var(--safe-top))`,
+                      sm: 8,
+                    },
                     left: 8,
                     right: { xs: 8, sm: 'auto' },
                     maxWidth: { sm: 400 },
@@ -1254,6 +1280,15 @@ export default function App() {
             listing={unplaced}
             onShare={(listing) => void share({ poi: listing.uid }, listing.name)}
             onClose={() => setUnplaced(undefined)}
+            compact={compact}
+          />
+          <StackSheet
+            stack={stack}
+            onChoose={(poi) => {
+              setStack(undefined)
+              flyTo(poi.position, poi)
+            }}
+            onClose={() => setStack(undefined)}
             compact={compact}
           />
         </Box>

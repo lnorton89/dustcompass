@@ -414,33 +414,46 @@ assert(
   'clearing navigation removes the route',
 )
 
-// A playa address names an intersection, so camps share one. Whichever of them
-// wins the label is the name the user reads, and tapping it must open that
-// camp: it used to open whichever feature the renderer returned first.
+/*
+ * A playa address names an intersection, and until the survey publishes
+ * coordinates every listing is placed from its address — so most points on the
+ * map carry several camps. Tapping used to hand back whichever one the renderer
+ * returned first, leaving the rest unreachable from the map entirely. Now the
+ * dot carries its count and a tap offers the whole list.
+ */
 const contested = await page.evaluate(() => {
-  const labels = window.__map.queryRenderedFeatures({ layers: ['poi-label'] })
-  for (const label of labels) {
-    if (!label.properties?.uid) continue
-    const point = window.__map.project(label.geometry.coordinates)
-    const beneath = window.__map
-      .queryRenderedFeatures([[point.x - 12, point.y - 12], [point.x + 12, point.y + 12]], {
-        layers: ['poi-dot'],
-      })
-      .filter((f) => f.properties?.uid)
-    if (beneath.length > 1) {
-      return { name: label.properties.name, x: point.x, y: point.y, beneath: beneath.length }
-    }
+  const dot = window.__map
+    .queryRenderedFeatures({ layers: ['poi-dot'] })
+    .find((f) => f.properties?.stack > 1)
+  if (!dot) return undefined
+  const point = window.__map.project(dot.geometry.coordinates)
+  const rect = window.__map.getCanvas().getBoundingClientRect()
+  return {
+    stack: dot.properties.stack,
+    // project() is canvas-relative, and the canvas sits below the app bar.
+    x: rect.left + point.x,
+    y: rect.top + point.y,
   }
-  return undefined
 })
 if (contested) {
-  // The map is often still easing when this runs, and Playwright will wait for
-  // a canvas to hold still forever. It never will.
-  await page.locator('canvas').click({ position: { x: contested.x, y: contested.y }, force: true })
-  await page.waitForTimeout(900)
-  // Scoped to the panel's own handle: on a wide screen the listing is a column
-  // beside the map rather than a drawer over it, so `.MuiDrawer-root` misses it
-  // and every name read out of it came back empty.
+  await page.mouse.click(contested.x, contested.y)
+  await page.waitForTimeout(1200)
+  const sheet = page.locator('.MuiDrawer-paper')
+  const said = await sheet.innerText().catch(() => '')
+  const listed = await sheet.locator('.MuiListItemButton-root').count()
+  assert(
+    listed === contested.stack,
+    `a shared pin offers every listing on it (dot says ${contested.stack}, list holds ${listed})`,
+  )
+  assert(
+    new RegExp(`${contested.stack} listings share this address`).test(said),
+    'a shared pin says how many listings are on it',
+  )
+  const wanted = (
+    await sheet.locator('.MuiListItemButton-root').nth(1).innerText()
+  ).split(String.fromCharCode(10))[0]
+  await sheet.locator('.MuiListItemButton-root').nth(1).click()
+  await page.waitForTimeout(1800)
   const opened = await page
     .getByTestId('detail-panel')
     .locator('h5, h6')
@@ -448,13 +461,13 @@ if (contested) {
     .innerText()
     .catch(() => '')
   assert(
-    opened.trim() === contested.name,
-    `tapping a shared pin opens the camp it is labelled with (read "${contested.name}", opened "${opened.trim()}")`,
+    opened.trim() === wanted.trim(),
+    `choosing from a shared pin opens that listing (wanted "${wanted}", opened "${opened.trim()}")`,
   )
   await page.keyboard.press('Escape')
   await page.waitForTimeout(400)
 } else {
-  console.log('      no two camps drawn close enough to contest a label at this zoom')
+  console.log('      no shared pin drawn at this zoom')
 }
 
 // Tapping bare playa drops a shareable pin and puts the address in the URL.

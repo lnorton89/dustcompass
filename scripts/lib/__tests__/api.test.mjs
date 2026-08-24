@@ -10,16 +10,43 @@ import {
 } from '../api.mjs'
 
 /**
- * The 2025 listings in public/data came from this same API, so they are a real
+ * The listings in public/data came from this same API, so they are a real
  * fixture for what a good response looks like — not a hand-written guess at it.
  */
-const load = (name) => JSON.parse(readFileSync(`public/data/2025/${name}.json`, 'utf8'))
+const YEAR = process.env.NEXT_PUBLIC_DATA_YEAR ?? '2026'
+const load = (name) => JSON.parse(readFileSync(`public/data/${YEAR}/${name}.json`, 'utf8'))
+
+/**
+ * The files on disk have already been through the embargo, so a dataset whose
+ * locations are still withheld is legitimately missing them. That is the one
+ * thing `validateDataset` cannot tell apart from a response shape change, and
+ * it does not need to: it runs on the raw response, before redaction.
+ */
+const release = releaseForYear(YEAR)
+const withheld = (kind) => {
+  const lifts = kind === 'art' ? release.art : kind === 'camp' ? release.camp : undefined
+  return lifts !== undefined && new Date() < lifts
+}
+const shapeProblems = (kind) =>
+  validateDataset(kind, load(kind)).problems.filter(
+    (problem) => !(withheld(kind) && /"location(_string)?"/.test(problem)),
+  )
 
 describe('validating a real response', () => {
   it('accepts the shapes the app is built against', () => {
     for (const kind of ['art', 'camp', 'event']) {
-      expect(validateDataset(kind, load(kind)).problems).toEqual([])
+      expect(shapeProblems(kind), `${kind} response shape`).toEqual([])
     }
+  })
+
+  it('still notices when a location field disappears outside an embargo', () => {
+    const stripped = load('camp').map((camp) => {
+      const copy = { ...camp }
+      delete copy.location
+      delete copy.location_string
+      return copy
+    })
+    expect(validateDataset('camp', stripped).problems.length).toBeGreaterThan(0)
   })
 
   /** Not every camp is placed — some register without ever taking a spot. */

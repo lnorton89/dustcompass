@@ -5,8 +5,11 @@ import { geocode } from '../../brc/geocode'
 import type { CityLayout } from '../../brc/layout'
 import type { ArtItem } from '../types'
 
-const layout = JSON.parse(readFileSync('public/data/2025/layout.json', 'utf8')) as CityLayout
-const art = JSON.parse(readFileSync('public/data/2025/art.json', 'utf8')) as ArtItem[]
+import { DATA_YEAR } from '../../config'
+
+const base = `public/data/${DATA_YEAR}`
+const layout = JSON.parse(readFileSync(`${base}/layout.json`, 'utf8')) as CityLayout
+const art = JSON.parse(readFileSync(`${base}/art.json`, 'utf8')) as ArtItem[]
 
 describe('embargo windows', () => {
   it('withholds both before the camp release', () => {

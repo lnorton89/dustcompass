@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { deepLinkUrl, readDeepLink, resolveDeepLink } from '../useDeepLink'
 import { geocode } from '../../brc/geocode'
 import type { CityLayout } from '../../brc/layout'
+import { DATA_YEAR } from '../../config'
 
-const layout = JSON.parse(readFileSync('public/data/2025/layout.json', 'utf8')) as CityLayout
+const layout = JSON.parse(
+  readFileSync(`public/data/${DATA_YEAR}/layout.json`, 'utf8'),
+) as CityLayout
 const BASE = 'https://playa.example/'
 
 describe('deep links', () => {

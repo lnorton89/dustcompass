@@ -7,6 +7,18 @@ on:
     branches: ['**']
   # Lets you publish by hand without pushing.
   workflow_dispatch:
+  # The listings keep moving after the last commit, and nobody is at a laptop
+  # once the event starts. Two things make this necessary rather than tidy:
+  # art locations stay embargoed until Gates open, so on the morning of 30
+  # August the map gains 329 pieces it could not legally show the day before;
+  # and camps add, move and cancel events right through the week.
+  #
+  # 07:15 UTC is 00:15 in Black Rock City, a quarter of an hour after the art
+  # embargo lifts. 19:15 UTC is midday there, which picks up the day's changes
+  # before the evening everyone actually uses this.
+  schedule:
+    - cron: '15 7 * * *'
+    - cron: '15 19 * * *'
 
 # Pages needs these; nothing else in this workflow writes to the repo.
 permissions:

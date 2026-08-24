@@ -4,8 +4,11 @@ import type { CityLayout } from '../layout'
 import { buildCity } from '../city'
 import { cityOutlinePoints, frameFor } from '../frame'
 import { destination, distanceBetween, type Position } from '../geo'
+import { DATA_YEAR } from '../../config'
 
-const layout = JSON.parse(readFileSync('public/data/2025/layout.json', 'utf8')) as CityLayout
+const layout = JSON.parse(
+  readFileSync(`public/data/${DATA_YEAR}/layout.json`, 'utf8'),
+) as CityLayout
 const city = buildCity(layout)
 const points = cityOutlinePoints(city.streets)
 const man = layout.center.geometry.coordinates as Position

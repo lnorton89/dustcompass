@@ -271,4 +271,99 @@ describe('generated service worker', () => {
     expect(await worker.caches.has('dust-compass-live-data')).toBe(true)
     expect(await live.match(dataUrl('layout.json'))).toBeDefined()
   })
+
+  /**
+   * The bug behind #25: `Cache.match(request)` matches the request's full
+   * URL by default, including the query string. Deep links and shared
+   * locations both land at the root as `?poi=`/`?at=` query params rather
+   * than distinct paths, so a warm, fully offline-ready install still sent
+   * every one of them past the precached shell and into the network-first
+   * path below — at best a wasted round trip, at worst a captive portal's
+   * 200 OK login page standing in for the app. Matching by pathname alone,
+   * ahead of the exact-URL check, must return the cached shell for these
+   * with no network attempt at all.
+   */
+  describe('root deep-link navigations (#25)', () => {
+    it('serves the cached shell for a warm ?poi= deep link without touching the network', async () => {
+      const calls = []
+      const worker = loadWorker({
+        fetchImpl: async (req) => {
+          calls.push(typeof req === 'string' ? req : req.url)
+          return new Response('<html>shell</html>', { status: 200 })
+        },
+      })
+      await worker.fireInstall()
+      calls.length = 0 // only the navigation below should be able to add to this
+
+      const response = await worker.fireFetch('/?poi=xyz', { mode: 'navigate' })
+
+      expect(calls).toEqual([])
+      expect(response).toBeDefined()
+      expect(await response.text()).toBe('<html>shell</html>')
+    })
+
+    it('serves the cached shell for a warm ?at= deep link without touching the network', async () => {
+      const calls = []
+      const worker = loadWorker({
+        fetchImpl: async (req) => {
+          calls.push(typeof req === 'string' ? req : req.url)
+          return new Response('<html>shell</html>', { status: 200 })
+        },
+      })
+      await worker.fireInstall()
+      calls.length = 0
+
+      const response = await worker.fireFetch('/?at=some-address', { mode: 'navigate' })
+
+      expect(calls).toEqual([])
+      expect(response).toBeDefined()
+      expect(await response.text()).toBe('<html>shell</html>')
+    })
+
+    it('still falls back to the cached shell when a genuinely distinct page cannot be reached', async () => {
+      // A path outside the precached shell (not just "/") — no fetch mock
+      // ever resolves it, simulating a hung or offline network. The fallback
+      // logic under test doesn't need the real 20s REQUEST_TIMEOUT_MS to
+      // elapse: a rejected fetch promise exercises the same catch-and-fall-
+      // through path a timed-out one would.
+      const worker = loadWorker({
+        fetchImpl: async (req) => {
+          const url = typeof req === 'string' ? req : req.url
+          if (url.endsWith('/some/other/page/')) throw new Error('network down')
+          return new Response('<html>shell</html>', { status: 200 })
+        },
+      })
+      await worker.fireInstall()
+
+      const response = await worker.fireFetch('/some/other/page/', { mode: 'navigate' })
+
+      expect(response).toBeDefined()
+      expect(await response.text()).toBe('<html>shell</html>')
+    })
+
+    it('bounds the network-first attempt for a non-shell navigation with the shared request timeout', async () => {
+      let capturedInit
+      const worker = loadWorker({
+        fetchImpl: async (req, init) => {
+          const url = typeof req === 'string' ? req : req.url
+          if (url.endsWith('/some/other/page/')) {
+            capturedInit = init
+            throw new Error('network down')
+          }
+          return new Response('<html>shell</html>', { status: 200 })
+        },
+      })
+      await worker.fireInstall()
+
+      // A genuinely distinct page still gets the existing network-first
+      // treatment, now bounded by the same REQUEST_TIMEOUT_MS/AbortSignal
+      // .timeout pattern used elsewhere in this file, so a hanging captive-
+      // portal connection can't delay the eventual fallback indefinitely.
+      const response = await worker.fireFetch('/some/other/page/', { mode: 'navigate' })
+
+      expect(capturedInit?.signal).toBeInstanceOf(AbortSignal)
+      expect(response).toBeDefined()
+      expect(await response.text()).toBe('<html>shell</html>')
+    })
+  })
 })

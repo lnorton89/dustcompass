@@ -276,6 +276,25 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
+
+      // The precached shell is keyed by SHELL — a bare pathname, no query
+      // string — but Cache.match(request) matches the request's full URL by
+      // default. Deep links and shared locations both live at the root as
+      // query params (/?poi=<uid>, /?at=<address>), not distinct paths, so
+      // that exact-URL lookup misses them constantly and sends a warm,
+      // fully-offline-ready install to the network for a page it already
+      // has. Matching by pathname alone catches every one of those and
+      // returns the cached shell with no network attempt at all — which
+      // also means a captive portal's 200 OK login page never gets a chance
+      // to stand in for the app on a shared link. Nothing is lost by
+      // skipping the network here: the query string stays in the browser's
+      // own address bar, and the app reads it from window.location once the
+      // cached HTML has loaded and hydrated.
+      if (url.pathname === SHELL) {
+        const shell = await cache.match(SHELL);
+        if (shell) return shell;
+      }
+
       const exact = await cache.match(request);
       if (exact) return exact;
 
@@ -283,12 +302,14 @@ self.addEventListener('fetch', (event) => {
       // precached, so it has to be fetched — but never written back, which is
       // what was poisoning the shell. Falling straight through to SHELL here
       // served the app at /p/<uid>/ with no listing in the URL, so every
-      // shared link opened the bare city once a cache existed.
+      // shared link opened the bare city once a cache existed. Bounded by
+      // REQUEST_TIMEOUT_MS so a captive portal or dead hotspot that never
+      // answers can't hold up the eventual fallback to the cached shell.
       try {
-        const network = await fetch(request);
+        const network = await fetch(request, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
         if (network.ok) return network;
       } catch {
-        /* offline, or the page has gone; fall through */
+        /* offline, timed out, or the page has gone; fall through */
       }
 
       // Offline, a shared listing link still has somewhere to go: the app is

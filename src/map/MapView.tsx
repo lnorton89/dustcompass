@@ -40,6 +40,11 @@ import { assetUrl } from '../config'
 interface Props {
   data: PlayaData
   mode: ThemeMode
+  /**
+   * Label sizes, scaled by the reader's size preference. Unlike the interface,
+   * the map's labels have room to grow into.
+   */
+  labelScale: number
   visible: Set<PoiKind>
   showServices: boolean
   showToilets: boolean
@@ -125,6 +130,7 @@ const INTERACTIVE_LAYER_IDS = [
 export function MapView({
   data,
   mode,
+  labelScale,
   visible,
   showServices,
   showToilets,
@@ -332,12 +338,10 @@ export function MapView({
       }}
       maxPitch={60}
       /*
-       * The credit is not gone, it has moved: it reads in the footnote at the
-       * corner of the map, alongside the non-affiliation line it belongs next
-       * to. MapLibre's own control put a second white pill in the middle of a
-       * phone screen saying almost the same thing, and there is no basemap
-       * here to attribute — the city is drawn from Burning Man's survey, which
-       * is exactly what the footnote now credits.
+       * No attribution control. There is no basemap to attribute — the city is
+       * drawn from the survey, and the survey is credited in the footnote, next
+       * to the non-affiliation line it belongs beside. A second floating pill
+       * saying nearly the same thing sat in the middle of the map on a phone.
        */
       attributionControl={false}
       style={{ position: 'absolute', inset: 0 }}
@@ -404,20 +408,27 @@ export function MapView({
 
       {/* The drawn desert, under everything the survey put on it. */}
       <PlayaScene layout={data.layout} palette={palette} />
-      <CityLayers city={data.city} campOutlines={data.campOutlines} palette={palette} />
+      <CityLayers
+        city={data.city}
+        campOutlines={data.campOutlines}
+        palette={palette}
+        labelScale={labelScale}
+      />
       <RouteLayer from={route?.from} to={route?.to} palette={palette} />
-      <SavedPlacesLayer places={savedPlaces} palette={palette} />
+      <SavedPlacesLayer places={savedPlaces} palette={palette} labelScale={labelScale} />
       <ServiceLayers
         services={data.services}
         toilets={data.toilets}
         showServices={showServices}
         showToilets={showToilets}
         palette={palette}
+        labelScale={labelScale}
       />
       <PoiLayers
         pois={data.pois}
         visible={visible}
         palette={palette}
+        labelScale={labelScale}
         focusPosition={destination?.position ?? selected?.position}
       />
     </MapGL>

@@ -149,3 +149,29 @@ export function arc(
   out.push(polarToPosition(layout, end, radiusFeet))
   return out
 }
+
+/**
+ * How far from the Man a GPS fix can be and still be worth navigating from.
+ *
+ * The trash fence is about 2.5km out and Gerlach is 20 minutes up the road, so
+ * this is generous on purpose — someone on the approach is still arriving. What
+ * it excludes is the person who opens the app at home in another state, whose
+ * fix is real and hundreds of miles away.
+ */
+export const NAVIGABLE_RADIUS_METERS = 20_000
+
+/**
+ * Whether a fix is close enough to route from.
+ *
+ * Without this the app took the fix at face value and drew a line off the edge
+ * of the map, quoting a walk of 157 hours. The honest answer that far out is
+ * not a bearing, it is that you are not there yet — so the distance falls back
+ * to being measured from the Man, which is what the readout says it is doing.
+ */
+export function isNearCity(
+  layout: CityLayout,
+  position: Position,
+  limitMeters = NAVIGABLE_RADIUS_METERS,
+): boolean {
+  return distanceBetween(layout.center.geometry.coordinates as Position, position) <= limitMeters
+}

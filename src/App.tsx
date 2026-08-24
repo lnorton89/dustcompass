@@ -52,12 +52,18 @@ import { useSavedPlaces } from './data/useSavedPlaces'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
 import { travelBetween } from './brc/travel'
-import { bearingToClock, bearingBetween, bearingsMatch } from './brc/geo'
+import { bearingToClock, bearingBetween, bearingsMatch, isNearCity } from './brc/geo'
 import { shareLink } from './ui/share'
 import type { EventItem, Poi, PoiKind, UnplacedListing } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
-import { paletteFor, type PlayaPalette, type ThemeMode } from './map/style'
+import {
+  LABEL_SCALE,
+  paletteFor,
+  type PlayaPalette,
+  type ReadingSize,
+  type ThemeMode,
+} from './map/style'
 import { BRAND } from './brand'
 import { BrandMark } from './ui/BrandMark'
 import { PwaStatus } from './ui/PwaStatus'
@@ -218,10 +224,36 @@ export default function App() {
   // that lands somewhere else — claiming one anyway is exactly the bug this
   // exists to fix.
   const orientationLabel = cityUp ? '12:00 up' : northUp ? 'North up' : 'Free rotation'
+  /**
+   * "I cannot read this" is a real complaint out there and it has nothing to do
+   * with eyesight: full sun, a screen under a week of dust, and reading glasses
+   * that are back at camp. Persisted unkeyed by year — someone who needs bigger
+   * text this August needs it next August too.
+   */
+  const READING_KEY = 'dust-compass:reading-size'
+  const [reading, setReading] = useState<ReadingSize>(() => {
+    try {
+      return localStorage.getItem(READING_KEY) === 'large' ? 'large' : 'normal'
+    } catch {
+      // Private windows and blocked site data both throw.
+      return 'normal'
+    }
+  })
+  const toggleReading = useCallback(() => {
+    setReading((current) => {
+      const next = current === 'large' ? 'normal' : 'large'
+      try {
+        localStorage.setItem(READING_KEY, next)
+      } catch {
+        /* nothing to do — the preference just will not outlive the tab */
+      }
+      return next
+    })
+  }, [])
   // The static <meta name="theme-color"> in layout.tsx only covers first
   // paint; browser/PWA chrome should follow the live theme afterward, the
   // same as everything else on screen does.
-  const theme = useMemo(() => playaTheme(mode), [mode])
+  const theme = useMemo(() => playaTheme(mode, reading), [mode, reading])
   useEffect(() => {
     document.querySelector('meta[name="theme-color"]')?.setAttribute(
       'content',
@@ -493,10 +525,18 @@ export default function App() {
     [data],
   )
 
-  const origin = here ?? (data?.layout.center.geometry.coordinates as Position | undefined)
-  const originLabel = here
+  /**
+   * A fix from four hundred miles away is a real fix and a useless origin: the
+   * route line shot off the edge of the map and the readout offered a walk of
+   * 157 hours. Past the approach to the city the honest answer is not a
+   * bearing, so distance falls back to being measured from the Man — which is
+   * what the readout already says it is doing when there is no fix at all.
+   */
+  const usableFix = here && data && isNearCity(data.layout, here) ? here : undefined
+  const origin = usableFix ?? (data?.layout.center.geometry.coordinates as Position | undefined)
+  const originLabel = usableFix
     ? data
-      ? `you (${reverseGeocode(here, data.layout).label})`
+      ? `you (${reverseGeocode(usableFix, data.layout).label})`
       : 'you'
     : 'the Man'
 
@@ -911,6 +951,7 @@ export default function App() {
               <MapView
                 data={{ ...data, pois: visiblePois }}
                 mode={mode}
+                labelScale={LABEL_SCALE[reading]}
                 visible={kinds}
                 showServices={active.has('services')}
                 showToilets={active.has('toilets')}
@@ -1002,11 +1043,6 @@ export default function App() {
                 }}
               >
                 <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.25 }}>
-                  {/*
-                    * The data credit lives here too, rather than in a second
-                    * floating pill of its own. It is the same sentence's worth
-                    * of small print and it belongs in the same place.
-                    */}
                   City survey &amp; listings: Burning Man Project. {BRAND.disclaimer}
                 </Typography>
               </Box>
@@ -1016,7 +1052,7 @@ export default function App() {
                   address={heading.address}
                   travel={navigation.travel}
                   heading={navigation.clock}
-                  located={Boolean(here)}
+                  located={Boolean(usableFix)}
                   status={location.status}
                   accuracy={location.accuracy}
                   approximate={heading.approximate}
@@ -1269,9 +1305,11 @@ export default function App() {
         palette={palette}
         active={active}
         cityUp={cityUp}
+        reading={reading}
         places={places}
         onToggle={toggleFilter}
         onToggleCityUp={toggleCityUp}
+        onToggleReading={toggleReading}
         onGoToPlace={(place) => {
           setFiltersOpen(false)
           navigateTo(place)

@@ -21,6 +21,7 @@
     "icons": "node scripts/make-icons.mjs",
     "verify:icons": "node scripts/check-icons.mjs",
     "test:a11y": "node scripts/a11y-test.mjs",
+    "test:ui": "node scripts/ui-invariants.mjs",
     "fetch-api": "node scripts/fetch-api.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

@@ -837,6 +837,80 @@ await shared.close()
   await detail.close()
 }
 
+/**
+ * A GPS fix from hundreds of miles away is a real fix and a useless origin.
+ * Taken at face value it drew a route line off the edge of the map and quoted a
+ * walk of 157 hours, so past the approach to the city the app measures from the
+ * Man instead — which is what it already does when there is no fix at all.
+ */
+{
+  const base = new URL(`data/${DATA_YEAR}/`, url).href
+  const reachFrom = async (label, geolocation) => {
+    const ctx = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      geolocation,
+      permissions: ['geolocation'],
+    })
+    const page = await ctx.newPage()
+    const listings = await (await ctx.request.get(`${base}camp.json`)).json()
+    const layout = await (await ctx.request.get(`${base}layout.json`)).json()
+    const man = layout.center.geometry.coordinates
+    const camp = listings.find((entry) => entry.location_string && entry.uid && entry.name)
+
+    await page.goto(new URL(`p/${camp.uid}/`, url).href, { waitUntil: 'load' })
+    await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+    await page.waitForTimeout(3000)
+    // A fresh context gets the first-run screen, and it covers the panel.
+    const firstRun = page.getByRole('button', { name: /Show me the map/ })
+    if (await firstRun.count()) {
+      await firstRun.first().click()
+      await page.waitForTimeout(2000)
+    }
+    // Asking to be taken somewhere is what starts the watch, so the route only
+    // exists after this click. Without it the whole check passes vacuously.
+    await page.getByRole('button', { name: /Take me there/ }).first().click()
+    await page.waitForTimeout(4000)
+
+    const result = await page.evaluate((man) => {
+      const source = window.__map.getSource('route')
+      const data = source && (source._data ?? source.serialize?.().data)
+      const points = []
+      const walk = (node) => {
+        if (Array.isArray(node)) {
+          if (node.length === 2 && typeof node[0] === 'number') points.push(node)
+          else node.forEach(walk)
+        } else if (node && typeof node === 'object') Object.values(node).forEach(walk)
+      }
+      if (data) walk(data)
+      return {
+        points: points.length,
+        reach: points.length
+          ? Math.max(...points.map(([lng, lat]) => Math.hypot(lng - man[0], lat - man[1])))
+          : null,
+        readout: document.body.innerText,
+      }
+    }, man)
+    await ctx.close()
+    assert(result.points > 0, `${label}: a route is drawn at all (${result.points} points)`)
+    return result
+  }
+
+  // A degree is about 111km here, so the whole city and the road in fit inside a
+  // third of one. San Francisco is four degrees away and unmissable.
+  const near = await reachFrom('near fix', { latitude: 40.7772, longitude: -119.1893 })
+  const far = await reachFrom('distant fix', { latitude: 37.7749, longitude: -122.4194 })
+  assert(near.reach < 0.35, `a fix in the city routes from the fix (${near.reach.toFixed(3)}°)`)
+  assert(/toward \d/.test(near.readout), 'a fix in the city gives a bearing to walk')
+  assert(
+    far.reach < 0.35,
+    `a distant fix does not drag the route off the map (${far.reach.toFixed(3)}° from the Man)`,
+  )
+  assert(
+    /from the Man/.test(far.readout),
+    'a distant fix says the distance is measured from the Man',
+  )
+}
+
 console.log(problems.length ? `\n${problems.length} problem(s):\n` + problems.join('\n') : '\nno console or network errors')
 await browser.close()
 process.exit(problems.length || process.exitCode ? 1 : 0)

@@ -1,17 +1,19 @@
 import { useMemo } from 'react'
 import { Layer, Source } from '@vis.gl/react-maplibre'
 import type { SavedPlace } from '../data/useSavedPlaces'
-import type { PlayaPalette } from './style'
+import { labelRamp, type PlayaPalette } from './style'
 
 interface Props {
   places: SavedPlace[]
   palette: PlayaPalette
+  /** How much bigger the reader has asked the map's labels to be drawn. */
+  labelScale: number
 }
 
 export const SAVED_LAYER_ID = 'saved-dot'
 
 /** Saved spots stay labelled at every zoom — finding them is the whole point. */
-export function SavedPlacesLayer({ places, palette }: Props) {
+export function SavedPlacesLayer({ places, palette, labelScale }: Props) {
   const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
     () => ({
       type: 'FeatureCollection',
@@ -46,7 +48,10 @@ export function SavedPlacesLayer({ places, palette }: Props) {
           'text-font': ['Open Sans Regular'],
           // The user's own places. Second only to the landmarks, because on
           // the walk home at 4am this is the label that matters.
-          'text-size': ['interpolate', ['linear'], ['zoom'], 14, 13, 18, 16] as unknown as number,
+          'text-size': labelRamp(labelScale, [
+            [14, 13],
+            [18, 16],
+          ]),
           'text-offset': [0, 1],
           'text-anchor': 'top',
           'text-allow-overlap': false,

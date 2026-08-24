@@ -18,7 +18,7 @@ import CloseIcon from '@mui/icons-material/Close'
 import { alpha } from '@mui/material/styles'
 import type { ReactElement } from 'react'
 import type { SavedPlace } from '../data/useSavedPlaces'
-import type { PlayaPalette } from '../map/style'
+import type { PlayaPalette, ReadingSize } from '../map/style'
 
 export interface FilterOption<T extends string> {
   key: T
@@ -34,9 +34,12 @@ interface Props<T extends string> {
   palette: PlayaPalette
   active: Set<T>
   cityUp: boolean
+  /** Whether the reader has asked for bigger text on the map and in the UI. */
+  reading: ReadingSize
   places: SavedPlace[]
   onToggle: (key: T) => void
   onToggleCityUp: () => void
+  onToggleReading: () => void
   onGoToPlace: (place: SavedPlace) => void
   onRemovePlace: (id: string) => void
   onClose: () => void
@@ -53,9 +56,11 @@ export function FilterSheet<T extends string>({
   palette,
   active,
   cityUp,
+  reading,
   places,
   onToggle,
   onToggleCityUp,
+  onToggleReading,
   onGoToPlace,
   onRemovePlace,
   onClose,
@@ -131,6 +136,18 @@ export function FilterSheet<T extends string>({
         <FormControlLabel
           control={<Switch checked={cityUp} onChange={onToggleCityUp} />}
           label="12:00 points up"
+        />
+      </Box>
+      {/*
+       * The app is used in full sun, through dust, by people whose reading
+       * glasses are back at camp. This moves the whole type scale and the map's
+       * labels together — the interface is no use bigger if the city it is
+       * describing is still 13px.
+       */}
+      <Box>
+        <FormControlLabel
+          control={<Switch checked={reading === 'large'} onChange={onToggleReading} />}
+          label="Bigger text and labels"
         />
       </Box>
 

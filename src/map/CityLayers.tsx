@@ -1,12 +1,14 @@
 import { Layer, Source } from '@vis.gl/react-maplibre'
 import type { CityGeometry } from '../brc/city'
-import type { PlayaPalette } from './style'
+import { labelRamp, type PlayaPalette } from './style'
 
 interface Props {
   city: CityGeometry
   /** Surveyed camp block footprints. */
   campOutlines: GeoJSON.FeatureCollection
   palette: PlayaPalette
+  /** How much bigger the reader has asked the map's labels to be drawn. */
+  labelScale: number
 }
 
 /** The Man and the portals: labelled dots, and a tap lands on the dot. */
@@ -16,7 +18,7 @@ export const LANDMARK_LAYER_ID = 'landmark-dot'
  * The city itself: fence, plazas, streets, landmarks. All of it comes from
  * client-generated GeoJSON, so there is nothing to fetch and nothing to cache.
  */
-export function CityLayers({ city, campOutlines, palette }: Props) {
+export function CityLayers({ city, campOutlines, palette, labelScale }: Props) {
   return (
     <>
       <Source id="fence" type="geojson" data={city.fence}>
@@ -101,7 +103,10 @@ export function CityLayers({ city, campOutlines, palette }: Props) {
             'symbol-placement': 'line',
             'text-field': ['get', 'name'],
             'text-font': ['Open Sans Regular'],
-            'text-size': ['interpolate', ['linear'], ['zoom'], 12.75, 10, 15, 13] as unknown as number,
+            'text-size': labelRamp(labelScale, [
+              [12.75, 10],
+              [15, 13],
+            ]),
             'text-letter-spacing': 0.08,
             'text-max-angle': 30,
           }}
@@ -141,7 +146,10 @@ export function CityLayers({ city, campOutlines, palette }: Props) {
             'text-font': ['Open Sans Regular'],
             // The city's fixed points, and the ones everybody navigates by.
             // Placed before every other label layer, so they win collisions.
-            'text-size': ['interpolate', ['linear'], ['zoom'], 13, 13, 17, 17] as unknown as number,
+            'text-size': labelRamp(labelScale, [
+              [13, 13],
+              [17, 17],
+            ]),
             'text-offset': [0, 1.1],
             'text-anchor': 'top',
           }}

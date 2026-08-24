@@ -27,15 +27,16 @@ import {
 const YEAR = process.argv[2] ?? String(new Date().getFullYear())
 // BMORG_API_KEY is accepted too, for checkouts set up before the rename.
 const KEY = process.env.BURNING_MAN_API_KEY ?? process.env.BMORG_API_KEY
-const BASE = process.env.BMORG_API_BASE ?? 'https://api.burningman.org/api'
+const BASE = process.env.BURNING_MAN_API_BASE ?? process.env.BMORG_API_BASE ?? 'https://api.burningman.org/api'
 const OUT = resolve(import.meta.dirname, '..', 'public', 'data', YEAR)
 const RELEASE = releaseForYear(YEAR)
 
 if (!KEY) {
   console.error(
-    'BMORG_API_KEY is not set.\n' +
-      'Request a key at https://api.burningman.org/api-key-request/, then:\n' +
-      '  export BMORG_API_KEY=your-key-here',
+    'BURNING_MAN_API_KEY is not set.\n' +
+      'Request a key at https://api.burningman.org/api-key-request/, then put\n' +
+      'it in .env, which is git-ignored, or export it:\n' +
+      '  export BURNING_MAN_API_KEY=your-key-here',
   )
   process.exit(2)
 }

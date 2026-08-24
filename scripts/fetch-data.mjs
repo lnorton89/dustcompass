@@ -110,4 +110,4 @@ await writeFile(
 const files = await readdir(OUT)
 console.log(`\nWrote public/data/${YEAR}: ${files.join(', ')}`)
 console.log(`Wrote ${GLYPH_RANGES.length} glyph ranges to public/fonts/Open Sans Regular`)
-console.log('Fetch listings next: `npm run fetch-api -- YEAR` with BMORG_API_KEY set.')
+console.log('Fetch listings next: `npm run fetch-api -- YEAR` with BURNING_MAN_API_KEY set.')

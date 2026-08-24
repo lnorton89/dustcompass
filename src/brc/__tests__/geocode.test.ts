@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { CityLayout } from '../layout'
-import { bearingToClock, clockToBearing, distanceBetween, minutesToClock } from '../geo'
-import { geocode, parseAddress, reverseGeocode } from '../geocode'
+import { bearingToClock, clockToBearing, distanceBetween, minutesToClock, polarToPosition } from '../geo'
+import { geocode, intersectionExists, parseAddress, reverseGeocode } from '../geocode'
 import { DATA_YEAR } from '../../config'
 
 const base = `public/data/${DATA_YEAR}`
@@ -71,9 +71,18 @@ describe('address parsing', () => {
 
   it('accepts full street names', () => {
     expect(geocode('7:30 & Esplanade', layout)?.label).toBe('Esplanade & 7:30')
-    // Whatever this year calls them, every published name resolves to its ref.
+    // Whatever this year calls them, every published name resolves to its
+    // ref — checked at a clock the survey actually carries that street and a
+    // reaching radial at, not an arbitrary "4:00" that may sit in a gap or
+    // outrun every radial (issue #52: streets have real gaps and not every
+    // ring reaches every clock, so a blanket clock here would only prove the
+    // pre-fix bug, not the name lookup this test is actually about).
     for (const street of layout.cStreets) {
-      expect(geocode(`${street.name} & 4:00`, layout)?.street).toBe(street.ref)
+      const clock = layout.tStreets
+        .flatMap((radial) => radial.refs)
+        .find((ref) => intersectionExists(layout, ref, street.ref))
+      if (!clock) continue
+      expect(geocode(`${street.name} & ${clock}`, layout)?.street).toBe(street.ref)
     }
   })
 
@@ -191,5 +200,98 @@ describe('reverse geocoding', () => {
     const back = reverseGeocode(middle.position, layout)
     expect(back.street).toBeUndefined()
     expect(back.label).toMatch(/^12:00 & \d+'$/)
+  })
+})
+
+/**
+ * Issue #52: `parseAddress`/`reverseGeocode` used to check only that a named
+ * annular street existed somewhere, never whether its `segments` actually
+ * covered the requested clock, or whether a radial reached out that far at
+ * all. A fixture layout with a real gap and a short radial is what exercises
+ * that — a layout where every street happens to run the full 360° (or every
+ * radial reaches every ring) would pass both the old, buggy code and the fix
+ * alike, and prove nothing.
+ */
+describe('street/radial coverage (issue #52)', () => {
+  const COVERAGE_LAYOUT: CityLayout = {
+    center: {
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'Point', coordinates: [-119.2, 40.78] },
+    },
+    bearing: 45,
+    fence_distance: 10560,
+    road_width: 40,
+    cStreets: [
+      { ref: 'esplanade', name: 'Esplanade', distance: 2500, segments: [['2:00', '10:00']] },
+      // A gap from 5:30 to 8:00, the way Center Camp breaks a real ring.
+      { ref: 'c', name: 'C', distance: 3000, segments: [['2:00', '5:30'], ['8:00', '10:00']] },
+      // Only reachable where a radial actually runs that far out.
+      { ref: 'k', name: 'K', distance: 5000, segments: [['2:00', '10:00']] },
+    ],
+    tStreets: [
+      // Reaches all the way to K.
+      { refs: ['3:00'], segments: [[0, 'k']] },
+      // Stops at C — never reaches K.
+      { refs: ['5:00'], segments: [[0, 'c']] },
+      // 9:00 has no surveyed radial in this fixture at all.
+    ],
+    plazas: [],
+    portals: [],
+  }
+
+  describe('intersectionExists', () => {
+    it('is true for a clock inside a covered segment with a reaching radial', () => {
+      expect(intersectionExists(COVERAGE_LAYOUT, '3:00', 'esplanade')).toBe(true)
+      expect(intersectionExists(COVERAGE_LAYOUT, '5:00', 'c')).toBe(true)
+    })
+    it('is false for a clock that sits in an annular gap', () => {
+      expect(intersectionExists(COVERAGE_LAYOUT, '6:00', 'c')).toBe(false)
+    })
+    it('is false when no radial is surveyed at that clock at all', () => {
+      expect(intersectionExists(COVERAGE_LAYOUT, '9:00', 'c')).toBe(false)
+    })
+    it('is false when the radial stops short of the requested ring', () => {
+      expect(intersectionExists(COVERAGE_LAYOUT, '5:00', 'k')).toBe(false)
+    })
+  })
+
+  describe('parseAddress / geocode', () => {
+    it('does not resolve an annular street outside its surveyed segments', () => {
+      expect(parseAddress('6:00 & C', COVERAGE_LAYOUT)).toBeUndefined()
+      expect(parseAddress('C & 6:00', COVERAGE_LAYOUT)).toBeUndefined()
+    })
+    it('does not invent an intersection at a clock with no surveyed radial', () => {
+      expect(parseAddress('9:00 & C', COVERAGE_LAYOUT)).toBeUndefined()
+    })
+    it('does not let a short radial reach an outer ring it never touches', () => {
+      expect(parseAddress('5:00 & K', COVERAGE_LAYOUT)).toBeUndefined()
+    })
+    it('still resolves a real, covered intersection', () => {
+      expect(parseAddress('3:00 & K', COVERAGE_LAYOUT)).toEqual({
+        clock: '3:00',
+        distanceFeet: 5000,
+        street: 'k',
+        label: 'K & 3:00',
+      })
+      expect(geocode('K & 3:00', COVERAGE_LAYOUT)?.street).toBe('k')
+    })
+  })
+
+  describe('reverseGeocode', () => {
+    it('does not label a point in a missing segment as that street', () => {
+      const pos = polarToPosition(COVERAGE_LAYOUT, '6:00', 3000)
+      expect(reverseGeocode(pos, COVERAGE_LAYOUT).street).toBeUndefined()
+    })
+    it('does not label a point as on a ring no radial reaches at that clock', () => {
+      const pos = polarToPosition(COVERAGE_LAYOUT, '5:00', 5000)
+      expect(reverseGeocode(pos, COVERAGE_LAYOUT).street).toBeUndefined()
+    })
+    it('still snaps to the street in a genuinely covered segment', () => {
+      const pos = polarToPosition(COVERAGE_LAYOUT, '3:00', 3000)
+      const result = reverseGeocode(pos, COVERAGE_LAYOUT)
+      expect(result.street).toBe('c')
+      expect(result.label).toBe('C & 3:00')
+    })
   })
 })

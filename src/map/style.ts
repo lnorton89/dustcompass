@@ -14,6 +14,8 @@ export interface PlayaPalette {
   streetCasing: string
   plaza: string
   fence: string
+  /** The gate road's crossing point — distinct from ordinary streets, so it doesn't read as one. */
+  entranceRoad: string
   label: string
   labelHalo: string
   art: string
@@ -36,6 +38,7 @@ export const DARK: PlayaPalette = {
   streetCasing: '#302c27',
   plaza: '#39342d',
   fence: '#9a8055',
+  entranceRoad: '#d9a44a',
   label: '#e8e0d0',
   labelHalo: '#12100e',
   art: '#ff8a4c',
@@ -63,6 +66,7 @@ export const NIGHT: PlayaPalette = {
   streetCasing: '#1f0505',
   plaza: '#2a0808',
   fence: '#7a2020',
+  entranceRoad: '#b34747',
   label: '#ff6b6b',
   labelHalo: '#0a0000',
   art: '#ff4d4d',
@@ -85,6 +89,7 @@ export const LIGHT: PlayaPalette = {
   streetCasing: '#c9bda2',
   plaza: '#f2ecdd',
   fence: '#9a7f4e',
+  entranceRoad: '#a8722a',
   label: '#3a332a',
   labelHalo: '#f5f0e4',
   art: '#c2410c',

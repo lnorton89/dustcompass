@@ -684,11 +684,18 @@ export default function App() {
                 data-testid="api-disclaimer"
                 sx={{
                   position: 'absolute',
-                  // It shares the bottom-left corner with the scale bar and,
-                  // on a phone, with whatever the screen keeps down there.
+                  /*
+                   * On a phone this goes to the top. The bottom of a phone is
+                   * where the bar, the navigation readout and the system
+                   * gesture area all live, and a footnote competing for that
+                   * space was pushing the thing people actually read — where
+                   * they are heading and how far — off the screen. There is
+                   * nothing at the top of the map but map.
+                   */
                   left: 'calc(8px + var(--safe-left))',
+                  top: { xs: 'calc(8px + var(--safe-top))', sm: 'auto' },
                   bottom: {
-                    xs: `calc(${heading ? 172 : 72}px + var(--safe-bottom))`,
+                    xs: 'auto',
                     sm: `calc(${heading ? 112 : 34}px + var(--safe-bottom))`,
                   },
                   zIndex: 2,
@@ -760,7 +767,9 @@ export default function App() {
                   elevation={0}
                   sx={{
                     position: 'absolute',
-                    top: 8,
+                    // Below the non-affiliation footnote on a phone, which now
+                    // occupies the top-left corner.
+                    top: { xs: 'calc(56px + var(--safe-top))', sm: 8 },
                     left: 8,
                     right: { xs: 8, sm: 'auto' },
                     maxWidth: { sm: 400 },

@@ -4,7 +4,6 @@ import {
   Map as MapGL,
   NavigationControl,
   Marker,
-  ScaleControl,
   type MapLayerMouseEvent,
   type MapRef,
 } from '@vis.gl/react-maplibre'
@@ -226,7 +225,6 @@ export function MapView({
         positionOptions={{ enableHighAccuracy: true }}
         onGeolocate={(event) => onLocate([event.coords.longitude, event.coords.latitude])}
       />
-      <ScaleControl position="bottom-left" unit="imperial" />
       {pin && (
         <Marker longitude={pin.position[0]} latitude={pin.position[1]} anchor="bottom">
           <div

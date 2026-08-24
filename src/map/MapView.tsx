@@ -126,21 +126,43 @@ export function MapView({
   )
 
   /**
-   * Everything sharing each point, by the same key the dots are drawn by — and
-   * over the same listings, so the list a tap opens holds exactly what the map
-   * is showing. Counting hidden kinds here offered the reader a camp they had
-   * just filtered out, under a dot with no count on it.
+   * Everything sharing each point, over exactly what the map is drawing.
+   *
+   * One source of truth for both jobs: the dots read their counts from this,
+   * and a tap reads its list from it, so the number on a dot is a promise the
+   * list keeps. Computing it twice let the two drift — a dot with no count on
+   * it opened a list of two, because one side counted a filtered-out listing.
+   *
+   * Civic places belong in it too. A camp addressed "3:00 Portal" geocodes to
+   * the portal's own surveyed point, exactly, so no rule about which is nearer
+   * the thumb can separate them — SonicBoom Saloon could not be opened at all,
+   * because the portal it shares a pixel with always won.
    */
   const stacks = useMemo(() => {
+    const drawn = (poi: Poi) => {
+      if (poi.kind === 'landmark') return true
+      if (poi.kind === 'service') return poi.category === 'toilet' ? showToilets : showServices
+      return visible.has(poi.kind)
+    }
     const out = new globalThis.Map<string, Poi[]>()
-    for (const poi of data.pois.filter((candidate) => visible.has(candidate.kind))) {
+    for (const poi of data.pois.filter(drawn)) {
       const key = stackKey(poi.position)
       const found = out.get(key)
       if (found) found.push(poi)
       else out.set(key, [poi])
     }
     return out
-  }, [data.pois, visible])
+  }, [data.pois, showServices, showToilets, visible])
+
+  /** Of everything at this point, the list — or nothing when it stands alone. */
+  const sharedWith = useCallback(
+    (poi: Poi | undefined) => {
+      if (!poi) return undefined
+      const sharing = stacks.get(stackKey(poi.position))
+      return sharing && sharing.length > 1 ? sharing : undefined
+    },
+    [stacks],
+  )
 
   // Frame the whole city rather than guessing a zoom. A fixed zoom that suits a
   // desktop window crops the city badly on a tall phone screen.
@@ -183,7 +205,9 @@ export function MapView({
       // are small, and a thumb is not, so they are given a little room.
       const civic = listed(nearestIn(CIVIC_LAYER_IDS, DOT_HIT_RADIUS))
       if (civic) {
-        onSelect(civic)
+        const sharing = sharedWith(civic)
+        if (sharing) onSelectStack(sharing)
+        else onSelect(civic)
         return
       }
 
@@ -203,12 +227,12 @@ export function MapView({
       const chosen = onDot ?? nearestIn([POI_LABEL_LAYER_ID], LABEL_HIT_RADIUS)
       if (chosen?.properties?.uid) {
         const poi = poiIndex.get(String(chosen.properties.uid))
-        // Whichever of the nine the renderer happened to hand back was the one
-        // the reader got, and the other eight were unreachable — the map had no
+        // Whichever of the six the renderer happened to hand back was the one
+        // the reader got, and the other five were unreachable — the map had no
         // way of admitting they existed. Hand over the whole point instead and
         // let them say which one they meant.
-        const sharing = poi ? (stacks.get(stackKey(poi.position)) ?? [poi]) : []
-        if (sharing.length > 1) {
+        const sharing = sharedWith(poi)
+        if (sharing) {
           onSelectStack(sharing)
           return
         }
@@ -221,7 +245,7 @@ export function MapView({
       onProbe(reverseGeocode(position, data.layout).label, position)
       onSelect(undefined)
     },
-    [data.layout, onProbe, onSelect, onSelectPlace, onSelectStack, poiIndex, stacks],
+    [data.layout, onProbe, onSelect, onSelectPlace, onSelectStack, poiIndex, sharedWith],
   )
 
   return (
@@ -335,6 +359,7 @@ export function MapView({
       <PoiLayers
         pois={data.pois}
         visible={visible}
+        stacks={stacks}
         palette={palette}
         labelScale={labelScale}
         focusPosition={destination?.position ?? selected?.position}

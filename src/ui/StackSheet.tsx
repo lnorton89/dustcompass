@@ -61,7 +61,7 @@ export function StackSheet({ stack, onChoose, onClose, compact }: Props) {
             <Box>
               <Typography variant="h6">{address || 'This spot'}</Typography>
               <Typography variant="body2" color="text.secondary">
-                {stack.length} listings share this address
+                {stack.length} places share this address
               </Typography>
             </Box>
             <IconButton onClick={onClose} aria-label="Close" edge="end">
@@ -70,13 +70,16 @@ export function StackSheet({ stack, onChoose, onClose, compact }: Props) {
           </Stack>
 
           {/*
-            * The pin is the intersection, not the plot. Saying so here is the
-            * same caveat the detail panel gives, at the moment it explains why
-            * there is a list at all rather than one place.
+            * The pin is the intersection, not the plot — but only for the ones
+            * placed from an address. A surveyed civic place shares the pixel
+            * because the pixel is genuinely where it is, and telling the reader
+            * their portal is approximate would be the opposite of true.
             */}
-          <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 1 }}>
-            The pin marks the address, not the plot — these are spread along it.
-          </Typography>
+          {stack.some((poi) => poi.positionSource === 'address') && (
+            <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 1 }}>
+              The pin marks the address, not the plot — camps are spread along it.
+            </Typography>
+          )}
 
           <List sx={{ mt: 1 }}>
             {stack.map((poi) => (

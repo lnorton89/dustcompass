@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canConfirmArrival, locationWatchHasFailed } from '../App'
+import { canConfirmArrival, liveAddressMessage, locationWatchHasFailed } from '../App'
 
 /**
  * #49: `origin` (and so `navigation.travel.meters`) falls back to the Man's
@@ -48,5 +48,20 @@ describe('locationWatchHasFailed (#56)', () => {
     expect(locationWatchHasFailed('idle')).toBe(false)
     expect(locationWatchHasFailed('locating')).toBe(false)
     expect(locationWatchHasFailed('tracking')).toBe(false)
+  })
+})
+
+/**
+ * #62: the live-address snackbar's own text, tested in isolation so a lost
+ * fix mid-display (walking out of GPS range, the watch stopping) is
+ * provably handled without needing to drive App's whole render tree.
+ */
+describe('liveAddressMessage (#62)', () => {
+  it('reports the address when one is available', () => {
+    expect(liveAddressMessage('6:30 & B')).toBe('You are near 6:30 & B')
+  })
+
+  it('falls back to a finding-you message rather than freezing on stale text', () => {
+    expect(liveAddressMessage(undefined)).toBe('Finding you…')
   })
 })

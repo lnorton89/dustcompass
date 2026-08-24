@@ -82,6 +82,8 @@ interface Props {
    * watch isn't producing a usable fix, in which case no marker is drawn.
    */
   userLocation?: { position: Position; accuracy?: number }
+  /** Reads out the current playa address when the live-location marker is tapped (#62). */
+  onLocationClick?: () => void
   /** A dropped or shared location to mark, if any. */
   pin?: { position: Position; address: string }
   /** Fires when the pin marker itself is tapped, to reopen its actions. */
@@ -161,6 +163,7 @@ export function MapView({
   onProbe,
   onLocate,
   userLocation,
+  onLocationClick,
   pin,
   onPinClick,
   initialTarget,
@@ -540,6 +543,7 @@ export function MapView({
           position={userLocation.position}
           accuracy={userLocation.accuracy}
           palette={palette}
+          onClick={onLocationClick}
         />
       )}
 

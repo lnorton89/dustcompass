@@ -1011,6 +1011,14 @@ await shared.close()
     'the marker moves on screen as the shared watch reports a new position (#59)',
   )
 
+  // #62: tapping the live-location marker is the "where am I?" action —
+  // reads out the same shared fix's playa address without opening
+  // navigation or starting a second watch.
+  await marker.first().click()
+  await page.waitForTimeout(500)
+  const readout = page.getByText(/^You are near /)
+  assert((await readout.count()) > 0, 'tapping the live-location marker shows the current playa address (#62)')
+
   await ctx.close()
 }
 

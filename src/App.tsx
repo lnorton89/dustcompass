@@ -207,6 +207,17 @@ export function locationWatchHasFailed(status: LocationStatus): boolean {
   return status === 'denied' || status === 'unavailable'
 }
 
+/**
+ * What the live-address snackbar says (#62). A stale/lost fix while it's
+ * open falls back to saying so plainly rather than freezing on the last
+ * address it read — `liveAddressLabel` already goes undefined the instant
+ * `usableFix` does, on the same terms as everywhere else that reads it.
+ * Exported for a focused unit test.
+ */
+export function liveAddressMessage(label: string | undefined): string {
+  return label ? `You are near ${label}` : 'Finding you…'
+}
+
 export function canConfirmArrival(
   travelMeters: number,
   hasUsableFix: boolean,
@@ -316,6 +327,11 @@ export default function App() {
   // event's own description (issue #20).
   const [selectedEvent, setSelectedEvent] = useState<EventItem>()
   const [probe, setProbe] = useState<string>()
+  // Set from tapping the live-location marker (#62), rather than stashing a
+  // frozen string into `probe` — computing the snackbar's text fresh on
+  // every render while this stays true is what lets "You are near ..." keep
+  // tracking the shared GPS watch instead of freezing at tap time.
+  const [showingLiveAddress, setShowingLiveAddress] = useState(false)
   const [deletedPlace, setDeletedPlace] = useState<(typeof places)[number]>()
   // The map's own locate control and the "take me there" flow feed the same
   // watch, so a heading stays live however it was started, only one
@@ -618,6 +634,11 @@ export default function App() {
       ? `you (${reverseGeocode(usableFix, data.layout).label})`
       : 'you'
     : 'the Man'
+  // #62: the same reverse-geocode call originLabel already makes, exposed on
+  // its own so the live-address snackbar can say "You are near ..." without
+  // the "you (...)" framing that reads fine inline in a sentence but not as
+  // a standalone answer to "where am I".
+  const liveAddressLabel = usableFix && data ? reverseGeocode(usableFix, data.layout).label : undefined
 
   const navigation = useMemo(() => {
     if (!heading || !origin || !data) return undefined
@@ -1067,6 +1088,12 @@ export default function App() {
                 // `isNearCity()` has rejected never draws a marker
                 // somewhere off this map (#59).
                 userLocation={usableFix ? { position: usableFix, accuracy: location.accuracy } : undefined}
+                // #62: the survey has unusually strong reverse-geocoder math
+                // already; this is what puts it within reach without opening
+                // navigation at all. `showingLiveAddress` (not a frozen
+                // string in `probe`) is what makes the snackbar's own text
+                // keep tracking the shared watch while it stays open.
+                onLocationClick={usableFix ? () => setShowingLiveAddress(true) : undefined}
                 savedPlaces={places}
                 onSelectPlace={(id) => {
                   const place = places.find((p) => p.id === id)
@@ -1473,10 +1500,17 @@ export default function App() {
       )}
 
       <Snackbar
-        open={Boolean(probe)}
+        open={Boolean(probe) || showingLiveAddress}
         autoHideDuration={6000}
-        onClose={() => setProbe(undefined)}
-        message={probe}
+        onClose={() => {
+          setProbe(undefined)
+          setShowingLiveAddress(false)
+        }}
+        // Out-of-city fixes never reach here at all — the marker this opens
+        // from only exists for `usableFix`, and losing the fix mid-display
+        // (walking out of GPS range, the watch stopping) falls back to
+        // saying so plainly rather than freezing on the last address.
+        message={showingLiveAddress ? liveAddressMessage(liveAddressLabel) : probe}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         action={
           deletedPlace && probe === `Removed “${deletedPlace.name}”` ? (

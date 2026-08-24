@@ -84,6 +84,15 @@ if (await embargoNotice.count()) {
   // component happens to draw it. It used to be a MUI Alert and is now a plain
   // themed surface, because `severity="info"` painted a saturated blue
   // billboard across an app made of ember, teal and dust.
+  // A modal marks the rest of the app aria-hidden, and getByRole skips hidden
+  // subtrees while getByText does not — so if the explainer is up, the notice's
+  // text matches and its button is unreachable. Clear the explainer first
+  // rather than assuming the init script suppressed it.
+  const explainer = page.getByRole('button', { name: /Show me the map/i })
+  if (await explainer.count()) {
+    await explainer.click()
+    await page.waitForTimeout(500)
+  }
   await page.getByRole('button', { name: 'Dismiss' }).click()
   await page.waitForTimeout(400)
   await page.reload({ waitUntil: 'load' })

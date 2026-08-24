@@ -41,6 +41,7 @@ const fail = (label, detail) => {
   console.log(`FAIL  ${label}`)
   if (detail) console.log(`        ${detail}`)
 }
+const skip = (label) => console.log(`SKIP  ${label}`)
 
 const browser = await chromium.launch({
   ...(CHROME ? { executablePath: CHROME } : {}),
@@ -158,9 +159,17 @@ for (const viewport of VIEWPORTS) {
 
 {
   const { context, page } = await open({ name: '375', width: 375, height: 812 })
-  const at = await page.evaluate(() => {
+  const result = await page.evaluate(() => {
     const map = window.__map
-    if (!map) return undefined
+    // `window.__map` is a test-only hook (see MapView.tsx), deliberately
+    // built only into the `NEXT_PUBLIC_E2E=1` build and never the real
+    // production one — this check needs live access to the map instance to
+    // find a tappable patch of open playa, which a production build has no
+    // way to offer. That is a property of the artifact under test, not a
+    // real UI defect, so it is reported distinctly from an actual failure
+    // rather than folded into the same "could not find open playa" case a
+    // genuinely broken map would also produce.
+    if (!map) return { ok: false, reason: 'no-map-handle' }
     const layers = ['poi-dot', 'poi-cluster', 'poi-label', 'saved-dot', 'toilet-dot', 'service-dot'].filter(
       (id) => map.getLayer(id),
     )
@@ -180,14 +189,17 @@ for (const viewport of VIEWPORTS) {
           [[candidate.x - 14, candidate.y - 14], [candidate.x + 14, candidate.y + 14]],
           { layers },
         )
-        if (hit.length === 0) return candidate
+        if (hit.length === 0) return { ok: true, x: candidate.x, y: candidate.y }
       }
     }
-    return undefined
+    return { ok: false, reason: 'not-found' }
   })
-  if (!at) {
+  if (!result.ok && result.reason === 'no-map-handle') {
+    skip("dropped-pin marker hit target: needs the E2E build's window.__map, not exposed here")
+  } else if (!result.ok) {
     fail('dropped-pin marker: could not find open playa to tap')
   } else {
+    const at = { x: result.x, y: result.y }
     await page.locator('canvas').click({ position: at, force: true })
     await page.waitForTimeout(700)
     const pinBox = await page.evaluate(() => {

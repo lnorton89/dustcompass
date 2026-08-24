@@ -167,14 +167,24 @@ jobs:
       # `steps.start-server.outcome` alone is not enough here the way it was
       # for the first round of tests above: a custom `if:` replaces the
       # default `success()` gate rather than adding to it, so without also
-      # naming `build-production` these four would still attempt to run
-      # against a stale or half-written `out/` if the production build
-      # itself failed — testing (and possibly passing against) exactly the
-      # build issue #68 says must never reach Pages untested.
-      - name: Smoke tests (production build — tested artifact)
-        if: steps.start-server.outcome == 'success' && steps.build-production.outcome == 'success'
-        run: npm run test:smoke "http://127.0.0.1:4173/${{ github.event.repository.name }}/"
-
+      # naming `build-production` these would still attempt to run against a
+      # stale or half-written `out/` if the production build itself failed —
+      # testing (and possibly passing against) exactly the build issue #68
+      # says must never reach Pages untested.
+      #
+      # `test:smoke` does not run again here. `window.__map` — the raw
+      # MapLibre handle nearly every one of its scenarios drives the map
+      # through directly — is deliberately built only into the
+      # `NEXT_PUBLIC_E2E=1` build above and never the real production one
+      # (see MapView.tsx); against this build it can only time out waiting
+      # for a handle that will never exist, not report anything about the
+      # artifact itself. That first run above, moments earlier against the
+      # same source with the one addition of that handle, is the genuine
+      # coverage; `test:ui`'s one check with the same dependency degrades to
+      # a SKIP here instead (see ui-invariants.mjs) rather than a guaranteed,
+      # meaningless failure, and its other checks — along with a11y and
+      # offline, neither of which ever needed the handle — still run for
+      # real against this exact production `out/`.
       - name: Accessibility tests (production build — tested artifact)
         if: steps.start-server.outcome == 'success' && steps.build-production.outcome == 'success'
         run: npm run test:a11y "http://127.0.0.1:4173/${{ github.event.repository.name }}/"

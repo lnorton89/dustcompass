@@ -40,6 +40,7 @@ import { SERVICE_LAYER_ID, ServiceLayers, TOILET_LAYER_ID } from './ServiceLayer
 import { pickByPriority } from './pick'
 import { baseStyle, paletteFor, type ThemeMode } from './style'
 import { FocusMarker } from './FocusMarker'
+import { UserLocationMarker } from './UserLocationMarker'
 import { PlayaScene } from './PlayaScene'
 import { assetUrl } from '../config'
 
@@ -75,6 +76,12 @@ interface Props {
   onProbe: (address: string, position: Position) => void
   /** Fires when the map's locate control is pressed. */
   onLocate: () => void
+  /**
+   * The shared GPS watch's current fix (#59) — the same one navigation math
+   * already uses, not a second independent tracker. `undefined` whenever the
+   * watch isn't producing a usable fix, in which case no marker is drawn.
+   */
+  userLocation?: { position: Position; accuracy?: number }
   /** A dropped or shared location to mark, if any. */
   pin?: { position: Position; address: string }
   /** Fires when the pin marker itself is tapped, to reopen its actions. */
@@ -153,6 +160,7 @@ export function MapView({
   onSelectStack,
   onProbe,
   onLocate,
+  userLocation,
   pin,
   onPinClick,
   initialTarget,
@@ -524,6 +532,13 @@ export function MapView({
           address={destination.address}
           navigating
           approximate={destination.approximate}
+          palette={palette}
+        />
+      )}
+      {userLocation && (
+        <UserLocationMarker
+          position={userLocation.position}
+          accuracy={userLocation.accuracy}
           palette={palette}
         />
       )}

@@ -27,6 +27,8 @@ export interface PlayaPalette {
   /** The Temple and other named deep-playa reference points — see ServiceCategory's 'landmark'. */
   landmark: string
   saved: string
+  /** The live current-location marker (#59) — deliberately not `saved`'s colour, which already means something else on the same map. */
+  location: string
 }
 
 export const DARK: PlayaPalette = {
@@ -51,6 +53,7 @@ export const DARK: PlayaPalette = {
   civic: '#cbb994',
   landmark: '#a78bfa',
   saved: '#facc15',
+  location: '#38bdf8',
 }
 
 /**
@@ -81,7 +84,11 @@ export const NIGHT: PlayaPalette = {
   // Its own shade of the same night-mode red, not a different hue — see the
   // file comment above on why every colour here stays on one low-luminance red.
   landmark: '#cc6666',
+  // The most saturated red in the palette: this is a live, moving indicator
+  // rather than static chrome, and it needs to read as "you" at a glance
+  // among everything else that stays on the same hue.
   saved: '#ff9b9b',
+  location: '#ff3b3b',
 }
 
 export const LIGHT: PlayaPalette = {
@@ -106,6 +113,7 @@ export const LIGHT: PlayaPalette = {
   civic: '#7a6a45',
   landmark: '#6d28d9',
   saved: '#a16207',
+  location: '#0284c7',
 }
 
 /**

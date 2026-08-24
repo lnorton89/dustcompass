@@ -1056,6 +1056,11 @@ export default function App() {
                 // a fix started this way keeps running for the rest of the
                 // session.
                 onLocate={() => acquireLocation('map')}
+                // The same usable fix navigation math and the distance
+                // readout already use — not `here` directly, so a fix
+                // `isNearCity()` has rejected never draws a marker
+                // somewhere off this map (#59).
+                userLocation={usableFix ? { position: usableFix, accuracy: location.accuracy } : undefined}
                 savedPlaces={places}
                 onSelectPlace={(id) => {
                   const place = places.find((p) => p.id === id)

@@ -966,6 +966,54 @@ await shared.close()
   )
 }
 
+/**
+ * #59: the shared GPS watch already drives navigation math and the route
+ * line; without its own marker, the map had no visible "you are here" at
+ * all until MapLibre's own one-shot locate control was pressed separately —
+ * and even then only a frozen dot, since Dust Compass runs exactly one
+ * watch rather than a second continuous MapLibre tracker.
+ */
+{
+  const base = new URL(`data/${DATA_YEAR}/`, url).href
+  const ctx = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    geolocation: { latitude: 40.7772, longitude: -119.1893 },
+    permissions: ['geolocation'],
+  })
+  const page = await ctx.newPage()
+  const listings = await (await ctx.request.get(`${base}camp.json`)).json()
+  const camp = listings.find((entry) => entry.location_string && entry.uid && entry.name)
+
+  await page.goto(new URL(`p/${camp.uid}/`, url).href, { waitUntil: 'load' })
+  await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+  await page.waitForTimeout(3000)
+  const firstRun = page.getByRole('button', { name: /Show me the map/ })
+  if (await firstRun.count()) {
+    await firstRun.first().click()
+    await page.waitForTimeout(2000)
+  }
+  // Asking to be taken somewhere is what starts the shared watch.
+  await page.getByRole('button', { name: /Take me there/ }).first().click()
+  await page.waitForTimeout(4000)
+
+  const marker = page.getByTestId('user-location-marker')
+  assert((await marker.count()) > 0, 'a live current-location marker appears once navigation starts (#59)')
+
+  const before = await marker.first().boundingBox()
+  // Move the mocked fix a few hundred metres north and give the shared
+  // watch a chance to report it.
+  await ctx.setGeolocation({ latitude: 40.7822, longitude: -119.1893 })
+  await page.waitForTimeout(3000)
+  const after = await marker.first().boundingBox()
+
+  assert(
+    Boolean(before) && Boolean(after) && (Math.abs(before.x - after.x) > 2 || Math.abs(before.y - after.y) > 2),
+    'the marker moves on screen as the shared watch reports a new position (#59)',
+  )
+
+  await ctx.close()
+}
+
 console.log(problems.length ? `\n${problems.length} problem(s):\n` + problems.join('\n') : '\nno console or network errors')
 await browser.close()
 process.exit(problems.length || process.exitCode ? 1 : 0)

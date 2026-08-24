@@ -39,6 +39,27 @@ git commit          # commits the index, not the working tree
 Check `git diff --cached --stat` first. If it reports the whole file changed, the
 line endings were rewritten — see below.
 
+### Check your work is still there after someone else commits
+
+Committing is not the end of it. Another agent's working copy of a shared file
+can predate your commit, so when they stage that file they quietly put back the
+version without your change. Nothing conflicts and nothing fails — the work is
+just gone from `master`.
+
+This has happened: the map credit was folded into the footnote, the scale bar
+and the attribution pill were removed, and the next commit restored all three.
+
+So after a commit lands on a file someone else is editing, check it survived:
+
+```sh
+git show HEAD:src/map/MapView.tsx | grep -c 'attributionControl={false}'
+```
+
+Zero means you were reverted. Rebuild on top of the **current** `HEAD` rather
+than replaying your old copy — their commit may have restructured the file. Then
+pin it with an assertion in `scripts/ui-invariants.mjs` or `scripts/smoke.mjs`,
+so the next revert fails CI instead of reaching the live site.
+
 ## Keep LF line endings
 
 The repo is LF throughout and there is no `.gitattributes`, so a tool that writes

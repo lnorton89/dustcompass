@@ -25,6 +25,7 @@ import { SAVED_LAYER_ID, SavedPlacesLayer } from './SavedPlacesLayer'
 import { ServiceLayers } from './ServiceLayers'
 import { baseStyle, paletteFor, type ThemeMode } from './style'
 import { FocusMarker } from './FocusMarker'
+import { PlayaScene } from './PlayaScene'
 import { assetUrl } from '../config'
 
 interface Props {
@@ -227,6 +228,8 @@ export function MapView({
         />
       )}
 
+      {/* The drawn desert, under everything the survey put on it. */}
+      <PlayaScene layout={data.layout} palette={palette} />
       <CityLayers city={data.city} campOutlines={data.campOutlines} palette={palette} />
       <RouteLayer from={route?.from} to={route?.to} palette={palette} />
       <SavedPlacesLayer places={savedPlaces} palette={palette} />

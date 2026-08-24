@@ -19,7 +19,6 @@
     "test:smoke": "node scripts/smoke.mjs",
     "test:offline": "node scripts/offline-test.mjs",
     "icons": "node scripts/make-icons.mjs",
-    "playa": "node scripts/make-playa.mjs",
     "test:a11y": "node scripts/a11y-test.mjs",
     "fetch-api": "node scripts/fetch-api.mjs",
     "lint": "eslint .",

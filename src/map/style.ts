@@ -4,6 +4,12 @@ export type ThemeMode = 'dark' | 'light' | 'night'
 
 export interface PlayaPalette {
   playa: string
+  /** The drawn desert under the city — see src/brc/playa.ts. */
+  basin: string
+  patchPale: string
+  patchShade: string
+  track: string
+  range: string
   street: string
   streetCasing: string
   plaza: string
@@ -21,6 +27,11 @@ export interface PlayaPalette {
 
 export const DARK: PlayaPalette = {
   playa: '#12100e',
+  basin: '#241f17',
+  patchPale: '#2d2619',
+  patchShade: '#1d1913',
+  track: '#3a3226',
+  range: '#0b0908',
   street: '#625b50',
   streetCasing: '#302c27',
   plaza: '#39342d',
@@ -43,6 +54,11 @@ export const DARK: PlayaPalette = {
  */
 export const NIGHT: PlayaPalette = {
   playa: '#0a0000',
+  basin: '#150404',
+  patchPale: '#1c0707',
+  patchShade: '#100202',
+  track: '#230909',
+  range: '#060000',
   street: '#5c1212',
   streetCasing: '#1f0505',
   plaza: '#2a0808',
@@ -60,6 +76,11 @@ export const NIGHT: PlayaPalette = {
 
 export const LIGHT: PlayaPalette = {
   playa: '#e8e0cf',
+  basin: '#ded4bf',
+  patchPale: '#eae2d1',
+  patchShade: '#d2c6ad',
+  track: '#c6b99d',
+  range: '#b3a184',
   street: '#ffffff',
   streetCasing: '#c9bda2',
   plaza: '#f2ecdd',

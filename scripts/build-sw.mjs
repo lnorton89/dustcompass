@@ -194,7 +194,49 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') void self.skipWaiting();
+  if (event.data?.type === 'CHECK_OFFLINE_READY') event.waitUntil(verifyAndRepairPrecache());
 });
+
+/**
+ * An active service-worker registration is not a cache-integrity signal:
+ * Cache Storage can be evicted under storage pressure (or cleared by hand)
+ * while the worker registration itself stays installed and active. A
+ * returning session used to treat "some worker is active" as proof the
+ * complete offline map still exists, which could claim Ready offline right
+ * up until the moment a real offline launch failed to load something the UI
+ * had promised was saved (#58).
+ *
+ * Verifies every expected PRECACHE key is actually present in this exact
+ * build's cache and, if any are missing, repairs it the same way install()
+ * built it in the first place — reporting through the same CACHE_PROGRESS/
+ * CACHE_FAILED/OFFLINE_READY messages the page already listens for, so a
+ * fully intact cache reaches Ready with nothing more than a handful of
+ * cheap existence checks, and only a genuinely incomplete one pays for a
+ * re-download.
+ */
+async function verifyAndRepairPrecache() {
+  const cache = await caches.open(CACHE_NAME);
+  const missing = [];
+  for (const url of PRECACHE) {
+    if (!(await cache.match(url))) missing.push(url);
+  }
+  if (missing.length === 0) {
+    await notify({ type: 'OFFLINE_READY', total: PRECACHE.length });
+    return;
+  }
+  let completed = PRECACHE.length - missing.length;
+  await notify({ type: 'CACHE_PROGRESS', completed, total: PRECACHE.length });
+  try {
+    for (const url of missing) {
+      await store(cache, url);
+      completed += 1;
+      await notify({ type: 'CACHE_PROGRESS', completed, total: PRECACHE.length });
+    }
+    await notify({ type: 'OFFLINE_READY', total: PRECACHE.length });
+  } catch (error) {
+    await notify({ type: 'CACHE_FAILED', completed, total: PRECACHE.length, url: String((error && error.message) || error) });
+  }
+}
 
 /** Only this build's cache. An unscoped match reads other versions' caches. */
 async function fromCache(request) {

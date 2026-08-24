@@ -176,8 +176,13 @@ function loadWorker({ fetchImpl, cacheStorage }) {
     })
     return promise
   }
+  const fireMessage = async (data) => {
+    let promise = Promise.resolve()
+    await handlers.message({ data, waitUntil: (p) => (promise = p) })
+    return promise
+  }
 
-  return { caches: sandbox.caches, notifications, fireInstall, fireActivate, fireFetch }
+  return { caches: sandbox.caches, notifications, fireInstall, fireActivate, fireFetch, fireMessage }
 }
 
 const dataUrl = (name) => `/data/2025/${name}`
@@ -372,6 +377,68 @@ describe('generated service worker', () => {
    * ahead of the exact-URL check, must return the cached shell for these
    * with no network attempt at all.
    */
+  /**
+   * The bug behind #58: `PwaStatus` used to treat an active service-worker
+   * registration alone as proof the offline map was still complete, even
+   * though Cache Storage can be evicted under storage pressure while the
+   * worker registration stays active. `CHECK_OFFLINE_READY` is the
+   * verification (and self-repair) handshake that replaces that assumption.
+   */
+  describe('CHECK_OFFLINE_READY (#58)', () => {
+    it('reports OFFLINE_READY straight away when every precache entry is already present', async () => {
+      const worker = loadWorker({ fetchImpl: async () => new Response('should not be fetched', { status: 200 }) })
+      await worker.fireInstall()
+      worker.notifications.length = 0
+
+      await worker.fireMessage({ type: 'CHECK_OFFLINE_READY' })
+
+      expect(worker.notifications).toEqual([{ type: 'OFFLINE_READY', total: expect.any(Number) }])
+    })
+
+    it('repairs a precache entry that was evicted after install, then reports OFFLINE_READY', async () => {
+      const worker = loadWorker({ fetchImpl: async () => new Response('refetched', { status: 200 }) })
+      await worker.fireInstall()
+
+      const cacheNameMatch = /CACHE_NAME = "(dust-compass-[a-f0-9]+)"/.exec(workerSource)
+      const cache = await worker.caches.open(cacheNameMatch[1])
+      // Simulate the browser evicting one entry under storage pressure —
+      // the registration itself (and this cache) is still active.
+      const [evictedUrl] = await cache.keys()
+      cache.store.delete(evictedUrl)
+      expect(await cache.match(evictedUrl)).toBeUndefined()
+
+      worker.notifications.length = 0
+      await worker.fireMessage({ type: 'CHECK_OFFLINE_READY' })
+
+      expect(await cache.match(evictedUrl)).toBeDefined()
+      expect(worker.notifications.some((m) => m.type === 'CACHE_PROGRESS')).toBe(true)
+      expect(worker.notifications.at(-1)).toEqual({ type: 'OFFLINE_READY', total: expect.any(Number) })
+    })
+
+    it('reports CACHE_FAILED, not OFFLINE_READY, when a missing entry cannot be re-fetched', async () => {
+      let installed = false
+      const worker = loadWorker({
+        fetchImpl: async () => {
+          if (!installed) return new Response('ok', { status: 200 })
+          throw new Error('network down')
+        },
+      })
+      await worker.fireInstall()
+      installed = true
+
+      const cacheNameMatch = /CACHE_NAME = "(dust-compass-[a-f0-9]+)"/.exec(workerSource)
+      const cache = await worker.caches.open(cacheNameMatch[1])
+      const [evictedUrl] = await cache.keys()
+      cache.store.delete(evictedUrl)
+
+      worker.notifications.length = 0
+      await worker.fireMessage({ type: 'CHECK_OFFLINE_READY' })
+
+      expect(worker.notifications.some((m) => m.type === 'OFFLINE_READY')).toBe(false)
+      expect(worker.notifications.some((m) => m.type === 'CACHE_FAILED')).toBe(true)
+    })
+  })
+
   describe('root deep-link navigations (#25)', () => {
     it('serves the cached shell for a warm ?poi= deep link without touching the network', async () => {
       const calls = []

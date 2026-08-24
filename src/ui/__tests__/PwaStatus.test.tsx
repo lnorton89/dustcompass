@@ -123,9 +123,17 @@ describe('PwaStatus · separated state dimensions', () => {
    */
   it('reports an update failure separately from having nothing saved', async () => {
     setOnline(true)
-    const worker = installServiceWorkerMock(registration({ active: {} as ServiceWorker }))
+    const postMessage = vi.fn()
+    const worker = installServiceWorkerMock(
+      registration({ active: { postMessage } as unknown as ServiceWorker }),
+    )
     render(<PwaStatus compact={false} />)
 
+    // The returning-session verification handshake (#58): the worker
+    // confirms its precache is actually intact before this reports Ready.
+    await act(async () => {
+      worker.send({ type: 'OFFLINE_READY', total: 8 })
+    })
     expect(await screen.findByText('Ready offline')).toBeDefined()
 
     await act(async () => {
@@ -134,5 +142,26 @@ describe('PwaStatus · separated state dimensions', () => {
 
     expect(await screen.findByText('Update failed')).toBeDefined()
     expect(screen.queryByText('Not saved')).toBeNull()
+  })
+
+  /**
+   * #58: an active service-worker registration is not proof the cache it
+   * built is still intact — Cache Storage can be evicted under storage
+   * pressure while the registration stays active. A returning session used
+   * to treat `registration.active` alone as enough to claim "Ready
+   * offline". It must instead ask the worker to verify itself and wait for
+   * that verification to actually land.
+   */
+  it('does not report Ready offline from an active registration alone, before verification responds', async () => {
+    setOnline(true)
+    const postMessage = vi.fn()
+    installServiceWorkerMock(registration({ active: { postMessage } as unknown as ServiceWorker }))
+    render(<PwaStatus compact={false} />)
+
+    // Give the registration/ready promise chain a tick to resolve.
+    await act(async () => Promise.resolve())
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'CHECK_OFFLINE_READY' })
+    expect(screen.queryByText('Ready offline')).toBeNull()
   })
 })

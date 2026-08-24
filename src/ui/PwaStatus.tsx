@@ -130,9 +130,15 @@ export function PwaStatus({ compact }: { compact: boolean }) {
         // A returning session has no fresh OFFLINE_READY to listen for — that
         // only ever broadcasts at the moment *this* worker activates, which
         // for an already-installed worker already happened in an earlier
-        // page load. An active controller by the time registration settles
-        // is the only signal available that some past install succeeded.
-        if (registration.active) setCacheReady(true)
+        // page load. An active registration is not proof the cache it built
+        // is still intact, though: Cache Storage can be evicted under
+        // storage pressure while the worker stays active (#58). Ask the
+        // worker to verify (and, if needed, repair) its own precache rather
+        // than assuming — it reports back through the same CACHE_PROGRESS/
+        // CACHE_FAILED/OFFLINE_READY messages a real install uses, handled
+        // by the listener above, so `cacheReady` stays false (and the chip
+        // stays in a checking/caching state) until that verification lands.
+        registration.active?.postMessage({ type: 'CHECK_OFFLINE_READY' })
       })
       .catch(() => setSupport('unsupported'))
 

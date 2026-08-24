@@ -24,6 +24,7 @@ import {
   summarize,
   validateDataset,
 } from './lib/api.mjs'
+import { deriveEventRange } from './lib/event-range.mjs'
 
 const YEAR = process.argv[2] ?? String(new Date().getFullYear())
 // BMORG_API_KEY is accepted too, for checkouts set up before the rename.
@@ -99,17 +100,23 @@ try {
   // The event window used to come from a third-party file. The occurrences
   // the API already returns describe it exactly, and they are the same
   // records the schedule is built from, so the two can never disagree.
+  //
+  // The absolute min/max timestamp used to be trusted directly, but a single
+  // otherwise-valid record months before or after the burn — a rehearsal, a
+  // data-entry mistake — is structurally fine and passes validateDataset(),
+  // so it would silently expand the whole preview window to include a month
+  // nobody would call "the event". deriveEventRange() applies the same
+  // dominant-month-plus-bounded-window protection fetch-archive.mjs already
+  // used for archived years (#67).
   try {
     const events = JSON.parse(await readFile(`${stage}/event.json`, 'utf8'))
-    const times = events
-      .flatMap((event) => event.occurrence_set ?? [])
-      .flatMap((slot) => [slot.start_time, slot.end_time])
-      .filter(Boolean)
-      .sort()
-    if (times.length > 0) {
-      const rangeInfo = { startDate: times[0], endDate: times[times.length - 1] }
-      await writeFile(`${stage}/dates_info.json`, JSON.stringify({ rangeInfo }))
-      console.log(`  ✓ event window ${rangeInfo.startDate.slice(0, 10)} to ${rangeInfo.endDate.slice(0, 10)}`)
+    const range = deriveEventRange(events)
+    if (range) {
+      await writeFile(`${stage}/dates_info.json`, JSON.stringify({ rangeInfo: range.rangeInfo }))
+      console.log(`  ✓ event window ${range.rangeInfo.startDate.slice(0, 10)} to ${range.rangeInfo.endDate.slice(0, 10)}`)
+      for (const outlier of range.outliers) {
+        console.warn(`  · outside the event range, excluded from preview: ${outlier.title ?? outlier.uid} (${outlier.start})`)
+      }
     }
   } catch {
     console.warn('  · could not derive the event window from the occurrences')

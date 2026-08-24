@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Chip, Tooltip } from '@mui/material'
+import { Box, Chip, Tooltip, Typography } from '@mui/material'
 import CloudDoneIcon from '@mui/icons-material/CloudDone'
 import CloudOffIcon from '@mui/icons-material/CloudOff'
 import DownloadingIcon from '@mui/icons-material/Downloading'
@@ -86,38 +86,70 @@ export function PwaStatus({ compact }: { compact: boolean }) {
   }, [])
 
   const view = statusView(status, progress)
-  return (
-    <Tooltip title={`${view.detail} · ${DATA_YEAR} map`}>
-      <Chip
-        size="small"
-        color={view.color}
-        variant={status === 'ready' ? 'outlined' : 'filled'}
-        icon={view.icon}
-        label={compact ? undefined : view.label}
-        aria-label={`${view.label}. ${view.detail}. ${DATA_YEAR} map data.`}
-        onClick={
-          waiting
-            ? () => waiting.postMessage({ type: 'SKIP_WAITING' })
-            : status === 'incomplete'
-              ? // A failed install leaves no worker to message; registering
+  const title = `${view.detail} · ${DATA_YEAR} map`
+  const description = `${view.label}. ${view.detail}. ${DATA_YEAR} map data.`
+
+  // Only two of these states want anything from the user, and only those two
+  // are shaped like a button. Wearing the same pill for "everything is fine"
+  // put a permanent green control in the toolbar that did nothing when pressed
+  // and outshouted the filters beside it.
+  if (status === 'update' || status === 'incomplete') {
+    return (
+      <Tooltip title={title}>
+        <Chip
+          size="small"
+          color={view.color}
+          variant="filled"
+          icon={view.icon}
+          label={compact ? undefined : view.label}
+          aria-label={description}
+          onClick={
+            waiting
+              ? () => waiting.postMessage({ type: 'SKIP_WAITING' })
+              : // A failed install leaves no worker to message; registering
                 // again on load is what starts a fresh attempt.
                 () => window.location.reload()
-              : undefined
-        }
-        sx={
-          compact
-            ? {
-                width: 32,
-                justifyContent: 'center',
-                // With no label text MUI still renders the label element, and
-                // its 8px of padding shoulders the icon off-centre. Auto
-                // margins cannot win against a sibling that is still 16px wide.
-                '& .MuiChip-label': { display: 'none' },
-                '& .MuiChip-icon': { m: 0 },
-              }
-            : undefined
-        }
-      />
+          }
+          sx={{
+            fontWeight: 600,
+            ...(compact && {
+              width: 32,
+              justifyContent: 'center',
+              // With no label text MUI still renders the label element, and
+              // its 8px of padding shoulders the icon off-centre. Auto
+              // margins cannot win against a sibling that is still 16px wide.
+              '& .MuiChip-label': { display: 'none' },
+              '& .MuiChip-icon': { m: 0 },
+            }),
+          }}
+        />
+      </Tooltip>
+    )
+  }
+
+  return (
+    <Tooltip title={title}>
+      <Box
+        role="status"
+        aria-label={description}
+        sx={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 0.65,
+          flexShrink: 0,
+          cursor: 'default',
+          color: 'text.secondary',
+        }}
+      >
+        <Box sx={{ display: 'flex', color: view.tone, '& svg': { display: 'block', fontSize: 18 } }}>
+          {view.icon}
+        </Box>
+        {!compact && (
+          <Typography variant="caption" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+            {view.label}
+          </Typography>
+        )}
+      </Box>
     </Tooltip>
   )
 }
@@ -137,6 +169,12 @@ function isWorkerMessage(value: unknown): value is WorkerMessage {
   return typeof candidate.completed === 'number' && typeof candidate.total === 'number'
 }
 
+/**
+ * `color` is the MUI palette slot for the states that render as a button.
+ * `tone` is what the quiet states tint their icon with — deliberately not
+ * `success.main`, which was the only green in an app that is otherwise entirely
+ * amber, teal and, at night, a single low red.
+ */
 function statusView(status: Status, progress?: { completed: number; total: number }) {
   switch (status) {
     case 'caching':
@@ -145,12 +183,13 @@ function statusView(status: Status, progress?: { completed: number; total: numbe
         label: progress ? `Saving ${progress.completed}/${progress.total}` : 'Preparing offline',
         detail: 'Keep this tab open while the map is saved',
         color: 'default' as const,
+        tone: 'text.secondary',
         icon: <DownloadingIcon />,
       }
     case 'offline':
-      return { label: 'Offline map', detail: 'Using the saved map', color: 'warning' as const, icon: <CloudOffIcon /> }
+      return { label: 'Offline map', detail: 'Using the saved map', color: 'warning' as const, tone: 'warning.main', icon: <CloudOffIcon /> }
     case 'update':
-      return { label: 'Update ready', detail: 'Tap to load the newest map', color: 'primary' as const, icon: <NewReleasesIcon /> }
+      return { label: 'Update ready', detail: 'Tap to load the newest map', color: 'primary' as const, tone: 'primary.main', icon: <NewReleasesIcon /> }
     case 'incomplete':
       return {
         label: 'Not saved',
@@ -158,11 +197,12 @@ function statusView(status: Status, progress?: { completed: number; total: numbe
           ? `Only ${progress.completed} of ${progress.total} pieces saved. Tap to try again while you have signal`
           : 'The map is not saved for offline use. Tap to try again while you have signal',
         color: 'error' as const,
+        tone: 'error.main',
         icon: <SyncProblemIcon />,
       }
     case 'unsupported':
-      return { label: 'Online only', detail: 'Offline saving is unavailable', color: 'warning' as const, icon: <CloudOffIcon /> }
+      return { label: 'Online only', detail: 'Offline saving is unavailable', color: 'warning' as const, tone: 'warning.main', icon: <CloudOffIcon /> }
     default:
-      return { label: 'Ready offline', detail: 'Map saved on this device', color: 'success' as const, icon: <CloudDoneIcon /> }
+      return { label: 'Ready offline', detail: 'Map saved on this device', color: 'success' as const, tone: 'text.secondary', icon: <CloudDoneIcon /> }
   }
 }

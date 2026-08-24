@@ -6,21 +6,17 @@ import {
   AppBar,
   Box,
   Button,
-  Chip,
   CircularProgress,
   CssBaseline,
   Snackbar,
   Stack,
   ThemeProvider,
-  ToggleButton,
   Toolbar,
-  Tooltip,
   TextField,
   Typography,
 } from '@mui/material'
 import { useMediaQuery } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
-import IconButton from '@mui/material/IconButton'
 import InputAdornment from '@mui/material/InputAdornment'
 import TuneIcon from '@mui/icons-material/Tune'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
@@ -54,10 +50,11 @@ import { shareLink } from './ui/share'
 import type { Poi, PoiKind } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
-import type { ThemeMode } from './map/style'
+import { paletteFor, type PlayaPalette, type ThemeMode } from './map/style'
 import { BRAND } from './brand'
 import { BrandMark } from './ui/BrandMark'
 import { PwaStatus } from './ui/PwaStatus'
+import { ControlButton, ControlDivider, ControlGroup } from './ui/ControlGroup'
 
 type Filter = PoiKind | 'toilets' | 'services' | 'favorites'
 
@@ -75,17 +72,23 @@ const THEME_LABEL: Record<ThemeMode, string> = {
   night: 'Switch to dark mode',
 }
 
+/**
+ * Each filter names the colour its own markers are drawn in rather than a MUI
+ * palette slot, so the row reads as the map's legend instead of five controls
+ * that happen to be different colours. It follows the map into night mode for
+ * free, because that is where the colours come from.
+ */
 const FILTERS: {
   key: Filter
   label: string
-  color: 'primary' | 'secondary' | 'default'
+  accent: keyof PlayaPalette
   icon: ReactElement
 }[] = [
-  { key: 'art', label: 'Art', color: 'primary', icon: <AutoAwesomeIcon /> },
-  { key: 'camp', label: 'Camps', color: 'secondary', icon: <GroupsIcon /> },
-  { key: 'toilets', label: 'Toilets', color: 'default', icon: <WcIcon /> },
-  { key: 'services', label: 'Services', color: 'default', icon: <LocalHospitalIcon /> },
-  { key: 'favorites', label: 'Saved', color: 'primary', icon: <StarIcon /> },
+  { key: 'art', label: 'Art', accent: 'art', icon: <AutoAwesomeIcon /> },
+  { key: 'camp', label: 'Camps', accent: 'camp', icon: <GroupsIcon /> },
+  { key: 'toilets', label: 'Toilets', accent: 'toilet', icon: <WcIcon /> },
+  { key: 'services', label: 'Services', accent: 'medical', icon: <LocalHospitalIcon /> },
+  { key: 'favorites', label: 'Saved', accent: 'saved', icon: <StarIcon /> },
 ]
 
 export default function App() {
@@ -136,6 +139,7 @@ export default function App() {
   const clock = useMemo(() => scheduleClock(data?.range, realNow), [data?.range, realNow])
   const mapRef = useRef<MapRef>(null)
   const theme = useMemo(() => playaTheme(mode), [mode])
+  const palette = useMemo(() => paletteFor(mode), [mode])
   // Phones are the real target here; the desktop layout is the special case.
   const compact = useMediaQuery(theme.breakpoints.down('md'))
   // The inline filter chips are a convenience, and search is not. Below a wide
@@ -323,7 +327,19 @@ export default function App() {
     <ThemeProvider theme={theme} defaultMode={mode === 'light' ? 'light' : 'dark'}>
       <CssBaseline />
       <Box sx={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
-        <AppBar position="static" color="default" elevation={0} enableColorOnDark>
+        {/* MUI's "default" AppBar is grey-900, which put a cold neutral slab
+            above an app whose every other surface is warm. It takes the same
+            paper as everything else and is separated by a hairline. */}
+        <AppBar
+          position="static"
+          color="transparent"
+          elevation={0}
+          sx={{
+            bgcolor: 'background.paper',
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+          }}
+        >
           <Toolbar sx={{ gap: 1, minHeight: { xs: 56, md: 64 }, py: 1 }}>
             {/* On a phone this is decoration standing between the user and the
                 one control that matters; the icon and splash already brand it. */}
@@ -374,73 +390,73 @@ export default function App() {
               )}
             </Box>
 
+            {/* Two groups rather than nine loose buttons: what is drawn on the
+                map, and how the map is drawn. The status readout stays outside
+                both, because it is something to read, not something to press. */}
             <Stack
               direction="row"
-              spacing={1}
+              spacing={1.25}
               sx={{ alignItems: 'center', ml: 'auto', flexShrink: 0 }}
             >
               <PwaStatus compact={compact} />
-              {!compact &&
-                roomForFilterChips &&
-                FILTERS.map((filter) => (
-                  <Chip
-                    key={filter.key}
-                    icon={filter.icon}
-                    label={filter.label}
-                    size="small"
-                    color={filter.color}
-                    variant={active.has(filter.key) ? 'filled' : 'outlined'}
-                    onClick={() => toggleFilter(filter.key)}
-                  />
-                ))}
-              <IconButton
-                size="small"
-                onClick={() => setFiltersOpen(true)}
-                aria-label="Filters and saved spots"
-              >
-                <TuneIcon fontSize="small" />
-              </IconButton>
-              <Tooltip title="Events">
-                <ToggleButton
-                  value="events"
-                  size="small"
+              <ControlGroup>
+                {!compact && roomForFilterChips && (
+                  <>
+                    {FILTERS.map((filter) => (
+                      <ControlButton
+                        key={filter.key}
+                        icon={filter.icon}
+                        label={filter.label}
+                        title={filter.label}
+                        selected={active.has(filter.key)}
+                        pressed={active.has(filter.key)}
+                        accent={palette[filter.accent]}
+                        onClick={() => toggleFilter(filter.key)}
+                      />
+                    ))}
+                    <ControlDivider />
+                  </>
+                )}
+                <ControlButton
+                  icon={<TuneIcon />}
+                  title="Filters and saved spots"
+                  onClick={() => setFiltersOpen(true)}
+                />
+              </ControlGroup>
+              <ControlGroup>
+                <ControlButton
+                  icon={<EventIcon />}
+                  title="Show events"
+                  tooltip="Events"
                   selected={eventsOpen}
-                  onChange={() => setEventsOpen((open) => !open)}
-                  aria-label="Show events"
-                >
-                  <EventIcon fontSize="small" />
-                </ToggleButton>
-              </Tooltip>
-              {!compact && (
-                <Tooltip title={cityUp ? '12:00 is up' : 'North is up'}>
-                  <ToggleButton
-                    value="cityUp"
-                    size="small"
+                  pressed={eventsOpen}
+                  onClick={() => setEventsOpen((open) => !open)}
+                />
+                {!compact && (
+                  <ControlButton
+                    icon={<ExploreIcon />}
+                    title="Orient the map so 12:00 points up"
+                    tooltip={cityUp ? '12:00 is up' : 'North is up'}
                     selected={cityUp}
-                    onChange={toggleCityUp}
-                    aria-label="Orient the map so 12:00 points up"
-                  >
-                    <ExploreIcon fontSize="small" />
-                  </ToggleButton>
-                </Tooltip>
-              )}
-              <Tooltip title={THEME_LABEL[mode]}>
-                <ToggleButton
-                  value="theme"
-                  size="small"
+                    pressed={cityUp}
+                    onClick={toggleCityUp}
+                  />
+                )}
+                <ControlButton
+                  icon={
+                    mode === 'dark' ? (
+                      <DarkModeIcon />
+                    ) : mode === 'light' ? (
+                      <LightModeIcon />
+                    ) : (
+                      <NightlightIcon />
+                    )
+                  }
+                  title={THEME_LABEL[mode]}
                   selected={mode === 'night'}
-                  onChange={() => setMode(NEXT_MODE[mode])}
-                  aria-label={THEME_LABEL[mode]}
-                >
-                  {mode === 'dark' ? (
-                    <DarkModeIcon fontSize="small" />
-                  ) : mode === 'light' ? (
-                    <LightModeIcon fontSize="small" />
-                  ) : (
-                    <NightlightIcon fontSize="small" />
-                  )}
-                </ToggleButton>
-              </Tooltip>
+                  onClick={() => setMode(NEXT_MODE[mode])}
+                />
+              </ControlGroup>
             </Stack>
           </Toolbar>
         </AppBar>
@@ -596,6 +612,7 @@ export default function App() {
       <FilterSheet
         open={filtersOpen}
         options={FILTERS}
+        palette={palette}
         active={active}
         cityUp={cityUp}
         places={places}

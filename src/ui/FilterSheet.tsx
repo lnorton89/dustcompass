@@ -15,19 +15,23 @@ import {
 } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 import CloseIcon from '@mui/icons-material/Close'
+import { alpha } from '@mui/material/styles'
 import type { ReactElement } from 'react'
 import type { SavedPlace } from '../data/useSavedPlaces'
+import type { PlayaPalette } from '../map/style'
 
 export interface FilterOption<T extends string> {
   key: T
   label: string
-  color: 'primary' | 'secondary' | 'default'
+  /** Which of the map's own colours this layer is drawn in. */
+  accent: keyof PlayaPalette
   icon?: ReactElement
 }
 
 interface Props<T extends string> {
   open: boolean
   options: FilterOption<T>[]
+  palette: PlayaPalette
   active: Set<T>
   cityUp: boolean
   places: SavedPlace[]
@@ -46,6 +50,7 @@ interface Props<T extends string> {
 export function FilterSheet<T extends string>({
   open,
   options,
+  palette,
   active,
   cityUp,
   places,
@@ -68,17 +73,40 @@ export function FilterSheet<T extends string>({
           <CloseIcon fontSize="small" />
         </IconButton>
       </Stack>
+      {/* The colour is the one the layer is drawn in on the map, and it is lit
+          only while that layer is shown - so this row is also the legend. */}
       <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mb: 1 }}>
-        {options.map((option) => (
-          <Chip
-            key={option.key}
-            icon={option.icon}
-            label={option.label}
-            color={option.color}
-            variant={active.has(option.key) ? 'filled' : 'outlined'}
-            onClick={() => onToggle(option.key)}
-          />
-        ))}
+        {options.map((option) => {
+          const on = active.has(option.key)
+          const accent = palette[option.accent]
+          return (
+            <Chip
+              key={option.key}
+              icon={option.icon}
+              label={option.label}
+              variant="outlined"
+              onClick={() => onToggle(option.key)}
+              sx={{
+                // Bigger than a default chip on purpose: this is the filter UI
+                // on a phone, used one-handed, in gloves, in the dark.
+                height: 40,
+                borderRadius: '12px',
+                px: 0.5,
+                fontSize: 14,
+                fontWeight: 600,
+                borderColor: on ? alpha(accent, 0.55) : 'divider',
+                bgcolor: on ? alpha(accent, 0.14) : 'transparent',
+                color: on ? 'text.primary' : 'text.secondary',
+                '& .MuiChip-icon': {
+                  fontSize: 19,
+                  color: on ? accent : 'inherit',
+                  opacity: on ? 1 : 0.7,
+                },
+                '&:hover': { bgcolor: on ? alpha(accent, 0.2) : 'action.hover' },
+              }}
+            />
+          )
+        })}
       </Stack>
       <Box sx={{ mt: 1 }}>
         <FormControlLabel

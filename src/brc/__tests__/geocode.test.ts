@@ -268,6 +268,15 @@ describe('street/radial coverage (issue #52)', () => {
       // confirmed present and both flanking major radials reach all the way
       // to K).
       { refs: ['3:15'], segments: [[0, 'c']] },
+      // A radial whose own segment names an annular street directly, at a
+      // clock that street's own arc list does not enumerate as covered — the
+      // real shape of Center Camp's Esplanade entrance ("Esplanade & 6:00
+      // Portal"): the ring's own arc list and a radial's recorded junction
+      // points are derived separately and do not always agree on exactly
+      // where a gap starts and ends. 7:00 sits inside C's own 5:30-8:00 gap,
+      // and this radial stops at C — it never reaches K, so it must not
+      // vouch for an intersection with a street it was never near.
+      { refs: ['7:00'], segments: [[0, 'c']] },
       // 9:00 has no surveyed radial in this fixture at all.
     ],
     plazas: [],
@@ -299,6 +308,15 @@ describe('street/radial coverage (issue #52)', () => {
       // all in this fixture) — neither flank reaches K, so this must not
       // invent an intersection there just because it is a quarter-hour clock.
       expect(intersectionExists(COVERAGE_LAYOUT, '5:15', 'k')).toBe(false)
+    })
+    it('is true when a radial names the street directly, even inside that street\'s own gap', () => {
+      // Real shape of "Esplanade & 6:00 Portal" at Center Camp: the radial's
+      // own segment names the street as an endpoint even though the street's
+      // own arc list has a gap right there.
+      expect(intersectionExists(COVERAGE_LAYOUT, '7:00', 'c')).toBe(true)
+    })
+    it('a direct radial junction does not vouch for a different street the radial never names', () => {
+      expect(intersectionExists(COVERAGE_LAYOUT, '7:00', 'k')).toBe(false)
     })
   })
 

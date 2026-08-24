@@ -4,7 +4,6 @@ import {
   Map as MapGL,
   NavigationControl,
   Marker,
-  ScaleControl,
   type MapLayerMouseEvent,
   type MapRef,
 } from '@vis.gl/react-maplibre'
@@ -222,7 +221,13 @@ export function MapView({
         }
       }}
       maxPitch={60}
-      attributionControl={{ compact: true, customAttribution: 'City survey &amp; listings: Burning Man Project' }}
+      /*
+       * No attribution control. There is no basemap to attribute — the city is
+       * drawn from the survey, and the survey is credited in the footnote, next
+       * to the non-affiliation line it belongs beside. A second floating pill
+       * saying nearly the same thing sat in the middle of the map on a phone.
+       */
+      attributionControl={false}
       style={{ position: 'absolute', inset: 0 }}
     >
       <NavigationControl position="bottom-right" visualizePitch showCompass />
@@ -232,7 +237,6 @@ export function MapView({
         positionOptions={{ enableHighAccuracy: true }}
         onGeolocate={(event) => onLocate([event.coords.longitude, event.coords.latitude])}
       />
-      <ScaleControl position="bottom-left" unit="imperial" />
       {pin && (
         <Marker longitude={pin.position[0]} latitude={pin.position[1]} anchor="bottom">
           <div

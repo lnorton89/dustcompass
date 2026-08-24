@@ -223,9 +223,6 @@ const SURFACES = {
   disclaimer: '[data-testid="api-disclaimer"]',
   'bottom bar': 'nav.MuiPaper-root',
   'map controls': '.maplibregl-ctrl-group',
-  'scale bar': '.maplibregl-ctrl-scale',
-  attribution: '.maplibregl-ctrl-attrib',
-  'attribution text': '.maplibregl-ctrl-attrib-inner',
 }
 
 const readSurfaces = (page) =>
@@ -265,7 +262,14 @@ const readSurfaces = (page) =>
   // Every surface has to look different in all three, or it is not themed.
   for (const name of Object.keys(SURFACES)) {
     const seen = ['dark', 'light', 'night'].map((mode) => byMode[mode][name]?.bg).filter(Boolean)
-    if (seen.length < 3) continue
+    // A surface that has stopped rendering used to skip silently, so this
+    // kept reporting a clean theme sweep over elements that no longer
+    // existed — a scale bar and an attribution pill, both since removed.
+    // A named surface that cannot be found is a broken check, not a pass.
+    if (seen.length < 3) {
+      fail(`${name} was not found to check`, `${SURFACES[name]} matched nothing in ${3 - seen.length} of 3 themes`)
+      continue
+    }
     // Attribution text is transparent-backed; it is judged on its colour.
     const values = name.includes('text')
       ? ['dark', 'light', 'night'].map((mode) => byMode[mode][name].fg)

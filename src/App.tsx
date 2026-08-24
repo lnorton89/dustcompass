@@ -50,7 +50,7 @@ import { useSavedPlaces } from './data/useSavedPlaces'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
 import { travelBetween } from './brc/travel'
-import { bearingToClock, bearingBetween } from './brc/geo'
+import { bearingToClock, bearingBetween, isNearCity } from './brc/geo'
 import { shareLink } from './ui/share'
 import type { Poi, PoiKind, UnplacedListing } from './data/types'
 import { reverseGeocode } from './brc/geocode'
@@ -333,10 +333,18 @@ export default function App() {
     [data],
   )
 
-  const origin = here ?? (data?.layout.center.geometry.coordinates as Position | undefined)
-  const originLabel = here
+  /**
+   * A fix from four hundred miles away is a real fix and a useless origin: the
+   * route line shot off the edge of the map and the readout offered a walk of
+   * 157 hours. Past the approach to the city the honest answer is not a
+   * bearing, so distance falls back to being measured from the Man — which is
+   * what the readout already says it is doing when there is no fix at all.
+   */
+  const usableFix = here && data && isNearCity(data.layout, here) ? here : undefined
+  const origin = usableFix ?? (data?.layout.center.geometry.coordinates as Position | undefined)
+  const originLabel = usableFix
     ? data
-      ? `you (${reverseGeocode(here, data.layout).label})`
+      ? `you (${reverseGeocode(usableFix, data.layout).label})`
       : 'you'
     : 'the Man'
 
@@ -767,7 +775,7 @@ export default function App() {
                 }}
               >
                 <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.25 }}>
-                  {BRAND.disclaimer}
+                  City survey &amp; listings: Burning Man Project. {BRAND.disclaimer}
                 </Typography>
               </Box>
               {heading && navigation && (
@@ -776,7 +784,7 @@ export default function App() {
                   address={heading.address}
                   travel={navigation.travel}
                   heading={navigation.clock}
-                  located={Boolean(here)}
+                  located={Boolean(usableFix)}
                   status={location.status}
                   accuracy={location.accuracy}
                   approximate={heading.approximate}

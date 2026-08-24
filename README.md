@@ -10,6 +10,7 @@
   [![Live app](https://img.shields.io/badge/Open_the_live_app-d97706?style=for-the-badge)](https://lnorton89.github.io/dustcompass/)
   [![CI](https://img.shields.io/github/actions/workflow/status/lnorton89/dustcompass/ci.yml?branch=master&style=for-the-badge&label=CI)](https://github.com/lnorton89/dustcompass/actions/workflows/ci.yml)
   [![Deploy](https://img.shields.io/github/actions/workflow/status/lnorton89/dustcompass/deploy.yml?branch=master&style=for-the-badge&label=Deploy)](https://github.com/lnorton89/dustcompass/actions/workflows/deploy.yml)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 </div>
 
 <a href="https://lnorton89.github.io/dustcompass/">
@@ -104,12 +105,16 @@ NEXT_PUBLIC_DATA_YEAR=2026 npm run dev
 
 ## How it works
 
-```text
-Burning Man survey ──> fetch-data / derive-layout ──> layout.json ─┐
-                                                                  ├─> static Next.js export ─> PWA cache
-API or archive ──────> validate + embargo filtering ─> listings ──┘
-                                                                  │
-GPS + device heading ─────────────────────────────────────────────> local navigation
+```mermaid
+flowchart TB
+  survey[Annual city survey] --> layout[Derive city layout]
+  listings[API or archive] --> validate[Validate and enforce embargo]
+  layout --> export[Static Next.js export]
+  validate --> export
+  export --> cache[Verified offline PWA cache]
+  cache --> app[Map, search, and events]
+  app --> navigation[On-device navigation]
+  sensors[GPS and device heading] --> navigation
 ```
 
 - **No backend:** Next.js exports a static site to `out/`; all map and navigation logic runs in the browser.
@@ -218,6 +223,17 @@ Bug reports and focused pull requests are welcome. Before opening a PR:
 4. Do not commit API keys, fetched embargoed locations, generated `out/` files, or local screenshots.
 
 Use [GitHub Issues](https://github.com/lnorton89/dustcompass/issues) for reproducible bugs and feature requests.
+
+## Community
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+- Report security vulnerabilities privately according to [SECURITY.md](SECURITY.md).
+- Help keep the project welcoming by following the [Code of Conduct](CODE_OF_CONDUCT.md).
+- Find ways to get help in [SUPPORT.md](SUPPORT.md).
+
+## License
+
+Dust Compass is released under the [MIT License](LICENSE).
 
 ---
 

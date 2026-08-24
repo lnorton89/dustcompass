@@ -574,14 +574,30 @@ assert(
   'saved spot is marked on the map',
 )
 
-// It has to be findable by name, and lead somewhere.
+// It has to be findable by name, and lead somewhere. #21: selecting the
+// saved result directly out of the search dropdown must start saved-place
+// navigation on its own — the same thing choosing it from the saved-spots
+// list or its map marker does — rather than requiring a detour through the
+// filter sheet to actually go anywhere.
 await search.fill('')
 await search.fill('My camp')
 await page.waitForTimeout(700)
 await page.keyboard.press('ArrowDown')
 await page.keyboard.press('Enter')
 await page.waitForTimeout(1000)
+assert(
+  await page.getByTestId('navigation-target').isVisible(),
+  'selecting a saved result directly from search starts navigation on its own (#21)',
+)
+assert(
+  (await page.getByTestId('navigation-target').innerText()).includes('My camp'),
+  "the saved result's own identity is preserved, not a generic dropped pin (#21)",
+)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(400)
 
+// Consistent with the same saved spot reached the other way — from the
+// saved-spots list in the filter sheet.
 await page.getByLabel('Filters and saved spots').click()
 await page.waitForTimeout(700)
 await page.getByRole('button', { name: /^My camp/ }).click()

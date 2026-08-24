@@ -34,6 +34,13 @@ interface Props {
   unplaced: UnplacedListing[]
   places: SavedPlace[]
   onGo: (position: Position, poi?: Poi) => void
+  /**
+   * A saved spot chosen from search — routed separately from `onGo` so it
+   * gets the same deliberate saved-place navigation a map marker or the
+   * saved-spots list gives it, instead of becoming a generic dropped pin at
+   * the same coordinate.
+   */
+  onGoToPlace: (place: SavedPlace) => void
   /** Opens a listing that has no position, so `onGo` has nothing to move to. */
   onOpenUnplaced: (listing: UnplacedListing) => void
   /** So "/" can put the cursor here from anywhere on the page. */
@@ -51,6 +58,8 @@ interface Option {
   position?: Position
   poi?: Poi
   unplaced?: UnplacedListing
+  /** Only set for `kind: 'saved'` results — the saved place's own identity. */
+  savedPlace?: SavedPlace
   score: number
 }
 
@@ -65,6 +74,7 @@ export function SearchPanel({
   unplaced,
   places,
   onGo,
+  onGoToPlace,
   onOpenUnplaced,
   inputRef,
   compact = false,
@@ -86,6 +96,7 @@ export function SearchPanel({
           detail: place.address,
           kind: 'saved',
           position: place.position,
+          savedPlace: place,
           score: score + 50,
         })
       }
@@ -158,7 +169,13 @@ export function SearchPanel({
           if (result) onGo(result.position)
           return
         }
-        if (value.unplaced) onOpenUnplaced(value.unplaced)
+        // Checked ahead of the generic position path: a saved result's
+        // position happens to be set too (for the freeSolo/geocode fallback
+        // to have something consistent to render), but selecting it must
+        // never synthesize a competing generic dropped pin over the user's
+        // own saved marker.
+        if (value.savedPlace) onGoToPlace(value.savedPlace)
+        else if (value.unplaced) onOpenUnplaced(value.unplaced)
         else if (value.position) onGo(value.position, value.poi)
       }}
       getOptionLabel={(option) => (typeof option === 'string' ? option : option.label)}

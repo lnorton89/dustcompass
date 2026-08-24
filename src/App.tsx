@@ -692,6 +692,7 @@ export default function App() {
                   unplaced={data.unplaced}
                   places={places}
                   onGo={flyTo}
+                  onGoToPlace={navigateTo}
                   onOpenUnplaced={(listing) => {
                     setSelected(undefined)
                     setUnplaced(listing)

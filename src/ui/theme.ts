@@ -2,6 +2,14 @@ import { createTheme, type Theme } from '@mui/material/styles'
 import type { ThemeMode } from '../map/style'
 
 /**
+ * The floor for anything a finger lands on. Every platform guideline agrees on
+ * 44px, and this app is worse than the average case for all of them: gloves,
+ * dust on the glass, one hand, often in the dark. It applies below `md` only —
+ * a pointer is precise, and the desktop toolbar is designed at its own density.
+ */
+const TOUCH = 44
+
+/**
  * Dark is the default and the point: this gets read at 3am on a dark playa,
  * where a white screen destroys night vision for everyone nearby.
  */
@@ -30,13 +38,154 @@ export function playaTheme(mode: ThemeMode): Theme {
           : { default: '#e8e0cf', paper: '#faf6ec' },
     },
     shape: { borderRadius: 12 },
+    /*
+     * Sized for arm's length in sunlight, not for a desk. The scale was short
+     * and disciplined already; the problem was where its mass sat — nearly
+     * everything the user reads while walking was 12px, and nothing was big
+     * enough to carry a screen.
+     *
+     * `h5` is the display size. It is a real MUI variant rather than a custom
+     * one so it needs no module augmentation, and nothing else was using it.
+     */
     typography: {
       fontFamily: '"Inter", system-ui, -apple-system, "Segoe UI", sans-serif',
+      h5: { fontWeight: 700, fontSize: '1.75rem', lineHeight: 1.15, letterSpacing: '-0.02em' },
       h6: { fontWeight: 650, letterSpacing: '-0.01em' },
+      // A step up each, which is the difference between glancing at a distance
+      // and stopping to read it.
+      body2: { fontSize: '0.9375rem' },
+      caption: { fontSize: '0.8125rem' },
       button: { textTransform: 'none', fontWeight: 600 },
     },
     components: {
       MuiPaper: { styleOverrides: { root: { backgroundImage: 'none' } } },
+      /*
+       * MapLibre ships its own control chrome, and none of it knew about the
+       * three palettes: zoom, compass, geolocate, the scale bar and the
+       * attribution strip all rendered white in every mode. In red night that
+       * is five lit rectangles in the corner of an interface whose entire
+       * purpose is to not be a flashlight. Their buttons were also 29px, the
+       * smallest targets in the app.
+       *
+       * Reached through CssBaseline rather than a stylesheet so the rules are
+       * rebuilt from `theme.palette` when the mode changes.
+       */
+      MuiCssBaseline: {
+        styleOverrides: (theme) => ({
+          '.maplibregl-ctrl-group': {
+            backgroundColor: theme.palette.background.paper,
+            border: `1px solid ${theme.palette.divider}`,
+            borderRadius: 10,
+            boxShadow: 'none',
+            overflow: 'hidden',
+          },
+          '.maplibregl-ctrl-group button': {
+            width: TOUCH,
+            height: TOUCH,
+            backgroundColor: 'transparent',
+          },
+          '.maplibregl-ctrl-group button:not(:disabled):hover': {
+            backgroundColor: theme.palette.action.hover,
+          },
+          '.maplibregl-ctrl-group button + button': {
+            borderTopColor: theme.palette.divider,
+          },
+          /*
+           * The glyphs are black SVGs baked into background-image data URIs, so
+           * they cannot be recoloured — only filtered. Inverting carries them to
+           * the dust colour on the dark ground; night takes that result down to
+           * the same low red as everything else.
+           */
+          ...(mode === 'light'
+            ? {}
+            : {
+                '.maplibregl-ctrl-icon': {
+                  filter: night
+                    ? 'invert(1) sepia(1) saturate(5) hue-rotate(-48deg) brightness(0.72)'
+                    : 'invert(1) opacity(0.82)',
+                },
+              }),
+          '.maplibregl-ctrl-scale': {
+            backgroundColor: theme.palette.background.paper,
+            borderColor: theme.palette.divider,
+            borderRadius: '0 0 4px 4px',
+            color: theme.palette.text.secondary,
+            fontSize: 11,
+          },
+          // MapLibre's own rule for the collapsed pill is
+          // `.maplibregl-ctrl-attrib.maplibregl-compact`, two classes and
+          // therefore more specific than one — matching only the single class
+          // left the attribution the last white thing on the night screen.
+          '.maplibregl-ctrl-attrib, .maplibregl-ctrl-attrib.maplibregl-compact': {
+            backgroundColor: theme.palette.background.paper,
+          },
+          // The text sits in `.maplibregl-ctrl-attrib-inner`, which inherits its
+          // colour from the `<details>` above it. Colouring only the details
+          // element loses to MapLibre's own rule on the same class, so the inner
+          // div is named directly — otherwise this stayed black on near-black
+          // in night mode, which is worse than the white pill it replaced.
+          '.maplibregl-ctrl-attrib, .maplibregl-ctrl-attrib-inner, .maplibregl-ctrl-attrib-inner a':
+            {
+              color: theme.palette.text.secondary,
+            },
+          '.maplibregl-ctrl-attrib-button': {
+            backgroundColor: 'transparent',
+          },
+        }),
+      },
+      /*
+       * The touch contract. Grown through padding and a minimum box, never by
+       * scaling the glyph — a 44px target around a 17px icon is correct, a 44px
+       * icon is a cartoon. Desktop keeps the density it was designed at.
+       */
+      MuiIconButton: {
+        styleOverrides: {
+          root: ({ theme }) => ({
+            [theme.breakpoints.down('md')]: { minWidth: TOUCH, minHeight: TOUCH },
+          }),
+        },
+      },
+      MuiToggleButton: {
+        styleOverrides: {
+          root: ({ theme }) => ({
+            [theme.breakpoints.down('md')]: { minWidth: TOUCH, minHeight: TOUCH },
+          }),
+        },
+      },
+      // Only the ones that do something when pressed. A chip used as a readout
+      // is text, and text does not need a thumb.
+      MuiChip: {
+        styleOverrides: {
+          clickable: ({ theme }) => ({
+            [theme.breakpoints.down('md')]: { minHeight: TOUCH },
+          }),
+        },
+      },
+      // Event rows and saved spots: long lists where a mis-tap costs a flight
+      // across the map and a journey back.
+      MuiListItemButton: {
+        styleOverrides: {
+          root: ({ theme }) => ({
+            [theme.breakpoints.down('md')]: { minHeight: TOUCH },
+          }),
+        },
+      },
+      MuiButton: {
+        styleOverrides: {
+          root: ({ theme }) => ({
+            [theme.breakpoints.down('md')]: { minHeight: TOUCH },
+          }),
+        },
+      },
+      // Applied to the field's box rather than by moving to `size="medium"`,
+      // which would have put a 56px input across the top of every phone.
+      MuiOutlinedInput: {
+        styleOverrides: {
+          root: ({ theme }) => ({
+            [theme.breakpoints.down('md')]: { minHeight: TOUCH },
+          }),
+        },
+      },
       /*
        * The map is allowed the whole screen — under the notch, under the home
        * indicator, into the rounded corners. Nothing drawn on top of it is.

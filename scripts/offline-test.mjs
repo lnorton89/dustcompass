@@ -20,6 +20,20 @@ const browser = await chromium.launch({
 const context = await browser.newContext({ viewport: { width: 1200, height: 800 } })
 const page = await context.newPage()
 
+/*
+ * The first-run explainer is a modal, so it holds the pointer and the search
+ * popup will not open behind it. Marked as seen before the app boots, the same
+ * way the browser suite does — this run is about what survives losing the
+ * network, and the dialog has its own coverage in the accessibility pass.
+ */
+await context.addInitScript(() => {
+  try {
+    localStorage.setItem('dust-compass:first-run:1', 'seen')
+  } catch {
+    /* private-mode storage throws; the dialog is harmless if it appears */
+  }
+})
+
 /**
  * The worker only takes control after `install` resolves, and `install` does
  * not resolve until every asset is cached. Waiting for a controller is
@@ -106,6 +120,51 @@ const survived = await precacheCount(flakyPage).catch(() => 0)
 
 assert(tripped, 'the flaky asset was actually served a 503')
 assert(survived >= total, `precache survived a dropped request (${survived}/${total} cached)`)
+
+/**
+ * A shared listing link has to survive the cache.
+ *
+ * The listing pages are deliberately not precached, so a navigation to one
+ * misses — and falling through to the app shell served the app at /p/<uid>/
+ * with no listing in the URL. Every shared link opened the bare city, but only
+ * for someone who had opened the app before, which is everyone it was sent to.
+ */
+{
+  const listings = await (await context.request.get(new URL(`data/${DATA_YEAR}/camp.json`, url).href)).json()
+  const camp = listings.find((entry) => entry.uid && entry.name && entry.location_string)
+  const link = new URL(`p/${camp.uid}/`, url).href
+
+  const warm = await browser.newContext({ viewport: { width: 1200, height: 800 } })
+  await warm.addInitScript(() => {
+    try {
+      localStorage.setItem('dust-compass:first-run:1', 'seen')
+    } catch {
+      /* see above */
+    }
+  })
+  const warmPage = await warm.newPage()
+  await warmPage.goto(url, { waitUntil: 'load' })
+  await warmPage.waitForFunction(() => navigator.serviceWorker?.controller != null, null, { timeout: 60000 })
+  await warmPage.waitForTimeout(2500)
+
+  await warmPage.goto(link, { waitUntil: 'load' })
+  await warmPage.waitForTimeout(2500)
+  assert(
+    new URL(warmPage.url()).searchParams.get('poi') === camp.uid,
+    'a shared link still finds its listing once the cache is warm',
+  )
+
+  // And with no network at all: the page itself is unreachable, so the worker
+  // hands the listing to the cached app as a query parameter instead.
+  await warm.setOffline(true)
+  await warmPage.goto(link, { waitUntil: 'load' }).catch(() => {})
+  await warmPage.waitForTimeout(2500)
+  assert(
+    new URL(warmPage.url()).searchParams.get('poi') === camp.uid,
+    'a shared link still finds its listing offline',
+  )
+  await warm.close()
+}
 
 await browser.close()
 process.exit(failed ? 1 : 0)

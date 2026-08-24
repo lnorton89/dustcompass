@@ -195,8 +195,30 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
-      const hit = (await cache.match(request)) || (await cache.match(SHELL));
-      if (hit) return hit;
+      const exact = await cache.match(request);
+      if (exact) return exact;
+
+      // A listing page is a real page on the server and is deliberately not
+      // precached, so it has to be fetched — but never written back, which is
+      // what was poisoning the shell. Falling straight through to SHELL here
+      // served the app at /p/<uid>/ with no listing in the URL, so every
+      // shared link opened the bare city once a cache existed.
+      try {
+        const network = await fetch(request);
+        if (network.ok) return network;
+      } catch {
+        /* offline, or the page has gone; fall through */
+      }
+
+      // Offline, a shared listing link still has somewhere to go: the app is
+      // cached, and the listing travels as a query parameter instead of a path.
+      const listing = /[/]p[/]([^/]+)[/]?$/.exec(url.pathname);
+      if (listing) {
+        return Response.redirect(SHELL + '?poi=' + encodeURIComponent(listing[1]), 302);
+      }
+
+      const shell = await cache.match(SHELL);
+      if (shell) return shell;
       return fetch(request);
     })());
     return;

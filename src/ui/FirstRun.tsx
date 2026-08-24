@@ -46,9 +46,10 @@ export function FirstRun() {
     try {
       return localStorage.getItem(SEEN_KEY) !== 'seen'
     } catch {
-      // Private windows and blocked site data both throw. Better to show this
-      // twice than to let it stop the map from opening.
-      return false
+      // Private windows and blocked site data both throw. Open rather than
+      // skip: dismiss() below swallows its own write failure, so the worst
+      // case is this screen coming back every launch — never zero onboarding.
+      return true
     }
   })
 

@@ -160,8 +160,16 @@ export function DetailDrawer({
         sx={{ mt: 2 }}
         fullWidth
       >
-        {poi.positionSource === 'address' ? 'Take me there · address area' : 'Take me there'}
+        Take me there
       </Button>
+      {/*
+       * The button used to carry "· address area" as well, so the panel said
+       * the same thing twice in three lines — once appended to the label of the
+       * thing you press, and once underneath it in full. The caveat is worth
+       * making, but it is a caveat about the pin, not about the button, and no
+       * listing has surveyed coordinates this year: said twice on every camp
+       * the reader opens, it stops being read at all.
+       */}
       {poi.positionSource === 'address' && (
         <Typography
           variant="caption"

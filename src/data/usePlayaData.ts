@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CityLayout } from '../brc/layout'
 import { buildCity, type CityGeometry } from '../brc/city'
 import { buildServices, toiletPoints } from '../brc/services'
@@ -59,6 +59,78 @@ export function usePlayaData() {
     setAttempt((current) => current + 1)
   }, [])
 
+  // The pre-embargo dataset from the most recent successful fetch, kept
+  // around so a release-boundary transition can be recomputed locally —
+  // `art`/`camps`/`pois`/`unplaced` all derive from this plus the current
+  // time — without going back to the network. `civic` (services/toilets/
+  // landmarks) isn't embargoed and doesn't change across a transition, so
+  // it's cached alongside rather than recomputed.
+  const rawRef = useRef<
+    { layout: CityLayout; art: ArtItem[]; camps: CampItem[]; civic: Poi[] } | undefined
+  >(undefined)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const clearScheduledTransition = useCallback(() => {
+    if (timerRef.current !== undefined) {
+      clearTimeout(timerRef.current)
+      timerRef.current = undefined
+    }
+  }, [])
+
+  /**
+   * Recompute embargo/art/camps/pois/unplaced from the cached pre-embargo
+   * dataset and arm a timer for whichever configured release boundary (camp
+   * release, then gates-open) hasn't happened yet — nothing is scheduled once
+   * both are released. Called once after a successful fetch and again,
+   * recursively, from the fired timer itself, so a session left open across
+   * both boundaries picks each one up without a reload. `cancelled` is the
+   * same guard `load()` uses for its own fetch, so a superseding load or an
+   * unmount stops this chain too.
+   */
+  const scheduleEmbargoTransition = useCallback(
+    (cancelled: { current: boolean }) => {
+      clearScheduledTransition()
+      const raw = rawRef.current
+      if (!raw) return
+      const embargoWindow = embargoWindowForYear(DATA_YEAR)
+      const current = embargoState(embargoWindow)
+      const nextBoundary = !current.campsReleased
+        ? embargoWindow.campRelease
+        : !current.artReleased
+          ? embargoWindow.gatesOpen
+          : undefined
+      if (!nextBoundary) return
+
+      const fire = () => {
+        if (cancelled.current) return
+        // A fake/host-clamped timer can fire a tick early; recheck the wall
+        // clock rather than trust the callback, and reschedule the remainder
+        // instead of ever revealing data ahead of the configured instant.
+        if (Date.now() < nextBoundary.getTime()) {
+          scheduleEmbargoTransition(cancelled)
+          return
+        }
+        const embargo = embargoState(embargoWindow)
+        const art = applyEmbargo(raw.art, embargo.artReleased)
+        const camps = applyEmbargo(raw.camps, embargo.campsReleased)
+        const listed = toPois(raw.layout, art, camps, embargo)
+        setData((prev) =>
+          prev && {
+            ...prev,
+            art,
+            camps,
+            pois: [...listed.pois, ...raw.civic],
+            unplaced: listed.unplaced,
+            embargo,
+          },
+        )
+        scheduleEmbargoTransition(cancelled)
+      }
+      timerRef.current = setTimeout(fire, Math.max(0, nextBoundary.getTime() - Date.now()))
+    },
+    [clearScheduledTransition],
+  )
+
   /**
    * Shared by the initial/retry load and the silent background refresh
    * below. `clear` decides whether to blank the screen back to the loading
@@ -68,6 +140,10 @@ export function usePlayaData() {
    */
   const load = useCallback((clear: boolean) => {
     const cancelled = { current: false }
+    // A new load — retry or background refresh — makes whatever boundary
+    // was pending from the previous load's dataset moot; it'll be re-armed
+    // below once this load's fetch succeeds.
+    clearScheduledTransition()
     if (clear) {
       setError(undefined)
       setData(undefined)
@@ -107,17 +183,19 @@ export function usePlayaData() {
         const listed = toPois(layout, art, camps, embargo)
         const services = buildServices(serviceSpecs)
         const toilets = toiletPoints(rawToilets)
+        // The survey's places share the index with the listings so that a tap
+        // on a ranger station resolves the same way a tap on a camp does.
+        // They are not embargoed: the city's own infrastructure is published
+        // with the survey, and only participants' locations are held back.
+        const civic = civicPois(layout, services, toilets, city.landmarks)
+        rawRef.current = { layout, art: rawArt, camps: rawCamps, civic }
         setData({
           layout,
           city,
           art,
           camps,
           events,
-          // The survey's places share the index with the listings so that a tap
-          // on a ranger station resolves the same way a tap on a camp does.
-          // They are not embargoed: the city's own infrastructure is published
-          // with the survey, and only participants' locations are held back.
-          pois: [...listed.pois, ...civicPois(layout, services, toilets, city.landmarks)],
+          pois: [...listed.pois, ...civic],
           unplaced: listed.unplaced,
           range: dates.rangeInfo,
           services,
@@ -127,13 +205,15 @@ export function usePlayaData() {
           partialDataWarnings,
         })
         setError(undefined)
+        scheduleEmbargoTransition(cancelled)
       })
       .catch((cause) => !cancelled.current && setError(cause as Error))
 
     return () => {
       cancelled.current = true
+      clearScheduledTransition()
     }
-  }, [])
+  }, [clearScheduledTransition, scheduleEmbargoTransition])
 
   useEffect(() => load(true), [attempt, load])
 

@@ -42,6 +42,19 @@ async function ready(page) {
   await page.waitForTimeout(2500)
 }
 
+/**
+ * The first-run explainer is a modal, so it owns the pointer until it is gone.
+ * Audited on the way past rather than suppressed: it is the first thing a new
+ * user meets, which makes it the last thing that should go unchecked.
+ */
+async function clearFirstRun(page, label) {
+  const dismiss = page.getByRole('button', { name: /Show me the map/i })
+  if (!(await dismiss.count())) return
+  await audit(page, label)
+  await dismiss.click()
+  await page.waitForTimeout(500)
+}
+
 // Desktop: map, events, a listing, and navigation.
 {
   const context = await browser.newContext({
@@ -51,6 +64,7 @@ async function ready(page) {
   })
   const page = await context.newPage()
   await ready(page)
+  await clearFirstRun(page, 'first run')
   await audit(page, 'map')
 
   // Red night mode drops contrast deliberately; it still has to pass.
@@ -101,6 +115,7 @@ async function ready(page) {
   const context = await browser.newContext({ ...devices['Pixel 7'] })
   const page = await context.newPage()
   await ready(page)
+  await clearFirstRun(page, 'phone first run')
   await audit(page, 'phone map')
   await page.getByLabel('Filters and saved spots').click()
   await page.waitForTimeout(800)

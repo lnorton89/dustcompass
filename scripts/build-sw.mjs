@@ -58,8 +58,14 @@ const SHELL = ${JSON.stringify(shell)};
 const DATA_PREFIX = ${JSON.stringify(dataPrefix)};
 // The precached data files bundled with *this* build — a manifest of exactly
 // which URLs make up one coherent data revision, so a background refresh can
-// be judged complete or incomplete as a set rather than file by file.
-const DATA_FILES = PRECACHE.filter((url) => url.indexOf(DATA_PREFIX) === 0);
+// be judged complete or incomplete as a set rather than file by file. Scoped
+// to .json/.geojson specifically, not just the data prefix: ATTRIBUTION.md
+// and LISTINGS-ATTRIBUTION.md live alongside the data files and stay
+// precached for offline credit text, but they never report a JSON
+// content-type, so including them here made results.every(Boolean) below
+// impossible to satisfy for any real build — live-data promotion silently
+// never happened (#71).
+const DATA_FILES = PRECACHE.filter((url) => url.indexOf(DATA_PREFIX) === 0 && /\\.(?:geo)?json$/.test(url));
 // Deliberately not scoped to CACHE_NAME. CACHE_NAME's bytes are hashed into
 // its own name specifically so that name is a promise: this exact content,
 // nothing else. Writing a live-fetched file into it — even one that merely
@@ -81,6 +87,16 @@ const DATA_FILES = PRECACHE.filter((url) => url.indexOf(DATA_PREFIX) === 0);
 const LIVE_POINTER_CACHE = 'dust-compass-live-pointer';
 const LIVE_REVISION_PREFIX = 'dust-compass-live-data-rev-';
 const LIVE_POINTER_URL = self.location.origin + '/__dust-compass-live-revision';
+// Which build's CACHE_NAME promoted the revision the pointer currently
+// names. The pointer and every revision cache are deliberately preserved
+// across worker activations (see above) — but a revision was fetched and
+// validated by whichever build ran refreshLiveData() at the time, not
+// necessarily the build now activating. Without this, a newer worker
+// shipping newer bundled data activated over an older worker's still-named
+// pointer and preferred that older live revision over its own freshly
+// bundled, by-definition-current precache — forever, since nothing here
+// ever re-examined the pointer once past activation (#72).
+const LIVE_POINTER_BUILD_URL = self.location.origin + '/__dust-compass-live-revision-build';
 
 async function notify(message) {
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
@@ -177,16 +193,37 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    // Live data is deliberately not versioned by build — the pointer cache
-    // and every revision cache persist across worker updates, managed by
-    // refreshLiveData()'s own promotion/cleanup rather than swept here as
-    // though they were one more stale precache.
+    // Live data is deliberately not versioned by build by default — the
+    // pointer cache and every revision cache persist across worker updates,
+    // managed by refreshLiveData()'s own promotion/cleanup rather than swept
+    // here as though they were one more stale precache. Surviving this sweep
+    // is not the same as being safe to use, though — see the build-ownership
+    // check just below.
     const names = await caches.keys();
     await Promise.all(
       names
         .filter((name) => name.startsWith('dust-compass-') && name !== CACHE_NAME && name !== LIVE_POINTER_CACHE && !name.startsWith(LIVE_REVISION_PREFIX))
         .map((name) => caches.delete(name)),
     );
+
+    // A pointer left by some other build was fetched and validated against
+    // that build's own code, not this one's — so rather than compare
+    // revision timestamps against a value this file has no other notion of,
+    // clear it outright once ownership doesn't match and let this worker's
+    // own next successful refresh repopulate and re-stamp it (#72). Until
+    // then, reads fall through to fromCache()'s own bundled precache, which
+    // is always current for whichever build is actually running.
+    if (await caches.has(LIVE_POINTER_CACHE)) {
+      const pointer = await caches.open(LIVE_POINTER_CACHE);
+      const buildMarker = await pointer.match(LIVE_POINTER_BUILD_URL);
+      const promotedBy = buildMarker ? await buildMarker.text() : null;
+      if (promotedBy !== CACHE_NAME) {
+        await caches.delete(LIVE_POINTER_CACHE);
+        const staleRevisions = names.filter((name) => name.startsWith(LIVE_REVISION_PREFIX));
+        await Promise.all(staleRevisions.map((name) => caches.delete(name)));
+      }
+    }
+
     await self.clients.claim();
     await notify({ type: 'OFFLINE_READY', total: PRECACHE.length });
   })());
@@ -340,6 +377,9 @@ function refreshLiveData() {
     try {
       const pointer = await caches.open(LIVE_POINTER_CACHE);
       await pointer.put(LIVE_POINTER_URL, new Response(revisionName));
+      // Stamped alongside the pointer itself so a later activation can tell
+      // whether this pointer is still this build's own to trust (#72).
+      await pointer.put(LIVE_POINTER_BUILD_URL, new Response(CACHE_NAME));
       await notify({ type: 'DATA_REFRESHED' });
       await deleteStaleRevisions(revisionName);
     } finally {
@@ -412,7 +452,14 @@ self.addEventListener('fetch', (event) => {
       // cached, and the listing travels as a query parameter instead of a path.
       const listing = /[/]p[/]([^/]+)[/]?$/.exec(url.pathname);
       if (listing) {
-        return Response.redirect(SHELL + '?poi=' + encodeURIComponent(listing[1]), 302);
+        // Response.redirect() requires an absolute URL. SHELL is
+        // root-relative on a project-subpath deployment (e.g.
+        // "/dustcompass/"), which throws a TypeError with no base to
+        // resolve it against — resolving it against the worker's own
+        // origin first keeps this working for both a subpath and a
+        // root-domain deployment (#75).
+        const target = new URL(SHELL + '?poi=' + encodeURIComponent(listing[1]), self.location.origin);
+        return Response.redirect(target.href, 302);
       }
 
       const shell = await cache.match(SHELL);

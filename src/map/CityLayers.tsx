@@ -9,6 +9,13 @@ interface Props {
   palette: PlayaPalette
   /** How much bigger the reader has asked the map's labels to be drawn. */
   labelScale: number
+  /**
+   * The layout's own `road_width` — the survey's typical/fallback street
+   * width — used as the baseline every drawn street's own surveyed `width`
+   * (set on every street feature by `annularStreets()`/`radialStreets()` in
+   * `city.ts`) is scaled against. See `roadWidth()`.
+   */
+  baseRoadWidth: number
 }
 
 /** The Man and the portals: labelled dots, and a tap lands on the dot. */
@@ -18,7 +25,7 @@ export const LANDMARK_LAYER_ID = 'landmark-dot'
  * The city itself: fence, plazas, streets, landmarks. All of it comes from
  * client-generated GeoJSON, so there is nothing to fetch and nothing to cache.
  */
-export function CityLayers({ city, campOutlines, palette, labelScale }: Props) {
+export function CityLayers({ city, campOutlines, palette, labelScale, baseRoadWidth }: Props) {
   return (
     <>
       <Source id="fence" type="geojson" data={city.fence}>
@@ -86,14 +93,14 @@ export function CityLayers({ city, campOutlines, palette, labelScale }: Props) {
           layout={{ 'line-cap': 'round', 'line-join': 'round' }}
           paint={{
             'line-color': palette.streetCasing,
-            'line-width': roadWidth(1.6),
+            'line-width': roadWidth(1.6, baseRoadWidth),
           }}
         />
         <Layer
           id="street-fill"
           type="line"
           layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-          paint={{ 'line-color': palette.street, 'line-width': roadWidth(1) }}
+          paint={{ 'line-color': palette.street, 'line-width': roadWidth(1, baseRoadWidth) }}
         />
         <Layer
           id="street-label"
@@ -177,9 +184,21 @@ export function CityLayers({ city, campOutlines, palette, labelScale }: Props) {
 /**
  * Streets are a fixed width on the ground, not on the screen, so they have to
  * scale with zoom to stay truthful. Roughly 1px per 2m at z16.
+ *
+ * The zoom ramp alone drew every street — a 50 ft K, a 30 ft J, a 40 ft
+ * radial avenue, a 20 ft radial path — at the same physical width, even
+ * though `city.ts` already carries each feature's own surveyed `width`
+ * (#51). Multiplying the ramp by that feature's width relative to
+ * `baseRoadWidth` (the layout's own typical/fallback width) keeps the
+ * zoom-driven screen scaling and adds the surveyed proportion on top, so a
+ * 50 ft street still renders visibly wider than a 30 ft one at every zoom
+ * rather than the difference collapsing to one line width.
  */
-function roadWidth(multiplier: number) {
-  return [
+// Exported for a focused unit test proving a feature's surveyed `width`
+// actually reaches the compiled expression (#51), rather than exercising it
+// through a full MapLibre render.
+export function roadWidth(multiplier: number, baseRoadWidth: number) {
+  const ramp = [
     'interpolate',
     ['exponential', 2],
     ['zoom'],
@@ -189,5 +208,11 @@ function roadWidth(multiplier: number) {
     3 * multiplier,
     19,
     22 * multiplier,
-  ] as unknown as number
+  ]
+  // Coalesce guards a feature that somehow carries no width (city.ts always
+  // sets one, but an expression evaluated by MapLibre itself has no type
+  // system to lean on) — falling back to the baseline gives a 1:1 ratio,
+  // the same width the ramp alone used to draw everything at.
+  const ratio = ['/', ['coalesce', ['get', 'width'], baseRoadWidth], baseRoadWidth]
+  return ['*', ramp, ratio] as unknown as number
 }

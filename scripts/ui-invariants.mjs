@@ -146,6 +146,67 @@ for (const viewport of VIEWPORTS) {
   await context.close()
 }
 
+// ---------------------------------------------------------------------------
+// 1b. Raw, non-MUI map controls hold the touch floor too — not just the
+// MUI-styled chrome the sweep above happens to catch on every load. The
+// dropped-pin marker (#57) is a `<button>` styled by hand inside a MapLibre
+// `<Marker>`, so none of MUI's IconButton/ToggleButton touch-floor rules
+// reach it — and it does not exist in the DOM at all until a pin has
+// actually been dropped, which is why the generic sweep above never caught
+// it on a page load with nothing tapped yet.
+// ---------------------------------------------------------------------------
+
+{
+  const { context, page } = await open({ name: '375', width: 375, height: 812 })
+  const at = await page.evaluate(() => {
+    const map = window.__map
+    if (!map) return undefined
+    const layers = ['poi-dot', 'poi-cluster', 'poi-label', 'saved-dot', 'toilet-dot', 'service-dot'].filter(
+      (id) => map.getLayer(id),
+    )
+    const { x, y } = map.project(map.getCenter())
+    const width = map.getCanvas().clientWidth
+    const height = map.getCanvas().clientHeight
+    const reach = Math.min(width, height) / 2 - 30
+    for (let radius = 60; radius <= reach; radius += 30) {
+      for (let step = 0; step < 24; step += 1) {
+        const angle = (step / 24) * Math.PI * 2
+        const candidate = {
+          x: Math.round(x + Math.cos(angle) * radius),
+          y: Math.round(y + Math.sin(angle) * radius),
+        }
+        if (candidate.x < 40 || candidate.y < 120 || candidate.x > width - 40 || candidate.y > height - 60) continue
+        const hit = map.queryRenderedFeatures(
+          [[candidate.x - 14, candidate.y - 14], [candidate.x + 14, candidate.y + 14]],
+          { layers },
+        )
+        if (hit.length === 0) return candidate
+      }
+    }
+    return undefined
+  })
+  if (!at) {
+    fail('dropped-pin marker: could not find open playa to tap')
+  } else {
+    await page.locator('canvas').click({ position: at, force: true })
+    await page.waitForTimeout(700)
+    const pinBox = await page.evaluate(() => {
+      const marker = document.querySelector('[aria-label^="Marked location:"]')
+      if (!marker) return null
+      const rect = marker.getBoundingClientRect()
+      return { w: Math.round(rect.width), h: Math.round(rect.height) }
+    })
+    if (!pinBox) {
+      fail('dropped-pin marker: tapping open playa did not drop a pin to measure')
+    } else if (pinBox.w >= TOUCH && pinBox.h >= TOUCH) {
+      pass(`dropped-pin marker hit target is at least ${TOUCH}px (${pinBox.w}x${pinBox.h})`)
+    } else {
+      fail(`dropped-pin marker hit target is under ${TOUCH}px`, `${pinBox.w}x${pinBox.h}`)
+    }
+  }
+  await context.close()
+}
+
 /*
  * Checked within each layout rather than straight across, because the step from
  * the phone layout to the desktop one legitimately costs the search box width:

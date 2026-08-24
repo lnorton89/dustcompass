@@ -62,6 +62,21 @@ assert(
 )
 assert(await page.getByTestId('api-disclaimer').isVisible(), 'required API disclaimer is prominent')
 
+// The embargo notice is true for weeks before the event. Re-announcing it on
+// every launch turns an explanation into something to swat away each time.
+const embargoNotice = page.getByText(/embargoed until Gates open/)
+if (await embargoNotice.count()) {
+  await page.locator('[class*=MuiAlert-root] button').first().click()
+  await page.waitForTimeout(400)
+  await page.reload({ waitUntil: 'load' })
+  await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+  await page.waitForTimeout(2500)
+  assert(
+    (await embargoNotice.count()) === 0,
+    'the embargo notice stays dismissed across a reload',
+  )
+}
+
 // The offline-status chip drops its label on a narrow screen and shows only
 // the icon. MUI keeps the empty label element, and its padding used to push
 // that icon eight pixels left of centre.

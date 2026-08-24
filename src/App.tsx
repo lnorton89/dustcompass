@@ -1,19 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import './map/worker'
+import { DATA_YEAR } from './config'
 import {
   Alert,
   AppBar,
   Box,
   Button,
-  Chip,
   CircularProgress,
   CssBaseline,
   Snackbar,
   Stack,
   ThemeProvider,
-  ToggleButton,
   Toolbar,
-  Tooltip,
   TextField,
   Typography,
 } from '@mui/material'
@@ -53,10 +51,11 @@ import { shareLink } from './ui/share'
 import type { Poi, PoiKind } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
-import type { ThemeMode } from './map/style'
+import { paletteFor, type PlayaPalette, type ThemeMode } from './map/style'
 import { BRAND } from './brand'
 import { BrandMark } from './ui/BrandMark'
 import { PwaStatus } from './ui/PwaStatus'
+import { ControlButton, ControlDivider, ControlGroup } from './ui/ControlGroup'
 
 type Filter = PoiKind | 'toilets' | 'services' | 'favorites'
 
@@ -107,7 +106,30 @@ export default function App() {
   const here = location.position ?? manualHere
   const [eventsOpen, setEventsOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [embargoNoticeSeen, setEmbargoNoticeSeen] = useState(false)
+  /**
+   * Dismissing the embargo notice has to stick. It is true for weeks before the
+   * event, and re-announcing it on every launch turns a useful explanation into
+   * something the user has to swat away each time they open the map. Keyed by
+   * year so next year's embargo introduces itself again.
+   */
+  const EMBARGO_NOTICE_KEY = `dust-compass:embargo-notice:${DATA_YEAR}`
+  const [embargoNoticeSeen, setEmbargoNoticeSeen] = useState(() => {
+    try {
+      return localStorage.getItem(EMBARGO_NOTICE_KEY) === 'seen'
+    } catch {
+      // Private windows and blocked site data both throw. The notice showing
+      // twice is a far smaller problem than the map not opening.
+      return false
+    }
+  })
+  const dismissEmbargoNotice = useCallback(() => {
+    setEmbargoNoticeSeen(true)
+    try {
+      localStorage.setItem(EMBARGO_NOTICE_KEY, 'seen')
+    } catch {
+      /* nothing to do — see above */
+    }
+  }, [EMBARGO_NOTICE_KEY])
   const [realNow, setRealNow] = useState(() => new Date())
   const clock = useMemo(() => scheduleClock(data?.range, realNow), [data?.range, realNow])
   const mapRef = useRef<MapRef>(null)
@@ -537,7 +559,7 @@ export default function App() {
                 <Alert
                   severity="info"
                   variant="filled"
-                  onClose={() => setEmbargoNoticeSeen(true)}
+                  onClose={dismissEmbargoNotice}
                   sx={{
                     position: 'absolute',
                     top: 8,

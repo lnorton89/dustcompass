@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   GeolocateControl,
   Map as MapGL,
@@ -7,6 +7,8 @@ import {
   type MapLayerMouseEvent,
   type MapRef,
 } from '@vis.gl/react-maplibre'
+import { Button, Stack, Typography } from '@mui/material'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
 import type { GeoJSONSource } from 'maplibre-gl'
 import type { PlayaData } from '../data/usePlayaData'
 import type { Poi, PoiKind } from '../data/types'
@@ -65,6 +67,33 @@ interface Props {
 
 const GLYPHS = assetUrl('fonts/{fontstack}/{range}.pbf')
 
+export type RenderStatus = 'starting' | 'ready' | 'failed'
+export type RenderStatusEvent = 'load' | 'error' | 'context-lost' | 'context-restored' | 'timeout'
+
+/**
+ * Pure so the failure/recovery logic can be tested without a real MapLibre
+ * instance — jsdom has no WebGL, so nothing that actually drives a `Map` can
+ * run in a unit test. `error` and `timeout` are only fatal while still
+ * `starting`: once the map has genuinely loaded, most 'error' events are
+ * transient (a source hiccup, a style warning), and treating every one of
+ * those as fatal would be worse than the blank-map bug this exists to catch.
+ * Context loss is the one event that can strike a map that already loaded
+ * fine, so it goes straight to `failed` regardless of current status.
+ */
+export function nextRenderStatus(current: RenderStatus, event: RenderStatusEvent): RenderStatus {
+  switch (event) {
+    case 'load':
+      return 'ready'
+    case 'context-restored':
+      return 'ready'
+    case 'context-lost':
+      return 'failed'
+    case 'error':
+    case 'timeout':
+      return current === 'starting' ? 'failed' : current
+  }
+}
+
 /**
  * Ranger stations, medical, ice, toilets, the Man and the portals. They come
  * from the survey rather than the listings API, but a tap on one asks the same
@@ -107,6 +136,30 @@ export function MapView({
     () => new globalThis.Map(data.pois.map((poi) => [poi.uid, poi])),
     [data.pois],
   )
+
+  /**
+   * A blank/background-only map is a materially worse failure than a data
+   * error: there is nothing on screen telling the user to reload, and for an
+   * offline-first navigation app that may be the only recovery available. A
+   * missing/corrupt worker asset, WebGL init failure, or context loss can all
+   * leave the map exactly there — background painted, `load` never firing —
+   * without ever reaching React's own error boundary, since none of this is a
+   * render exception.
+   */
+  const [renderStatus, setRenderStatus] = useState<RenderStatus>('starting')
+  const renderStatusRef = useRef(renderStatus)
+  const applyRenderEvent = useCallback((event: RenderStatusEvent) => {
+    renderStatusRef.current = nextRenderStatus(renderStatusRef.current, event)
+    setRenderStatus(renderStatusRef.current)
+  }, [])
+
+  // Bounded watchdog: `onLoad` racing an indefinitely stuck worker/style init
+  // otherwise leaves the loading state (or nothing at all) on screen forever.
+  useEffect(() => {
+    if (renderStatus !== 'starting') return
+    const timeout = setTimeout(() => applyRenderEvent('timeout'), 15_000)
+    return () => clearTimeout(timeout)
+  }, [renderStatus, applyRenderEvent])
 
   // Frame the whole city rather than guessing a zoom. A fixed zoom that suits a
   // desktop window crops the city badly on a tall phone screen.
@@ -176,6 +229,7 @@ export function MapView({
   )
 
   return (
+    <>
     <MapGL
       ref={mapRef}
       initialViewState={{
@@ -189,7 +243,17 @@ export function MapView({
       mapStyle={style}
       interactiveLayerIds={INTERACTIVE_LAYER_IDS}
       onClick={handleClick}
-      onError={(event) => console.error('Map rendering error:', event.error)}
+      onError={(event) => {
+        console.error('Map rendering error:', event.error)
+        // Before the map has ever loaded, any error is startup-fatal — there
+        // is no known-good render to fall back to. Once it has loaded, most
+        // 'error' events are transient (a source hiccup, a style warning);
+        // turning every one of those into a full failure screen would be
+        // worse than the bug this exists to catch. WebGL context loss is the
+        // one exception — handled separately below, since it can happen at
+        // any point, not just during startup.
+        applyRenderEvent('error')
+      }}
       onMouseMove={(event) => setCursor(event.features?.length ? 'pointer' : undefined)}
       onMouseLeave={() => setCursor(undefined)}
       cursor={cursor}
@@ -216,6 +280,15 @@ export function MapView({
         if (process.env.NEXT_PUBLIC_E2E === '1') {
           ;(window as unknown as Record<string, unknown>).__map = event.target
         }
+        applyRenderEvent('load')
+        // Not surfaced by @vis.gl/react-maplibre as its own prop — attached
+        // directly to the underlying maplibre-gl Map. A lost GL context can
+        // strike a map that already loaded fine minutes ago (a backgrounded
+        // tab, a GPU driver reset), and MapLibre does not recover from it on
+        // its own the way it silently replays sources/layers after most
+        // other disruptions.
+        map.on('webglcontextlost', () => applyRenderEvent('context-lost'))
+        map.on('webglcontextrestored', () => applyRenderEvent('context-restored'))
       }}
       maxPitch={60}
       /*
@@ -308,5 +381,35 @@ export function MapView({
         focusPosition={destination?.position ?? selected?.position}
       />
     </MapGL>
+    {renderStatus === 'failed' && (
+      // A blank/background-only map has no other way to tell the user
+      // anything is wrong, let alone how to fix it — this is deliberately
+      // the loudest thing on screen while it's showing, covering the map
+      // and its controls rather than sharing space with them.
+      <Stack
+        sx={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 5,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 2,
+          px: 4,
+          textAlign: 'center',
+          bgcolor: 'background.default',
+        }}
+      >
+        <ErrorOutlineIcon sx={{ fontSize: 40, color: 'error.main' }} />
+        <Typography variant="h6">The map stopped rendering</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 340 }}>
+          Something kept the map from drawing — often fixed by reloading. Saved spots and
+          favourites are stored on this device and are not affected.
+        </Typography>
+        <Button variant="contained" onClick={() => window.location.reload()}>
+          Reload
+        </Button>
+      </Stack>
+    )}
+    </>
   )
 }

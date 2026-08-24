@@ -55,7 +55,13 @@ import { shareLink } from './ui/share'
 import type { Poi, PoiKind, UnplacedListing } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
-import { paletteFor, type PlayaPalette, type ThemeMode } from './map/style'
+import {
+  LABEL_SCALE,
+  paletteFor,
+  type PlayaPalette,
+  type ReadingSize,
+  type ThemeMode,
+} from './map/style'
 import { BRAND } from './brand'
 import { BrandMark } from './ui/BrandMark'
 import { PwaStatus } from './ui/PwaStatus'
@@ -145,10 +151,36 @@ export default function App() {
       /* nothing to do — see above */
     }
   }, [EMBARGO_NOTICE_KEY])
+  /**
+   * "I cannot read this" is a real complaint out there and it has nothing to do
+   * with eyesight: full sun, a screen under a week of dust, and reading glasses
+   * that are back at camp. Persisted unkeyed by year — someone who needs bigger
+   * text this August needs it next August too.
+   */
+  const READING_KEY = 'dust-compass:reading-size'
+  const [reading, setReading] = useState<ReadingSize>(() => {
+    try {
+      return localStorage.getItem(READING_KEY) === 'large' ? 'large' : 'normal'
+    } catch {
+      // Private windows and blocked site data both throw.
+      return 'normal'
+    }
+  })
+  const toggleReading = useCallback(() => {
+    setReading((current) => {
+      const next = current === 'large' ? 'normal' : 'large'
+      try {
+        localStorage.setItem(READING_KEY, next)
+      } catch {
+        /* nothing to do — the preference just will not outlive the tab */
+      }
+      return next
+    })
+  }, [])
   const [realNow, setRealNow] = useState(() => new Date())
   const clock = useMemo(() => scheduleClock(data?.range, realNow), [data?.range, realNow])
   const mapRef = useRef<MapRef>(null)
-  const theme = useMemo(() => playaTheme(mode), [mode])
+  const theme = useMemo(() => playaTheme(mode, reading), [mode, reading])
   const palette = useMemo(() => paletteFor(mode), [mode])
   // Phones are the real target here; the desktop layout is the special case.
   const compact = useMediaQuery(theme.breakpoints.down('md'))
@@ -655,6 +687,7 @@ export default function App() {
               <MapView
                 data={{ ...data, pois: visiblePois }}
                 mode={mode}
+                labelScale={LABEL_SCALE[reading]}
                 visible={kinds}
                 showServices={active.has('services')}
                 showToilets={active.has('toilets')}
@@ -734,12 +767,7 @@ export default function App() {
                 }}
               >
                 <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.25 }}>
-                  {/*
-                    * The data credit lives here too, rather than in a second
-                    * floating pill of its own. It is the same sentence's worth
-                    * of small print and it belongs in the same place.
-                    */}
-                  City survey &amp; listings: Burning Man Project. {BRAND.disclaimer}
+                  {BRAND.disclaimer}
                 </Typography>
               </Box>
               {heading && navigation && (
@@ -897,9 +925,11 @@ export default function App() {
         palette={palette}
         active={active}
         cityUp={cityUp}
+        reading={reading}
         places={places}
         onToggle={toggleFilter}
         onToggleCityUp={toggleCityUp}
+        onToggleReading={toggleReading}
         onGoToPlace={(place) => {
           setFiltersOpen(false)
           navigateTo(place)

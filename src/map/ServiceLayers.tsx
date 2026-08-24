@@ -1,5 +1,5 @@
 import { Layer, Source } from '@vis.gl/react-maplibre'
-import type { PlayaPalette } from './style'
+import { labelRamp, labelSize, type PlayaPalette } from './style'
 
 interface Props {
   services: GeoJSON.FeatureCollection<GeoJSON.Point>
@@ -7,6 +7,8 @@ interface Props {
   showServices: boolean
   showToilets: boolean
   palette: PlayaPalette
+  /** How much bigger the reader has asked the map's labels to be drawn. */
+  labelScale: number
 }
 
 const EMPTY: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: 'FeatureCollection', features: [] }
@@ -20,7 +22,14 @@ export const TOILET_LAYER_ID = 'toilet-dot'
  * and art are switched off — at 3am they are the only layer that matters, and
  * hunting for them through a filter menu is the wrong interaction.
  */
-export function ServiceLayers({ services, toilets, showServices, showToilets, palette }: Props) {
+export function ServiceLayers({
+  services,
+  toilets,
+  showServices,
+  showToilets,
+  palette,
+  labelScale,
+}: Props) {
   return (
     <>
       <Source id="toilets" type="geojson" data={showToilets ? toilets : EMPTY}>
@@ -37,7 +46,11 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
           id="toilet-icon"
           type="symbol"
           minzoom={14}
-          layout={{ 'text-field': 'T', 'text-font': ['Open Sans Regular'], 'text-size': 10 }}
+          layout={{
+            'text-field': 'T',
+            'text-font': ['Open Sans Regular'],
+            'text-size': labelSize(labelScale, 10),
+          }}
           paint={{ 'text-color': palette.playa }}
         />
         <Layer
@@ -47,7 +60,10 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
           layout={{
             'text-field': 'Toilets',
             'text-font': ['Open Sans Regular'],
-            'text-size': ['interpolate', ['linear'], ['zoom'], 15, 12, 18, 14] as unknown as number,
+            'text-size': labelRamp(labelScale, [
+              [15, 12],
+              [18, 14],
+            ]),
             'text-offset': [0, 0.8],
             'text-anchor': 'top',
             'text-optional': true,
@@ -85,7 +101,7 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
           layout={{
             'text-field': ['match', ['get', 'category'], 'medical', '+', 'ranger', 'R', 'i'],
             'text-font': ['Open Sans Regular'],
-            'text-size': 11,
+            'text-size': labelSize(labelScale, 11),
           }}
           paint={{ 'text-color': palette.playa }}
         />
@@ -98,7 +114,10 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
             'text-font': ['Open Sans Regular'],
             // Medical, rangers, ice. Bigger than a camp label, because the
             // moment one of these is wanted is not a moment for squinting.
-            'text-size': ['interpolate', ['linear'], ['zoom'], 13, 13, 17, 16] as unknown as number,
+            'text-size': labelRamp(labelScale, [
+              [13, 13],
+              [17, 16],
+            ]),
             'text-offset': [0, 0.9],
             'text-anchor': 'top',
           }}

@@ -2,12 +2,14 @@ import { useMemo } from 'react'
 import { Layer, Source } from '@vis.gl/react-maplibre'
 import type { Poi, PoiKind } from '../data/types'
 import type { Position } from '../brc/geo'
-import type { PlayaPalette } from './style'
+import { labelRamp, labelSize, type PlayaPalette } from './style'
 
 interface Props {
   pois: Poi[]
   visible: Set<PoiKind>
   palette: PlayaPalette
+  /** How much bigger the reader has asked the map's labels to be drawn. */
+  labelScale: number
   /** Hide labels that would compete with the explicit selected/destination callout. */
   focusPosition?: Position
 }
@@ -22,7 +24,7 @@ export const POI_LABEL_LAYER_ID = 'poi-label'
  * MapLibre's own GeoJSON clustering handles on a phone — deck.gl only starts to
  * earn its weight an order of magnitude above this.
  */
-export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
+export function PoiLayers({ pois, visible, palette, labelScale, focusPosition }: Props) {
   const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
     () => ({
       type: 'FeatureCollection',
@@ -76,7 +78,7 @@ export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
         layout={{
           'text-field': ['get', 'point_count_abbreviated'],
           'text-font': ['Open Sans Regular'],
-          'text-size': 11,
+          'text-size': labelSize(labelScale, 11),
         }}
         paint={{ 'text-color': palette.playa, 'text-opacity': 0.85 }}
       />
@@ -106,7 +108,10 @@ export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
           // Read at arm's length, on a screen with dust on it, in daylight.
           // Grows with zoom, because at close range there is room for it and
           // the name is the whole reason you zoomed in.
-          'text-size': ['interpolate', ['linear'], ['zoom'], 15.5, 13, 18, 16] as unknown as number,
+          'text-size': labelRamp(labelScale, [
+            [15.5, 13],
+            [18, 16],
+          ]),
           'text-offset': [0, 0.9],
           'text-anchor': 'top',
           // Camps are the most numerous thing on the map and the least likely

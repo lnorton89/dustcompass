@@ -118,3 +118,31 @@ export function baseStyle(palette: PlayaPalette, glyphs: string): StyleSpecifica
     layers: [{ id: 'playa', type: 'background', paint: { 'background-color': palette.playa } }],
   }
 }
+
+/**
+ * How much larger the map's labels are drawn when the reader has asked for
+ * bigger text. The map is read at arm's length, in daylight, through dust on
+ * the glass, and often by someone who did not bring their glasses to the
+ * desert — and unlike the interface, the labels have room to grow into.
+ */
+export const LABEL_SCALE = { normal: 1, large: 1.25 } as const
+export type ReadingSize = keyof typeof LABEL_SCALE
+
+/** One label size, scaled. Kept to a tenth of a pixel; MapLibre accepts it. */
+export const labelSize = (scale: number, size: number) => Math.round(size * scale * 10) / 10
+
+/**
+ * A label that grows with zoom, scaled. Only the sizes move — the zoom stops
+ * are where a label starts earning its space and have nothing to do with how
+ * big it is drawn.
+ *
+ * Cast because MapLibre's own layout types take a number here, while accepting
+ * an expression at runtime; the same cast the layers already use inline.
+ */
+export const labelRamp = (scale: number, stops: readonly (readonly [number, number])[]) =>
+  [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    ...stops.flatMap(([zoom, size]) => [zoom, labelSize(scale, size)]),
+  ] as unknown as number

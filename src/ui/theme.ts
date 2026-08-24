@@ -1,5 +1,5 @@
 import { createTheme, type Theme } from '@mui/material/styles'
-import type { ThemeMode } from '../map/style'
+import type { ReadingSize, ThemeMode } from '../map/style'
 
 /**
  * The floor for anything a finger lands on. Every platform guideline agrees on
@@ -10,10 +10,17 @@ import type { ThemeMode } from '../map/style'
 const TOUCH = 44
 
 /**
+ * MUI derives every `rem` in the type scale from this, so one number moves the
+ * whole interface. 14 is its own default; 16 is a step that stays inside the
+ * layouts — the toolbar and the bottom bar were both measured at it.
+ */
+const BASE_FONT_SIZE = { normal: 14, large: 16 } as const
+
+/**
  * Dark is the default and the point: this gets read at 3am on a dark playa,
  * where a white screen destroys night vision for everyone nearby.
  */
-export function playaTheme(mode: ThemeMode): Theme {
+export function playaTheme(mode: ThemeMode, reading: ReadingSize = 'normal'): Theme {
   const night = mode === 'night'
   return createTheme({
     cssVariables: true,
@@ -49,6 +56,10 @@ export function playaTheme(mode: ThemeMode): Theme {
      */
     typography: {
       fontFamily: '"Inter", system-ui, -apple-system, "Segoe UI", sans-serif',
+      // Everything below is in `rem`, so this is the one lever for "I cannot
+      // read this" — squinting at a dusty screen in full sun with the glasses
+      // still in the tent.
+      fontSize: BASE_FONT_SIZE[reading],
       h5: { fontWeight: 700, fontSize: '1.75rem', lineHeight: 1.15, letterSpacing: '-0.02em' },
       h6: { fontWeight: 650, letterSpacing: '-0.01em' },
       // A step up each, which is the difference between glancing at a distance

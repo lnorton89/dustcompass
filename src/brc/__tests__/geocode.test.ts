@@ -257,8 +257,17 @@ describe('street/radial coverage (issue #52)', () => {
     tStreets: [
       // Reaches all the way to K.
       { refs: ['3:00'], segments: [[0, 'k']] },
+      { refs: ['3:30'], segments: [[0, 'k']] },
       // Stops at C — never reaches K.
       { refs: ['5:00'], segments: [[0, 'c']] },
+      // A minor quarter-hour spoke, surveyed only from the outer blocks in —
+      // real BRC road infrastructure often looks exactly like this, and it is
+      // not a gap in the address grid (#52 regression: "D & 7:15"-style
+      // addresses on real 2026 data were being rejected wholesale because the
+      // 3:15 spoke itself never reaches past C, even though the ring is
+      // confirmed present and both flanking major radials reach all the way
+      // to K).
+      { refs: ['3:15'], segments: [[0, 'c']] },
       // 9:00 has no surveyed radial in this fixture at all.
     ],
     plazas: [],
@@ -278,6 +287,18 @@ describe('street/radial coverage (issue #52)', () => {
     })
     it('is false when the radial stops short of the requested ring', () => {
       expect(intersectionExists(COVERAGE_LAYOUT, '5:00', 'k')).toBe(false)
+    })
+    it('is true at a quarter-hour clock whose own minor spoke is short, when both flanking majors reach', () => {
+      expect(intersectionExists(COVERAGE_LAYOUT, '3:15', 'k')).toBe(true)
+    })
+    it('is still true at a quarter-hour clock inside the minor spoke\'s own reach', () => {
+      expect(intersectionExists(COVERAGE_LAYOUT, '3:15', 'c')).toBe(true)
+    })
+    it('is false at a quarter-hour clock when a flanking major does not reach', () => {
+      // 5:15 sits between 5:00 (stops at C) and 5:30 (no surveyed radial at
+      // all in this fixture) — neither flank reaches K, so this must not
+      // invent an intersection there just because it is a quarter-hour clock.
+      expect(intersectionExists(COVERAGE_LAYOUT, '5:15', 'k')).toBe(false)
     })
   })
 

@@ -1,4 +1,4 @@
-import type { CityLayout, Feet } from './layout'
+import type { CityLayout, Feet, RadialStreet } from './layout'
 import { findAnnular, resolveRadius } from './layout'
 import {
   clockToBearing,
@@ -126,19 +126,43 @@ function withinArc(fromClock: string, toClock: string, targetMinutes: number): b
  * of the outer rings, and a clock with no radial at all names no
  * intersection regardless of what the annular street does there.
  */
+function radialReaches(layout: CityLayout, radial: RadialStreet, streetDistance: Feet): boolean {
+  return radial.segments.some(([from, to]) => {
+    const lo = resolveRadius(layout, from)
+    const hi = resolveRadius(layout, to)
+    return streetDistance >= Math.min(lo, hi) && streetDistance <= Math.max(lo, hi)
+  })
+}
+
 export function intersectionExists(layout: CityLayout, clock: string, streetRef: string): boolean {
   const street = layout.cStreets.find((s) => s.ref === streetRef)
   if (!street) return false
   const target = clockToMinutes(clock)
   if (!street.segments.some(([from, to]) => withinArc(from, to, target))) return false
 
-  const radial = layout.tStreets.find((r) => r.refs.some((ref) => clockToMinutes(ref) === target))
-  if (!radial) return false
-  return radial.segments.some(([from, to]) => {
-    const lo = resolveRadius(layout, from)
-    const hi = resolveRadius(layout, to)
-    return street.distance >= Math.min(lo, hi) && street.distance <= Math.max(lo, hi)
-  })
+  const findRadial = (minutes: number) =>
+    layout.tStreets.find((r) => r.refs.some((ref) => clockToMinutes(ref) === minutes))
+
+  const radial = findRadial(target)
+  if (radial && radialReaches(layout, radial, street.distance)) return true
+
+  // Minor quarter-hour spokes are frequently surveyed only from the outer
+  // blocks in — real BRC road infrastructure only exists there, not a gap
+  // in the address grid. A camp addressed "D & 7:15" is real even where the
+  // 7:15 spoke itself is only drawn from F outward: the block between the
+  // flanking hour/half-hour radials belongs to the ring the moment that ring
+  // is confirmed present (above), whether or not the minor cross-spoke
+  // between them was separately traced all the way to it.
+  if (target % 30 !== 0) {
+    const lowerMinutes = Math.floor(target / 30) * 30
+    const upperMinutes = (lowerMinutes + 30) % 720
+    const lower = findRadial(lowerMinutes)
+    const upper = findRadial(upperMinutes)
+    return Boolean(
+      lower && radialReaches(layout, lower, street.distance) && upper && radialReaches(layout, upper, street.distance),
+    )
+  }
+  return false
 }
 
 export function parseAddress(input: string, layout: CityLayout): PlayaAddress | undefined {

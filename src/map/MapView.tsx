@@ -44,6 +44,8 @@ interface Props {
   onLocate: () => void
   /** A dropped or shared location to mark, if any. */
   pin?: { position: Position; address: string }
+  /** Fires when the pin marker itself is tapped, to reopen its actions. */
+  onPinClick?: () => void
   /**
    * Where a shared link wants the camera. Framing the whole city on load would
    * otherwise race this and win, dropping the visitor on the city view instead
@@ -89,6 +91,7 @@ export function MapView({
   onProbe,
   onLocate,
   pin,
+  onPinClick,
   initialTarget,
   route,
   selected,
@@ -242,17 +245,26 @@ export function MapView({
       />
       {pin && (
         <Marker longitude={pin.position[0]} latitude={pin.position[1]} anchor="bottom">
-          <div
+          {/*
+           * Otherwise inert once the six-second Save/Share snackbar that
+           * created it auto-hides: the pin stayed on the map with no way
+           * back to those actions short of dropping a fresh one on top of it.
+           */}
+          <button
+            type="button"
             title={pin.address}
-            aria-label={`Marked location: ${pin.address}`}
+            aria-label={`Marked location: ${pin.address}. Reopen save and share options.`}
+            onClick={onPinClick}
             style={{
               width: 16,
               height: 16,
+              padding: 0,
+              border: `2px solid ${palette.playa}`,
               borderRadius: '50% 50% 50% 0',
               transform: 'rotate(-45deg)',
               background: palette.art,
-              border: `2px solid ${palette.playa}`,
               boxShadow: '0 1px 4px rgba(0,0,0,0.6)',
+              cursor: 'pointer',
             }}
           />
         </Marker>

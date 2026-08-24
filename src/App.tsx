@@ -173,6 +173,8 @@ export default function App() {
     position: Position
     address?: string
     approximate?: boolean
+    /** Present when heading to a listed camp/art piece, so the URL can name it. */
+    uid?: string
   }>()
 
   // "On now" has to stay true as time passes, or the panel quietly lies.
@@ -284,9 +286,15 @@ export default function App() {
     if (linkKey && restoredLink !== linkKey) return
     if (selected) publish({ poi: selected.uid })
     else if (unplaced) publish({ poi: unplaced.uid })
+    // The active navigation destination outranks a leftover dropped pin —
+    // otherwise starting navigation to a listing while an earlier pin was
+    // still on the map published that unrelated pin's address, and starting
+    // navigation to a place with no pin at all lost the destination from the
+    // URL entirely, falling back to the bare app root.
+    else if (heading) publish(heading.uid ? { poi: heading.uid } : heading.address ? { at: heading.address } : {})
     else if (pin) publish({ at: pin.address })
     else publish({})
-  }, [data, selected, unplaced, pin, publish, linkKey, restoredLink])
+  }, [data, selected, unplaced, heading, pin, publish, linkKey, restoredLink])
 
   const visiblePois = useMemo(() => {
     if (!data) return []
@@ -370,10 +378,27 @@ export default function App() {
   )
 
   const navigateTo = useCallback(
-    (target: { name: string; position: Position; address?: string; positionSource?: 'gps' | 'address' }) => {
-      setHeading({ ...target, approximate: target.positionSource === 'address' })
+    (target: {
+      name: string
+      position: Position
+      address?: string
+      positionSource?: 'gps' | 'address'
+      uid?: string
+    }) => {
+      setHeading({
+        name: target.name,
+        position: target.position,
+        address: target.address,
+        approximate: target.positionSource === 'address',
+        uid: target.uid,
+      })
       arrived.current = false
       setSelected(undefined)
+      // An earlier dropped pin is unrelated to this destination — leaving it
+      // behind meant it could out-rank the new heading in the URL-mirroring
+      // effect below, sharing the old pin's address while navigating to
+      // somewhere else entirely.
+      setPin(undefined)
       mapRef.current?.flyTo({
         center: target.position,
         zoom: 16.5,
@@ -395,7 +420,11 @@ export default function App() {
       })
       setSelected(poi)
       setUnplaced(undefined)
-      if (!poi && data) setPin({ position, address: addressFor(position, data.layout) })
+      // A pin marks bare playa the user tapped; selecting a listed place is a
+      // different target and should not leave that earlier pin sitting on
+      // the map as an unrelated, unexplained marker.
+      if (poi) setPin(undefined)
+      else if (data) setPin({ position, address: addressFor(position, data.layout) })
     },
     [data, focusPadding],
   )
@@ -685,6 +714,7 @@ export default function App() {
                   if (place) navigateTo(place)
                 }}
                 pin={pin}
+                onPinClick={() => pin && setProbe(pin.address)}
                 initialTarget={initialTarget}
                 // Withheld until a real fix exists rather than drawn from the
                 // Man fallback — a route line with no ambiguity about where it
@@ -977,6 +1007,16 @@ export default function App() {
                 onClick={() => void share({ at: pin.address }, `Meet me at ${pin.address}`)}
               >
                 Share
+              </Button>
+              <Button
+                color="secondary"
+                size="small"
+                onClick={() => {
+                  setPin(undefined)
+                  setProbe(undefined)
+                }}
+              >
+                Clear
               </Button>
             </>
           ) : undefined

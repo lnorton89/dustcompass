@@ -81,6 +81,9 @@ if (await embargoNotice.count()) {
 // the icon. MUI keeps the empty label element, and its padding used to push
 // that icon eight pixels left of centre.
 await page.setViewportSize({ width: 697, height: 900 })
+// A resize is not instant, and on a slower machine the chip has not
+// re-rendered by the time a fixed wait expires.
+await page.locator('[class*=MuiChip-root]').first().waitFor({ timeout: 15000 }).catch(() => {})
 await page.waitForTimeout(400)
 const chipIcon = await page.evaluate(() => {
   const chip = document.querySelector('[class*=MuiChip-root]')
@@ -105,9 +108,15 @@ for (const width of [1440, 1100, 900, 760, 420]) {
   await page.setViewportSize({ width, height: 900 })
   await page.waitForTimeout(400)
   const box = await page.getByPlaceholder(/Camp, art, or an address|Search the playa/).boundingBox()
+  // A share of the bar rather than a pixel count: text metrics differ between
+  // platforms, and 150px was a number tuned on one machine's fonts. What
+  // matters is that search is not the thing that got squeezed out.
+  // The upper end is capped by the field's own maxWidth, which lands at ~30% of
+  // a 1440px bar, so the floor sits below that rather than on top of it.
+  const share = (box?.width ?? 0) / width
   assert(
-    (box?.width ?? 0) > 150,
-    `search stays usable at ${width}px wide (${Math.round(box?.width ?? 0)}px)`,
+    share > 0.25,
+    `search keeps its share of the bar at ${width}px (${Math.round(box?.width ?? 0)}px, ${Math.round(share * 100)}%)`,
   )
 }
 await page.setViewportSize({ width: 1440, height: 900 })
@@ -382,11 +391,14 @@ const bareSpot = async () => {
     const layers = ['poi-dot', 'poi-cluster', 'poi-label', 'saved-dot', 'toilet-dot', 'service-dot']
       .filter((id) => map.getLayer(id))
     const { x, y } = map.project(map.getCenter())
-    for (let radius = 60; radius <= 320; radius += 40) {
-      for (let step = 0; step < 12; step += 1) {
-        const angle = (step / 12) * Math.PI * 2
+    const width = map.getCanvas().clientWidth
+    const height = map.getCanvas().clientHeight
+    const reach = Math.min(width, height) / 2 - 30
+    for (let radius = 60; radius <= reach; radius += 30) {
+      for (let step = 0; step < 24; step += 1) {
+        const angle = (step / 24) * Math.PI * 2
         const at = { x: Math.round(x + Math.cos(angle) * radius), y: Math.round(y + Math.sin(angle) * radius) }
-        if (at.x < 40 || at.y < 120) continue
+        if (at.x < 40 || at.y < 120 || at.x > width - 40 || at.y > height - 60) continue
         const hit = map.queryRenderedFeatures(
           [[at.x - 14, at.y - 14], [at.x + 14, at.y + 14]],
           { layers },

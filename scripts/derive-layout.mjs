@@ -337,9 +337,13 @@ async function main() {
 
   let dmz
   if (data.dmz.features.length > 0) {
-    const ring = data.dmz.features[0].geometry.coordinates[0].map(toXY)
-    const radii = ring.map(([x, y]) => Math.hypot(x - cx, y - cy))
-    const minutes = ring.map(([x, y]) => minutesOf(bearingOf([x - cx, y - cy]), bearing))
+    // The survey can publish the deep-playa buffer as more than one polygon
+    // feature — e.g. two Music Zones on opposite sides of the city. Every
+    // feature's ring has to feed the same distance/depth fit and segment
+    // pass, or only whichever band happened to be feature[0] gets drawn.
+    const points = data.dmz.features.flatMap((f) => f.geometry.coordinates[0].map(toXY))
+    const radii = points.map(([x, y]) => Math.hypot(x - cx, y - cy))
+    const minutes = points.map(([x, y]) => minutesOf(bearingOf([x - cx, y - cy]), bearing))
     dmz = {
       distance: Math.round(Math.min(...radii)),
       depth: Math.round(Math.max(...radii) - Math.min(...radii)),

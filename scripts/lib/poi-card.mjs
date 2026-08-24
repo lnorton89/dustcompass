@@ -13,33 +13,13 @@
 import { createElement } from 'react'
 import { packageFontLoader } from 'metaplate/fonts'
 import { createNodeOg } from 'metaplate/node'
-import { PALETTE } from './og-plate.mjs'
+import { PALETTE, MARK, ROSETTE, dataUri } from './og-plate.mjs'
 
 const { ink, dust, ember, horizon } = PALETTE
 const muted = '#584f42'
 const faint = '#766c5b'
 
 const h = createElement
-
-const MARK = `<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 76 76">
-  <rect width="76" height="76" rx="18" fill="${ink}"/>
-  <circle cx="38" cy="38" r="24" fill="none" stroke="${horizon}" stroke-width="3"/>
-  <path d="M38 14v10M38 52v10M14 38h10M52 38h10" stroke="${horizon}" stroke-width="3" stroke-linecap="round"/>
-  <path d="m38 24 7 17-7-3-7 3 7-17Z" fill="${ember}"/>
-  <path d="M22 48c8-4 24-4 32 0" fill="none" stroke="${dust}" stroke-width="3" stroke-linecap="round"/>
-  <circle cx="38" cy="38" r="3" fill="${dust}"/>
-</svg>`
-
-/** A compass rose, for a listing with no photo of its own. */
-const ROSETTE = `<svg xmlns="http://www.w3.org/2000/svg" width="260" height="260" viewBox="-140 -140 280 280">
-  <circle cx="0" cy="0" r="128" fill="none" stroke="${dust}" stroke-width="2" opacity=".18"/>
-  <circle cx="0" cy="0" r="91" fill="none" stroke="${horizon}" stroke-width="5" opacity=".65"/>
-  <path d="M0-128v37M0 91v37M-128 0h37M91 0h37" stroke="${horizon}" stroke-width="5" stroke-linecap="round" opacity=".65"/>
-  <path d="m0-91 30 105L0 0l-30 14L0-91Z" fill="${ember}" opacity=".85"/>
-  <circle cx="0" cy="0" r="12" fill="${dust}" opacity=".5"/>
-</svg>`
-
-const dataUri = (svg) => `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
 
 const font = (weight) => ({
   name: 'Inter',
@@ -54,6 +34,12 @@ const titleSize = (name) => (name.length > 44 ? 46 : name.length > 28 ? 58 : 70)
 export const poiOg = createNodeOg({
   alt: (copy) => copy.alt,
   fonts: packageFontLoader([font(500), font(600), font(800)]),
+  // A camp or art piece with a photo gets it letterboxed on a dark panel — the
+  // photos are whatever shape the camp uploaded, and ink is the one background
+  // every one of them reads cleanly against. A listing with no photo has
+  // nothing to letterbox, so it gets the same single cream background as the
+  // app's own card instead of an empty dark box next to it: the rosette that
+  // used to fill that box is now a watermark on the cream, not a second panel.
   component: (copy) =>
     h(
       'div',
@@ -62,6 +48,7 @@ export const poiOg = createNodeOg({
           width: '100%',
           height: '100%',
           display: 'flex',
+          position: 'relative',
           fontFamily: 'Inter',
           backgroundColor: dust,
           backgroundImage: `radial-gradient(85% 85% at 30% 25%, #fff7e8 0%, ${dust} 100%)`,
@@ -69,6 +56,14 @@ export const poiOg = createNodeOg({
       },
       h('div', { style: { display: 'flex', width: 18, height: 630, backgroundColor: ember } }),
       h('div', { style: { display: 'flex', width: 7, height: 630, backgroundColor: horizon } }),
+      copy.image
+        ? null
+        : h('img', {
+            src: dataUri(ROSETTE),
+            width: 260,
+            height: 260,
+            style: { position: 'absolute', left: 860, top: 185 },
+          }),
 
       h(
         'div',
@@ -76,7 +71,7 @@ export const poiOg = createNodeOg({
           style: {
             display: 'flex',
             flexDirection: 'column',
-            width: 620,
+            width: copy.image ? 620 : 780,
             padding: '54px 44px 46px 50px',
           },
         },
@@ -126,26 +121,26 @@ export const poiOg = createNodeOg({
         ),
       ),
 
-      h(
-        'div',
-        {
-          style: {
-            display: 'flex',
-            width: 555,
-            height: 630,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: ink,
-          },
-        },
-        copy.image
-          ? h('img', {
+      copy.image
+        ? h(
+            'div',
+            {
+              style: {
+                display: 'flex',
+                width: 555,
+                height: 630,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: ink,
+              },
+            },
+            h('img', {
               src: copy.image,
               width: 440,
               height: 330,
               style: { objectFit: 'contain' },
-            })
-          : h('img', { src: dataUri(ROSETTE), width: 260, height: 260 }),
-      ),
+            }),
+          )
+        : null,
     ),
 })

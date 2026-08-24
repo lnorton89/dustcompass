@@ -38,8 +38,14 @@ const faint = '#766c5b'
  */
 const h = createElement
 
-/** The compass mark that also serves as the app icon. */
-const MARK = `<svg xmlns="http://www.w3.org/2000/svg" width="76" height="76" viewBox="0 0 76 76">
+/**
+ * The compass mark that also serves as the app icon, and the same mark at
+ * poster scale (needle up the 12:00 radial). Exported so every plate that
+ * needs the brand mark draws this one rather than a hand-copied lookalike —
+ * poi-card.mjs used to keep its own `ROSETTE` and it drifted: no horizon
+ * curve, no pivot ring, reading as a generic compass rose instead of the mark.
+ */
+export const MARK = `<svg xmlns="http://www.w3.org/2000/svg" width="76" height="76" viewBox="0 0 76 76">
   <rect width="76" height="76" rx="18" fill="${ink}"/>
   <circle cx="38" cy="38" r="24" fill="none" stroke="${horizon}" stroke-width="3"/>
   <path d="M38 14v10M38 52v10M14 38h10M52 38h10" stroke="${horizon}" stroke-width="3" stroke-linecap="round"/>
@@ -48,8 +54,7 @@ const MARK = `<svg xmlns="http://www.w3.org/2000/svg" width="76" height="76" vie
   <circle cx="38" cy="38" r="3" fill="${dust}"/>
 </svg>`
 
-/** The same mark at poster scale, needle up the 12:00 radial. */
-const ROSETTE = `<svg xmlns="http://www.w3.org/2000/svg" width="280" height="280" viewBox="-140 -140 280 280">
+export const ROSETTE = `<svg xmlns="http://www.w3.org/2000/svg" width="280" height="280" viewBox="-140 -140 280 280">
   <circle cx="0" cy="0" r="128" fill="none" stroke="${ink}" stroke-width="2" opacity=".12"/>
   <circle cx="0" cy="0" r="91" fill="none" stroke="${horizon}" stroke-width="5"/>
   <circle cx="0" cy="0" r="59" fill="none" stroke="${ink}" stroke-width="2" opacity=".22"/>
@@ -60,7 +65,7 @@ const ROSETTE = `<svg xmlns="http://www.w3.org/2000/svg" width="280" height="280
   <circle cx="0" cy="0" r="5" fill="${dust}"/>
 </svg>`
 
-const dataUri = (svg) => `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+export const dataUri = (svg) => `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
 
 const font = (weight) => ({
   name: 'Inter',

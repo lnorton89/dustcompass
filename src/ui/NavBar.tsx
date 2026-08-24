@@ -1,8 +1,9 @@
-import { Box, Button, IconButton, Paper, Stack, Typography } from '@mui/material'
+import { Box, Button, IconButton, Paper, Stack, Tooltip, Typography } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk'
 import DirectionsBikeIcon from '@mui/icons-material/DirectionsBike'
 import NearMeIcon from '@mui/icons-material/NearMe'
+import VisibilityIcon from '@mui/icons-material/Visibility'
 import { formatDistance, formatMinutes, type Travel } from '../brc/travel'
 
 interface Props {
@@ -16,6 +17,8 @@ interface Props {
   status: 'idle' | 'locating' | 'tracking' | 'denied' | 'unavailable'
   accuracy?: number
   approximate?: boolean
+  /** True while a Screen Wake Lock is actually held for this navigation (#65) — not merely supported. */
+  screenAwake?: boolean
   onRetryLocation: () => void
   onClear: () => void
 }
@@ -26,7 +29,7 @@ interface Props {
  * city is built in — "head toward 4:30" is something you can act on without
  * looking at the screen again.
  */
-export function NavBar({ name, address, travel, heading, located, status, accuracy, approximate, onRetryLocation, onClear }: Props) {
+export function NavBar({ name, address, travel, heading, located, status, accuracy, approximate, screenAwake, onRetryLocation, onClear }: Props) {
   return (
     <Paper
       elevation={8}
@@ -146,6 +149,22 @@ export function NavBar({ name, address, travel, heading, located, status, accura
           </Button>
         )}
       </Box>
+      {/*
+       * The only feedback that this is holding the screen open at all —
+       * otherwise the reason the phone never dims mid-route is invisible.
+       * Shown only while a lock is actually held, not merely supported: a
+       * refused/unsupported request keeps navigation working exactly as it
+       * did before this existed, silently.
+       */}
+      {screenAwake && (
+        <Tooltip title="Keeping the screen on while you navigate">
+          <VisibilityIcon
+            fontSize="small"
+            aria-label="Screen staying on during navigation"
+            sx={{ color: 'text.secondary', flexShrink: 0 }}
+          />
+        </Tooltip>
+      )}
       <IconButton onClick={onClear} size="small" aria-label="Stop navigating">
         <CloseIcon fontSize="small" />
       </IconButton>

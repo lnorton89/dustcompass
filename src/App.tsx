@@ -49,6 +49,7 @@ import { useEventsByHost, usePlayaData, type PartialDataWarning } from './data/u
 import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
 import { useGeolocation, type LocationStatus } from './data/useGeolocation'
+import { useWakeLock } from './data/useWakeLock'
 import { useSavedPlaces } from './data/useSavedPlaces'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
@@ -625,6 +626,11 @@ export default function App() {
       clock: bearingToClock(data.layout, bearingBetween(origin, heading.position)),
     }
   }, [heading, origin, data])
+  // Distance and heading are meant to be read hands-free while walking or
+  // biking — a screen that dims mid-route defeats that (#65). `Boolean(heading)`
+  // matches NavBar's own visibility condition below exactly: the lock only
+  // holds while there is an active destination on screen.
+  const wakeLock = useWakeLock(Boolean(heading))
   /**
    * Arrival, buzzed once. The whole point of giving the heading as a clock
    * position is that you can act on it without looking at the screen, so the
@@ -1148,6 +1154,7 @@ export default function App() {
                   status={location.status}
                   accuracy={location.accuracy}
                   approximate={heading.approximate}
+                  screenAwake={wakeLock === 'active'}
                   onRetryLocation={location.start}
                   onClear={() => {
                     setHeading(undefined)

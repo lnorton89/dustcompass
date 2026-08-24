@@ -300,6 +300,41 @@ assert(
   'clearing navigation removes the route',
 )
 
+// A playa address names an intersection, so camps share one. Whichever of them
+// wins the label is the name the user reads, and tapping it must open that
+// camp: it used to open whichever feature the renderer returned first.
+const contested = await page.evaluate(() => {
+  const labels = window.__map.queryRenderedFeatures({ layers: ['poi-label'] })
+  for (const label of labels) {
+    if (!label.properties?.uid) continue
+    const point = window.__map.project(label.geometry.coordinates)
+    const beneath = window.__map
+      .queryRenderedFeatures([[point.x - 12, point.y - 12], [point.x + 12, point.y + 12]], {
+        layers: ['poi-dot'],
+      })
+      .filter((f) => f.properties?.uid)
+    if (beneath.length > 1) {
+      return { name: label.properties.name, x: point.x, y: point.y, beneath: beneath.length }
+    }
+  }
+  return undefined
+})
+if (contested) {
+  // The map is often still easing when this runs, and Playwright will wait for
+  // a canvas to hold still forever. It never will.
+  await page.locator('canvas').click({ position: { x: contested.x, y: contested.y }, force: true })
+  await page.waitForTimeout(900)
+  const opened = await page.locator('.MuiDrawer-root h6, .MuiDrawer-root h5').first().innerText().catch(() => '')
+  assert(
+    opened.trim() === contested.name,
+    `tapping a shared pin opens the camp it is labelled with (read "${contested.name}", opened "${opened.trim()}")`,
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+} else {
+  console.log('      no two camps drawn close enough to contest a label at this zoom')
+}
+
 // Tapping bare playa drops a shareable pin and puts the address in the URL.
 // Which pixels are bare playa depends on where the map has ended up and on
 // where this year put its camps, so try a few rather than trusting one.
@@ -311,7 +346,7 @@ for (const spot of [
   { x: 900, y: 700 },
   { x: 300, y: 250 },
 ]) {
-  await page.locator('canvas').click({ position: spot })
+  await page.locator('canvas').click({ position: spot, force: true })
   await page.waitForTimeout(700)
   pinned = new URL(page.url()).searchParams.get('at')
   if (pinned) break

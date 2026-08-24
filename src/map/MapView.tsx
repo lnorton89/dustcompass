@@ -17,6 +17,9 @@ import type { Position } from '../brc/geo'
 import { cityOutlinePoints, frameFor } from '../brc/frame'
 import { CityLayers } from './CityLayers'
 import { POI_CLUSTER_LAYER_ID, POI_LABEL_LAYER_ID, POI_LAYER_ID, PoiLayers } from './PoiLayers'
+
+/** How far from the tap to look for the label that names what was tapped. */
+const LABEL_HIT_RADIUS = 18
 import { RouteLayer } from './RouteLayer'
 import { SAVED_LAYER_ID, SavedPlacesLayer } from './SavedPlacesLayer'
 import { ServiceLayers } from './ServiceLayers'
@@ -107,9 +110,24 @@ export function MapView({
       // on one point. Only one of them wins the label, and that is the name the
       // person just tapped — take theirs rather than whichever the renderer
       // happened to return first.
+      // The label is drawn below its dot, so the exact click pixel is never
+      // inside it. Look in a small box instead, and among whatever is labelled
+      // there take the one anchored nearest the tap.
+      const { x, y } = event.point
       const labelled = event.target
-        .queryRenderedFeatures(event.point, { layers: [POI_LABEL_LAYER_ID] })
-        .find((feature) => feature.properties?.uid)
+        .queryRenderedFeatures(
+          [
+            [x - LABEL_HIT_RADIUS, y - LABEL_HIT_RADIUS],
+            [x + LABEL_HIT_RADIUS, y + LABEL_HIT_RADIUS],
+          ],
+          { layers: [POI_LABEL_LAYER_ID] },
+        )
+        .filter((feature) => feature.properties?.uid && feature.geometry.type === 'Point')
+        .sort((a, b) => {
+          const at = event.target.project((a.geometry as GeoJSON.Point).coordinates as [number, number])
+          const bt = event.target.project((b.geometry as GeoJSON.Point).coordinates as [number, number])
+          return Math.hypot(at.x - x, at.y - y) - Math.hypot(bt.x - x, bt.y - y)
+        })[0]
       const chosen = labelled ?? event.features?.find((feature) => feature.properties?.uid)
       if (chosen?.properties?.uid) {
         onSelect(poiIndex.get(String(chosen.properties.uid)))

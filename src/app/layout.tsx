@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import { AppRouterCacheProvider } from '@mui/material-nextjs/v16-appRouter'
 import { socialImageMetadata } from 'metaplate'
 import { BRAND } from '../brand'
 import { BASE_PATH, SITE_URL } from '../config'
@@ -55,7 +56,15 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {/* Without this, Emotion's style-insertion order can diverge between
+            the prerendered HTML and the client's first hydration pass — a
+            genuine hydration mismatch on every load, not merely a flash of
+            unstyled content. This streams the collected styles into <head>
+            during SSR so the client's first paint sees exactly what the
+            server already rendered. */}
+        <AppRouterCacheProvider options={{ key: 'mui' }}>{children}</AppRouterCacheProvider>
+      </body>
     </html>
   )
 }

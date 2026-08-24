@@ -826,7 +826,13 @@ await shared.close()
     hostedEventCount.set(event.hosted_by_camp, (hostedEventCount.get(event.hosted_by_camp) ?? 0) + 1)
   }
   const placed = camps.filter((c) => c.location_string && c.uid && c.name)
-  const short = placed.find((c) => !hostedEventCount.get(c.uid) && !c.images?.length)
+  // No events or image is not enough on its own — a long description alone
+  // can push a sheet past the drawer's own 82dvh clamp just as surely as a
+  // list of events can, and once both sheets hit that same ceiling their
+  // padding reads identically regardless of which one is actually taller.
+  const short = placed.find(
+    (c) => !hostedEventCount.get(c.uid) && !c.images?.length && (c.description?.length ?? 0) < 100,
+  )
   const tall = [...placed].sort(
     (a, b) => (hostedEventCount.get(b.uid) ?? 0) - (hostedEventCount.get(a.uid) ?? 0),
   )[0]

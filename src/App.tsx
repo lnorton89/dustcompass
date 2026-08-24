@@ -759,7 +759,7 @@ export default function App() {
   }, [active])
 
   return (
-    <ThemeProvider theme={theme} defaultMode={mode === 'light' ? 'light' : 'dark'}>
+    <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box sx={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
         {/* MUI's "default" AppBar is grey-900, which put a cold neutral slab

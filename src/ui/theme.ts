@@ -23,7 +23,15 @@ const BASE_FONT_SIZE = { normal: 14, large: 16 } as const
 export function playaTheme(mode: ThemeMode, reading: ReadingSize = 'normal'): Theme {
   const night = mode === 'night'
   return createTheme({
-    cssVariables: true,
+    // Not CSS variables: this app has no SSR flash to prevent — `mode` is
+    // pure client runtime state — and MUI's CSS-vars ThemeProvider only
+    // applies a theme's `palette.mode` once, at mount, via `defaultMode`.
+    // Every later mode change here creates a brand new theme object, which
+    // classic runtime theming re-applies to every styled component on the
+    // next render; the CSS-vars path silently kept rendering whatever scope
+    // was active at mount, freezing the AppBar/disclaimer/bottom bar at the
+    // very first theme while `paletteFor(mode)` (plain JS, no MUI) — which
+    // is what draws the map's own chrome — kept tracking it correctly.
     palette: {
       mode: mode === 'light' ? 'light' : 'dark',
       primary: { main: night ? '#ff6b6b' : mode === 'dark' ? '#ff8a4c' : '#c2410c' },

@@ -177,7 +177,10 @@ export function PwaStatus({ compact }: { compact: boolean }) {
           sx={{
             fontWeight: 600,
             ...(compact && {
-              width: 32,
+              // Below 44px this is a real, clickable control (it retries a
+              // failed install or applies a waiting update) narrower than the
+              // touch-target floor everything else in the toolbar keeps.
+              width: 44,
               justifyContent: 'center',
               // With no label text MUI still renders the label element, and
               // its 8px of padding shoulders the icon off-centre. Auto

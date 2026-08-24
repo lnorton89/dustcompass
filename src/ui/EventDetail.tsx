@@ -12,6 +12,8 @@ import {
 } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import NearMeIcon from '@mui/icons-material/NearMe'
+import BookmarkIcon from '@mui/icons-material/Bookmark'
+import BookmarkBorderIcon from '@mui/icons-material/BookmarkBorder'
 import type { CityLayout } from '../brc/layout'
 import type { Position } from '../brc/geo'
 import { formatDistance, travelBetween } from '../brc/travel'
@@ -26,6 +28,9 @@ interface Props {
   /** Where to measure from, for a distance readout when a location is known. */
   origin?: Position
   now: Date
+  /** Whole-event save state, keyed by `event.uid` — see `useSavedEvents`. */
+  isSaved: boolean
+  onToggleSave: () => void
   onClose: () => void
   onNavigate: (target: {
     name: string
@@ -44,7 +49,17 @@ interface Props {
  * (or, for an unregistered host, did nothing at all), and the host detail
  * listed hosted events as plain, noninteractive text (issue #20).
  */
-export function EventDetail({ event, host, layout, origin, now, onClose, onNavigate }: Props) {
+export function EventDetail({
+  event,
+  host,
+  layout,
+  origin,
+  now,
+  isSaved,
+  onToggleSave,
+  onClose,
+  onNavigate,
+}: Props) {
   const location = useMemo(
     () => (event ? resolveEventLocation(event, host, layout) : undefined),
     [event, host, layout],
@@ -66,16 +81,21 @@ export function EventDetail({ event, host, layout, origin, now, onClose, onNavig
     <Dialog open={Boolean(event)} onClose={onClose} fullWidth maxWidth="xs">
       {event && (
         <>
-          <DialogTitle sx={{ pr: 6 }}>
+          <DialogTitle sx={{ pr: 11 }}>
             {event.title}
-            <IconButton
-              onClick={onClose}
-              size="small"
-              aria-label="Close event details"
-              sx={{ position: 'absolute', right: 8, top: 8 }}
-            >
-              <CloseIcon fontSize="small" />
-            </IconButton>
+            <Stack direction="row" spacing={0.5} sx={{ position: 'absolute', right: 8, top: 8 }}>
+              <IconButton
+                onClick={onToggleSave}
+                size="small"
+                aria-label={isSaved ? 'Remove from saved events' : 'Save this event'}
+                color={isSaved ? 'primary' : 'default'}
+              >
+                {isSaved ? <BookmarkIcon fontSize="small" /> : <BookmarkBorderIcon fontSize="small" />}
+              </IconButton>
+              <IconButton onClick={onClose} size="small" aria-label="Close event details">
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Stack>
           </DialogTitle>
           <DialogContent>
             {event.event_type && (

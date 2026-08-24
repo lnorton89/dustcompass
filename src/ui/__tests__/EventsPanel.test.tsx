@@ -43,6 +43,10 @@ const baseProps = {
   onClose: vi.fn(),
   onNeedLocation: vi.fn(),
   onDoneWithLocation: vi.fn(),
+  savedEvents: [],
+  isEventSaved: () => false,
+  onToggleSaveEvent: vi.fn(),
+  onRemoveSavedEvent: vi.fn(),
 }
 
 /**
@@ -251,6 +255,87 @@ describe('EventsPanel · event rows (#20, #29)', () => {
     )
     expect(screen.getByText(/ask around at the tiki bar/)).toBeDefined()
     expect(screen.queryByText(/location not listed/i)).toBeNull()
+  })
+
+  it('offers a bookmark toggle on each row, reflecting saved state', () => {
+    const onToggleSaveEvent = vi.fn()
+    render(
+      <EventsPanel
+        {...baseProps}
+        events={[event('yoga')]}
+        origin={undefined}
+        locationStatus="idle"
+        isEventSaved={(uid) => uid === 'yoga'}
+        onToggleSaveEvent={onToggleSaveEvent}
+      />,
+    )
+    const toggle = screen.getByRole('button', { name: /remove from saved events/i })
+    fireEvent.click(toggle)
+    expect(onToggleSaveEvent).toHaveBeenCalledWith(expect.objectContaining({ uid: 'yoga' }))
+  })
+})
+
+describe('EventsPanel · Saved window (#60)', () => {
+  it('shows only saved events, ordered by their relevant occurrence', () => {
+    const yoga = event('yoga')
+    const pancakes = { ...event('pancakes'), occurrence_set: [{ start_time: '2026-09-02T12:00:00-07:00', end_time: '2026-09-02T13:00:00-07:00' }] }
+    const unsaved = event('unsaved bbq')
+    render(
+      <EventsPanel
+        {...baseProps}
+        events={[unsaved, pancakes, yoga]}
+        origin={undefined}
+        locationStatus="idle"
+        savedEvents={[
+          { uid: 'pancakes', title: 'pancakes', savedAt: 1 },
+          { uid: 'yoga', title: 'yoga', savedAt: 2 },
+        ]}
+        isEventSaved={(uid) => uid === 'pancakes' || uid === 'yoga'}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /^saved$/i }))
+
+    expect(screen.getByText('yoga')).toBeDefined()
+    expect(screen.getByText('pancakes')).toBeDefined()
+    expect(screen.queryByText('unsaved bbq')).toBeNull()
+  })
+
+  it('degrades a saved uid that no longer matches any current event to a harmless row instead of crashing', () => {
+    const onRemoveSavedEvent = vi.fn()
+    render(
+      <EventsPanel
+        {...baseProps}
+        // The uid isn't present in `events` at all — the realistic shape of
+        // "deleted/cancelled in a later data refresh". `uid` is the sole
+        // identity every part of this app uses (host lookups, row keys), and
+        // the officially issued ids aren't recycled within a year, so a
+        // *present* uid is trusted as the same event throughout — same as it
+        // is everywhere else in the app.
+        events={[event('unrelated current event')]}
+        origin={undefined}
+        locationStatus="idle"
+        savedEvents={[{ uid: 'ghost-uid', title: 'Deleted campfire chat', savedAt: 1 }]}
+        isEventSaved={() => true}
+        onRemoveSavedEvent={onRemoveSavedEvent}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /^saved$/i }))
+
+    // The snapshotted title shows up, and nothing crashes.
+    expect(screen.getByText('Deleted campfire chat')).toBeDefined()
+    expect(screen.getByText(/no longer listed this year/i)).toBeDefined()
+    expect(screen.queryByText('unrelated current event')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /remove deleted campfire chat from saved events/i }))
+    expect(onRemoveSavedEvent).toHaveBeenCalledWith('ghost-uid')
+  })
+
+  it('shows an explicit empty state rather than "nothing scheduled" when nothing is saved', () => {
+    render(
+      <EventsPanel {...baseProps} events={[event('yoga')]} origin={undefined} locationStatus="idle" savedEvents={[]} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /^saved$/i }))
+    expect(screen.getByText(/no saved events yet/i)).toBeDefined()
   })
 })
 

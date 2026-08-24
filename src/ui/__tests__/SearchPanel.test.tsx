@@ -131,6 +131,7 @@ describe('SearchPanel · description search (#64)', () => {
     description: 'A quiet spot for coffee and conversation, open all week.',
     position: [-119.21, 40.79],
     positionSource: 'address',
+    accuracyClass: 'derived',
   }
   const KARAOKE_CAMP: Poi = {
     uid: 'camp-karaoke',
@@ -138,6 +139,7 @@ describe('SearchPanel · description search (#64)', () => {
     name: 'Karaoke Kamp',
     position: [-119.21, 40.79],
     positionSource: 'address',
+    accuracyClass: 'derived',
   }
   const UNPLACED_ART: UnplacedListing = {
     uid: 'art-unplaced',

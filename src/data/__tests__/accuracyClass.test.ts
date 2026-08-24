@@ -23,7 +23,9 @@ const LAYOUT: CityLayout = {
   fence_distance: 10560,
   road_width: 40,
   cStreets: [{ ref: 'esplanade', name: 'Esplanade', distance: 2500, segments: [['2:00', '10:00']] }],
-  tStreets: [],
+  // #52: intersectionExists() also requires a radial reaching this street's
+  // radius at the requested clock, not just annular coverage.
+  tStreets: [{ refs: ['6:00'], segments: [['esplanade', 3000]] }],
   plazas: [],
   portals: [],
 }

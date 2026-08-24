@@ -28,9 +28,6 @@ const read = (name: string): Listing[] => {
 const camps = read('camp.json')
 const art = read('art.json')
 
-/** A street the current year actually has, since the names change annually. */
-const anyStreet = layout.cStreets[layout.cStreets.length - 1].name
-
 describe('clock positions', () => {
   it('puts 12:00 on the city bearing', () => {
     expect(clockToBearing(layout, '12:00')).toBeCloseTo(layout.bearing, 6)
@@ -60,13 +57,33 @@ describe('clock positions', () => {
   })
 })
 
+/**
+ * Streets have real gaps and not every radial reaches every ring — issue
+ * #52 — so a hand-picked street/clock pair (as this file used to use, e.g.
+ * "D & 3:15") can fail to name a real intersection at all once a future
+ * year's survey changes. Finding one dynamically keeps these tests about
+ * what they say they are about rather than about whether the fixture pair
+ * still happens to exist this year.
+ */
+function coveredIntersection(): { streetRef: string; streetName: string; clock: string } | undefined {
+  for (const street of layout.cStreets) {
+    const clock = layout.tStreets
+      .flatMap((radial) => radial.refs)
+      .find((ref) => intersectionExists(layout, ref, street.ref))
+    if (clock) return { streetRef: street.ref, streetName: street.name, clock }
+  }
+  return undefined
+}
+
 describe('address parsing', () => {
   it('accepts street and clock in either order', () => {
-    const a = geocode('D & 3:15', layout)
-    const b = geocode('3:15 & D', layout)
+    const found = coveredIntersection()
+    expect(found, 'no surveyed street/radial intersection exists to test against').toBeDefined()
+    const { streetName, clock } = found!
+    const a = geocode(`${streetName} & ${clock}`, layout)
+    const b = geocode(`${clock} & ${streetName}`, layout)
     expect(a?.position).toEqual(b?.position)
-    // The streets are renamed every year, so read the name from the layout.
-    expect(a?.label).toBe(`${layout.cStreets.find((s) => s.ref === 'd')!.name} & 3:15`)
+    expect(a?.label).toBe(`${streetName} & ${clock}`)
   })
 
   it('accepts full street names', () => {
@@ -189,7 +206,15 @@ describe.runIf(camps.length > 0)('against the official published listings', () =
 
 describe('reverse geocoding', () => {
   it('snaps back to the address it came from', () => {
-    for (const address of ['D & 3:15', 'Esplanade & 7:30', `${anyStreet} & 9:00`]) {
+    const found = coveredIntersection()
+    expect(found, 'no surveyed street/radial intersection exists to test against').toBeDefined()
+    const { streetName, clock } = found!
+    const addresses = [`${streetName} & ${clock}`]
+    // Esplanade runs the whole ring in every real year, so 7:30 on it is
+    // always covered — kept as a second, independent example alongside the
+    // dynamically discovered one above.
+    if (intersectionExists(layout, '7:30', 'esplanade')) addresses.push('Esplanade & 7:30')
+    for (const address of addresses) {
       const forward = geocode(address, layout)!
       expect(reverseGeocode(forward.position, layout).label).toBe(forward.label)
     }

@@ -45,6 +45,51 @@ const baseProps = {
   onDoneWithLocation: vi.fn(),
 }
 
+/**
+ * Issue #54: `EventsPanel` used to hard-cap its result set at 300 with no
+ * way to browse the rest — `matching.slice(0, 300)` with no continuation.
+ * Sorting/filtering still run across the complete set; only how much of it
+ * is rendered at once is now paged, with the remainder reachable via
+ * "Load more" rather than invisible.
+ */
+describe('EventsPanel · browsing past the initial page (#54)', () => {
+  const manyEvents = Array.from({ length: 350 }, (_, i) => event(`Event ${String(i).padStart(3, '0')}`))
+
+  it('caps the initial render at 300 but reports the full match count and offers to load more', () => {
+    render(<EventsPanel {...baseProps} events={manyEvents} origin={undefined} locationStatus="idle" />)
+
+    expect(screen.getByText('300 of 350 showing')).toBeDefined()
+    expect(screen.queryByText('Event 300')).toBeNull()
+    expect(screen.getByRole('button', { name: /load 50 more/i })).toBeDefined()
+  })
+
+  it('makes every record past index 300 reachable by loading more', () => {
+    render(<EventsPanel {...baseProps} events={manyEvents} origin={undefined} locationStatus="idle" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /load 50 more/i }))
+
+    expect(screen.getByText('Event 300')).toBeDefined()
+    expect(screen.getByText('Event 349')).toBeDefined()
+    expect(screen.getByText('350 showing')).toBeDefined()
+    expect(screen.queryByRole('button', { name: /load.*more/i })).toBeNull()
+  })
+
+  it('resets back to the first page when the search term changes', () => {
+    render(<EventsPanel {...baseProps} events={manyEvents} origin={undefined} locationStatus="idle" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /load 50 more/i }))
+    expect(screen.getByText('350 showing')).toBeDefined()
+
+    // "Event 3" matches only "Event 300".."Event 349" (50 events, all under
+    // the page size) — a stale "everything loaded" position from the
+    // unfiltered 350 would be meaningless against this much smaller set.
+    fireEvent.change(screen.getByPlaceholderText('Search events or camps'), { target: { value: 'Event 3' } })
+
+    expect(screen.getByText('50 showing')).toBeDefined()
+    expect(screen.queryByText(/of 350 showing/)).toBeNull()
+  })
+})
+
 describe('EventsPanel · location failure for "Closest"', () => {
   it('does not leave "Closest" selected while silently falling back to time order on denial', () => {
     const onNeedLocation = vi.fn()

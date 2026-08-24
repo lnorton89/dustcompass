@@ -63,6 +63,9 @@ interface Props {
   compact?: boolean
 }
 
+/** How many matching events are rendered at once — a rendering choice, not a limit on what's reachable (#54). */
+const PAGE_SIZE = 300
+
 const WINDOWS: { value: EventWindow; label: string }[] = [
   { value: 'now', label: 'Now' },
   { value: 'next3h', label: 'Next 3h' },
@@ -156,7 +159,7 @@ export function EventsPanel({
    * can get there before it ends. Sorting by distance answers both at once, and
    * only makes sense once there is somewhere to measure from.
    */
-  const rows = useMemo(() => {
+  const matching = useMemo(() => {
     const found = occurrencesInWindow(events, window, now)
     const located = found.map((row) => {
       const hostId = row.event.hosted_by_camp ?? row.event.located_at_art ?? ''
@@ -177,7 +180,7 @@ export function EventsPanel({
     })
 
     const term = query.trim().toLowerCase()
-    const matching = term
+    const filtered = term
       ? located.filter((row) =>
           [
             row.event.title,
@@ -189,10 +192,30 @@ export function EventsPanel({
       : located
 
     if (sort === 'distance' && origin) {
-      matching.sort((a, b) => (a.travel?.meters ?? Infinity) - (b.travel?.meters ?? Infinity))
+      filtered.sort((a, b) => (a.travel?.meters ?? Infinity) - (b.travel?.meters ?? Infinity))
     }
-    return matching.slice(0, 300)
+    return filtered
   }, [events, window, now, sort, origin, hosts, layout, query])
+
+  /**
+   * `matching` is the complete set — sorting/filtering above already runs
+   * across all of it, not just a visible slice. What used to be a hard
+   * `.slice(0, 300)` with no way past it (issue #54) is now how much of that
+   * complete set is actually rendered, so thousands of events don't all
+   * become DOM nodes at once on a low-end phone, but every one past the
+   * first page stays reachable with "Load more" rather than vanishing.
+   *
+   * Reset to the first page whenever the window, sort, having a live origin,
+   * or the search term changes — a stale "loaded 900" position from a
+   * completely different filter is not a page anyone asked to keep. `now`
+   * ticking is deliberately not part of that key: it reshuffles `matching`'s
+   * contents without changing what the reader is looking for, and resetting
+   * on every tick would snap someone's loaded-more list back to page one.
+   */
+  const pageKey = `${window}|${sort}|${Boolean(origin)}|${query}`
+  const [paging, setPaging] = useState({ key: pageKey, shown: PAGE_SIZE })
+  if (paging.key !== pageKey) setPaging({ key: pageKey, shown: PAGE_SIZE })
+  const rows = matching.slice(0, paging.shown)
 
   return (
     <Drawer
@@ -290,7 +313,7 @@ export function EventsPanel({
           </ToggleButton>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-          {rows.length === 300 ? 'showing first 300' : `${rows.length} showing`}
+          {rows.length < matching.length ? `${rows.length} of ${matching.length} showing` : `${rows.length} showing`}
           {sort === 'distance' && !origin && ' · finding you…'}
           {preview &&
             ` · previewing from ${now.toLocaleDateString(undefined, { timeZone: PLAYA_TIME_ZONE, weekday: 'long', month: 'short', day: 'numeric' })}`}
@@ -411,7 +434,22 @@ export function EventsPanel({
           )
         })}
       </List>
-      {rows.length === 0 && (
+      {rows.length < matching.length && (
+        // The initial cap is a rendering choice, not a limit on what is
+        // reachable — every matching event past the first page stays
+        // reachable here rather than becoming invisible the way a hard
+        // `.slice(0, 300)` with no continuation used to (issue #54).
+        <Box sx={{ px: 2, pb: 1.5 }}>
+          <Button
+            size="small"
+            fullWidth
+            onClick={() => setPaging({ key: pageKey, shown: paging.shown + PAGE_SIZE })}
+          >
+            Load {Math.min(PAGE_SIZE, matching.length - rows.length)} more ({matching.length - rows.length} left)
+          </Button>
+        </Box>
+      )}
+      {matching.length === 0 && (
         // An empty state has to carry its own way out. "Nothing scheduled in
         // this window" was true, unhelpful, and a dead end.
         <Box sx={{ px: 2, pt: 1, pb: 3 }}>

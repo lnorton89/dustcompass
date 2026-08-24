@@ -1,4 +1,4 @@
-import { CATEGORY_LABEL, type ServiceCategory } from '../brc/services'
+import { CATEGORY_LABEL, CATEGORY_NOTE, type ServiceCategory } from '../brc/services'
 import { reverseGeocode } from '../brc/geocode'
 import type { CityLayout } from '../brc/layout'
 import type { Poi } from './types'
@@ -24,6 +24,21 @@ export function civicPois(
     ...toilets.features.map((feature) => toPoi(layout, feature, 'service')),
     ...landmarks.features.map((feature) => toPoi(layout, feature, 'landmark')),
   ].filter((poi): poi is Poi => Boolean(poi))
+}
+
+/**
+ * The survey gives a name and a coordinate, so anything more has to be said
+ * here. Only where there is something true to say: a portal gets nothing,
+ * because what this repo knows about one is its name and where it is, and both
+ * are already on the screen above.
+ */
+function note(name: string, category: ServiceCategory | undefined): string | undefined {
+  // Not by uid: the Man is `landmark:man` here and a survey point elsewhere,
+  // and the sentence is true of whichever one the tap landed on.
+  if (name === 'The Man') {
+    return 'The centre of the city. Every playa address is measured from here.'
+  }
+  return category ? CATEGORY_NOTE[category] : undefined
 }
 
 function toPoi(
@@ -60,6 +75,7 @@ function toPoi(
     // The Man sits at the origin every address is measured from, so it has
     // none of its own — "12:00 & 0'" would be noise dressed as information.
     address: address.distanceFeet > 0 ? address.label : undefined,
+    description: note(name, category),
     position,
     // Surveyed coordinates, not a clock address geocoded back to a street
     // corner, so the pin is where the thing actually is.

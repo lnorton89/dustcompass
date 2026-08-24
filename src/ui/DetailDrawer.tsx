@@ -182,9 +182,24 @@ export function DetailDrawer({
             />
           )}
 
-          {poi.description && (
+          {poi.description ? (
             <Typography variant="body2" sx={{ mt: 2, whiteSpace: 'pre-wrap' }}>
               {poi.description}
+            </Typography>
+          ) : (
+            /*
+             * Roughly one placed camp in forty has published no description,
+             * and a third have no photo either. The panel used to end at the
+             * button and leave the reader wondering whether it had failed to
+             * load. It is the app talking here rather than the camp, so it is
+             * said quietly and in the app's own voice.
+             */
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ mt: 2, fontStyle: 'italic' }}
+            >
+              {missingDescription(poi.kind)}
             </Typography>
           )}
 
@@ -211,6 +226,14 @@ export function DetailDrawer({
       )}
     </Drawer>
   )
+}
+
+function missingDescription(kind: Poi['kind']): string {
+  if (kind === 'service' || kind === 'landmark') {
+    return 'Part of the surveyed city rather than a listing, so there is nothing more to show.'
+  }
+  if (kind === 'art') return 'No description published for this piece.'
+  return 'No description published yet. Camps often add one closer to the event.'
 }
 
 function formatOccurrences(event: EventItem): string {

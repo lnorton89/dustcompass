@@ -56,17 +56,32 @@ describe.runIf(hasSurvey)(`${DATA_YEAR} survey places as listings`, () => {
     expect(toilets.every((poi) => poi.name === 'Toilets')).toBe(true)
   })
 
+  it('says what a service is for, since the survey only gives it a name', () => {
+    const rangers = pois.filter((poi) => poi.category === 'ranger')
+    const toilets = pois.filter((poi) => poi.category === 'toilet')
+    expect(rangers.every((poi) => poi.description?.includes('Rangers'))).toBe(true)
+    expect(toilets.every((poi) => poi.description?.includes('MOOP'))).toBe(true)
+    // Nothing invented for the ones whose own name is the whole story.
+    const civic = pois.filter((poi) => poi.category === 'civic')
+    expect(civic.length).toBeGreaterThan(0)
+    expect(civic.every((poi) => poi.description === undefined)).toBe(true)
+  })
+
   it('leaves the Man without an address, being what addresses are measured from', () => {
     const man = pois.find((poi) => poi.name === 'The Man')
     expect(man?.kind).toBe('landmark')
     expect(man?.address).toBeUndefined()
     expect(man?.position).toEqual(layout.center.geometry.coordinates)
+    expect(man?.description).toMatch(/measured from here/)
   })
 
-  it('reaches the portals too', () => {
+  it('reaches the portals too, and makes nothing up about them', () => {
     const portals = pois.filter((poi) => poi.kind === 'landmark' && poi.name !== 'The Man')
     expect(portals.length).toBe(layout.portals.length)
     expect(portals.every((poi) => poi.address)).toBe(true)
+    // All this repo knows about a portal is its name and where it is, and both
+    // are already on screen above the description.
+    expect(portals.every((poi) => poi.description === undefined)).toBe(true)
   })
 })
 

@@ -34,6 +34,24 @@ export const CATEGORY_LABEL: Record<ServiceCategory, string> = {
   civic: 'Civic',
 }
 
+/**
+ * What the place is for, in one line.
+ *
+ * These are the app's own words, not the API's — the survey publishes a name
+ * and a coordinate and nothing else, so a ranger station opened with an empty
+ * panel under it. Kept to what is plainly true of the category: a station's
+ * own name already says which one it is.
+ *
+ * Nothing here for `civic`. "Playa Info", "Box Office" and "Airport" explain
+ * themselves, and a line restating the name is worse than none.
+ */
+export const CATEGORY_NOTE: Partial<Record<ServiceCategory, string>> = {
+  ranger: 'Black Rock Rangers — non-confrontational help. Mediation, welfare checks, and where to report someone missing.',
+  medical: 'Emergency medical care.',
+  ice: 'Bagged ice, sold here.',
+  toilet: 'Portable toilets. Nothing but paper goes in them — everything else is MOOP.',
+}
+
 export function categorise(name: string): ServiceCategory {
   const label = name.toLowerCase()
   // ESD is Burning Man's Emergency Services Department; Rampart is the field

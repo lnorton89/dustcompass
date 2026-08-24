@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CityLayout } from '../brc/layout'
 import { buildCity, type CityGeometry } from '../brc/city'
 import { buildServices, toiletPoints } from '../brc/services'
-import { geocode } from '../brc/geocode'
+import { frontagePosition } from '../brc/frontage'
 import type { ArtItem, CampItem, EventItem, Poi } from './types'
 import { applyEmbargo, embargoState, embargoWindowForYear, type EmbargoState } from './embargo'
 import type { EventRange } from './events'
@@ -140,13 +140,14 @@ function hasGps(location: { gps_latitude?: number; gps_longitude?: number } | un
 
 function resolve(
   layout: CityLayout,
-  location: { gps_latitude?: number; gps_longitude?: number } | undefined,
+  location: { gps_latitude?: number; gps_longitude?: number; exact_location?: string } | undefined,
   address: string | undefined,
 ): [number, number] | undefined {
+  const exactLocation = location?.exact_location
   if (location?.gps_latitude != null && location.gps_longitude != null) {
     return [location.gps_longitude, location.gps_latitude]
   }
-  if (address) return geocode(address, layout)?.position
+  if (address) return frontagePosition(layout, address, exactLocation)
   return undefined
 }
 

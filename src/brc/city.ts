@@ -10,9 +10,9 @@ export interface CityGeometry {
 }
 
 /**
- * Build the whole city from its layout spec. iBurn ships pre-generated GeoJSON
- * per year, but generating it in the browser means a new year only needs a new
- * layout.json — no tile build, no CLI, no release.
+ * Build the whole city from its layout spec. Burning Man publishes the survey
+ * as polylines; generating the city from the polar spec behind them means a new
+ * year only needs a new layout.json — no tile build, no CLI, no release.
  */
 export function buildCity(layout: CityLayout): CityGeometry {
   return {

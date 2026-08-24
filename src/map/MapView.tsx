@@ -16,7 +16,7 @@ import { reverseGeocode } from '../brc/geocode'
 import type { Position } from '../brc/geo'
 import { cityOutlinePoints, frameFor } from '../brc/frame'
 import { CityLayers } from './CityLayers'
-import { POI_CLUSTER_LAYER_ID, POI_LAYER_ID, PoiLayers } from './PoiLayers'
+import { POI_CLUSTER_LAYER_ID, POI_LABEL_LAYER_ID, POI_LAYER_ID, PoiLayers } from './PoiLayers'
 import { RouteLayer } from './RouteLayer'
 import { SAVED_LAYER_ID, SavedPlacesLayer } from './SavedPlacesLayer'
 import { ServiceLayers } from './ServiceLayers'
@@ -103,8 +103,16 @@ export function MapView({
         })
         return
       }
-      if (hit?.properties?.uid) {
-        onSelect(poiIndex.get(String(hit.properties.uid)))
+      // A playa address names an intersection, so several camps genuinely sit
+      // on one point. Only one of them wins the label, and that is the name the
+      // person just tapped — take theirs rather than whichever the renderer
+      // happened to return first.
+      const labelled = event.target
+        .queryRenderedFeatures(event.point, { layers: [POI_LABEL_LAYER_ID] })
+        .find((feature) => feature.properties?.uid)
+      const chosen = labelled ?? event.features?.find((feature) => feature.properties?.uid)
+      if (chosen?.properties?.uid) {
+        onSelect(poiIndex.get(String(chosen.properties.uid)))
         return
       }
       // Clicking bare playa answers "where am I?" in the only vocabulary that
@@ -159,7 +167,7 @@ export function MapView({
         }
       }}
       maxPitch={60}
-      attributionControl={{ compact: true, customAttribution: 'Layout & listings: iBurn (MPL-2.0), Burning Man Project' }}
+      attributionControl={{ compact: true, customAttribution: 'City survey &amp; listings: Burning Man Project' }}
       style={{ position: 'absolute', inset: 0 }}
     >
       <NavigationControl position="bottom-right" visualizePitch showCompass />

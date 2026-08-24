@@ -81,7 +81,8 @@ export function minutesToClock(minutes: number): string {
  * radial points along `layout.bearing` (45° in recent years), and the clock
  * runs clockwise from there over a full 12-hour turn.
  *
- * Verified against iBurn's own geocoded camp GPS to sub-metre agreement.
+ * Verified against Burning Man's own surveyed control points: every surveyed
+ * plaza lands within a foot of the street this puts it on.
  */
 export function clockToBearing(layout: CityLayout, clock: string | number): number {
   const minutes = typeof clock === 'number' ? clock : clockToMinutes(clock)

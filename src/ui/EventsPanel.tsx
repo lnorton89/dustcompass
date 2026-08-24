@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Chip,
@@ -61,7 +61,18 @@ export function EventsPanel({
   onClose,
   compact,
 }: Props) {
-  const [window, setWindow] = useState<EventWindow>('now')
+  // "Now" is the right question during the event and a useless one before it:
+  // scrubbed to the opening minute of the burn, one thing is running out of
+  // three thousand. Previewing a day reads as a schedule; previewing an instant
+  // reads as a broken app.
+  const [window, setWindow] = useState<EventWindow>(preview ? 'today' : 'now')
+  const wasPreview = useRef(preview)
+  useEffect(() => {
+    if (wasPreview.current !== preview) {
+      wasPreview.current = preview
+      setWindow(preview ? 'today' : 'now')
+    }
+  }, [preview])
   const [sort, setSort] = useState<'time' | 'distance'>('time')
 
   /**

@@ -14,6 +14,8 @@ interface Props {
 
 export const POI_LAYER_ID = 'poi-dot'
 export const POI_CLUSTER_LAYER_ID = 'poi-cluster'
+/** The label layer decides which of several coincident camps is named. */
+export const POI_LABEL_LAYER_ID = 'poi-label'
 
 /**
  * Camps and art as a single clustered source. ~1,700 points is well inside what
@@ -85,7 +87,7 @@ export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
         }}
       />
       <Layer
-        id="poi-label"
+        id={POI_LABEL_LAYER_ID}
         type="symbol"
         minzoom={15.5}
         filter={[

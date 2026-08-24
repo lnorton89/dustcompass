@@ -1,3 +1,5 @@
+import * as turf from '@turf/turf'
+
 /**
  * Survey places carry no id of their own, so one is minted from the name. The
  * prefixes keep them clear of the listing uids they share an index with, and
@@ -70,32 +72,61 @@ export function buildServices(
   places: GeoJSON.FeatureCollection | { features: SurveyedPlace[] },
 ): GeoJSON.FeatureCollection<GeoJSON.Point> {
   const features = (places.features ?? []) as SurveyedPlace[]
+  const named = features
+    .filter((place) => place.properties?.NAME && !NOT_A_SERVICE.test(place.properties.NAME))
+    .filter((place) => place.geometry?.type === 'Point')
+
   // Two stations can carry the same name in a survey, and a uid that collides
-  // sends the second one's detail drawer to the first one's dot.
-  const seen = new Map<string, number>()
+  // sends the second one's detail drawer to the first one's dot. The suffix
+  // used to be assigned by encounter order in the source array, so a reordered
+  // survey refresh silently reassigned every duplicate's uid — a shared link
+  // or a favourite would start resolving to a different physical station with
+  // no sign anything had changed. Sorting by coordinate first makes the Nth
+  // station at a given name always the same physical one, survey order or not.
+  const byName = new Map<string, SurveyedPlace[]>()
+  for (const place of named) {
+    const ref = slug(place.properties.NAME as string)
+    const group = byName.get(ref)
+    if (group) group.push(place)
+    else byName.set(ref, [place])
+  }
+  const suffixOf = new Map<SurveyedPlace, number>()
+  for (const group of byName.values()) {
+    if (group.length < 2) continue
+    const ordered = [...group].sort((a, b) => coordinateKey(a).localeCompare(coordinateKey(b)))
+    ordered.forEach((place, i) => suffixOf.set(place, i + 1))
+  }
+
   return {
     type: 'FeatureCollection',
-    features: features
-      .filter((place) => place.properties?.NAME && !NOT_A_SERVICE.test(place.properties.NAME))
-      .filter((place) => place.geometry?.type === 'Point')
-      .map((place) => {
-        const name = place.properties.NAME as string
-        const ref = slug(name)
-        const taken = seen.get(ref) ?? 0
-        seen.set(ref, taken + 1)
-        return {
-          type: 'Feature' as const,
-          properties: {
-            kind: 'service',
-            uid: taken ? `${SERVICE_UID}${ref}-${taken + 1}` : `${SERVICE_UID}${ref}`,
-            name,
-            ref,
-            category: categorise(name),
-          },
-          geometry: { type: 'Point' as const, coordinates: place.geometry.coordinates },
-        }
-      }),
+    features: named.map((place) => {
+      const name = place.properties.NAME as string
+      const ref = slug(name)
+      const suffix = suffixOf.get(place)
+      return {
+        type: 'Feature' as const,
+        properties: {
+          kind: 'service',
+          uid: suffix && suffix > 1 ? `${SERVICE_UID}${ref}-${suffix}` : `${SERVICE_UID}${ref}`,
+          name,
+          ref,
+          category: categorise(name),
+        },
+        geometry: { type: 'Point' as const, coordinates: place.geometry.coordinates },
+      }
+    }),
   }
+}
+
+/**
+ * 5 decimal places is about 1.1m at Black Rock City's latitude — far finer
+ * than two genuinely distinct stations of the same name would ever sit apart,
+ * but coarse enough to ignore the trailing-digit noise a GeoJSON re-export can
+ * introduce without the station having moved.
+ */
+function coordinateKey(place: SurveyedPlace): string {
+  const [lng, lat] = place.geometry.coordinates
+  return `${lng.toFixed(5)},${lat.toFixed(5)}`
 }
 
 function slug(name: string) {
@@ -108,36 +139,53 @@ export function toiletPoints(
 ): GeoJSON.FeatureCollection<GeoJSON.Point> {
   return {
     type: 'FeatureCollection',
-    features: toilets.features
-      .map((feature, index): GeoJSON.Feature<GeoJSON.Point> | undefined => {
-        let coordinates: GeoJSON.Position | undefined
-        if (feature.geometry?.type === 'Point') {
-          coordinates = feature.geometry.coordinates
-        } else if (feature.geometry?.type === 'Polygon') {
-          coordinates = ringCentre(feature.geometry.coordinates[0])
-        } else if (feature.geometry?.type === 'MultiPolygon') {
-          coordinates = ringCentre(feature.geometry.coordinates[0]?.[0] ?? [])
-        }
-        if (!coordinates) return undefined
-        return {
-          type: 'Feature',
-          properties: {
-            kind: 'service',
-            uid: `${TOILET_UID}${feature.properties?.OBJECTID ?? index}`,
-            category: 'toilet' as const,
-            name: 'Toilets',
-          },
-          geometry: { type: 'Point', coordinates },
-        }
+    features: toilets.features.flatMap((feature, index): GeoJSON.Feature<GeoJSON.Point>[] => {
+      const sourceId = feature.properties?.OBJECTID ?? index
+      const point = (coordinates: GeoJSON.Position, uid: string): GeoJSON.Feature<GeoJSON.Point> => ({
+        type: 'Feature',
+        properties: {
+          kind: 'service',
+          uid,
+          category: 'toilet' as const,
+          name: 'Toilets',
+        },
+        geometry: { type: 'Point', coordinates },
       })
-      .filter((feature): feature is GeoJSON.Feature<GeoJSON.Point> => Boolean(feature)),
+
+      if (feature.geometry?.type === 'Point') {
+        return [point(feature.geometry.coordinates, `${TOILET_UID}${sourceId}`)]
+      }
+      if (feature.geometry?.type === 'Polygon') {
+        const at = polygonPoint(feature.geometry.coordinates)
+        return at ? [point(at, `${TOILET_UID}${sourceId}`)] : []
+      }
+      if (feature.geometry?.type === 'MultiPolygon') {
+        // A survey feature can group several physically separate toilet banks
+        // into one MultiPolygon. Collapsing that to a single point (the old
+        // behaviour) silently dropped every bank but the first; a marker per
+        // part keeps them all reachable, each with its own stable id.
+        return feature.geometry.coordinates
+          .map((rings, part): GeoJSON.Feature<GeoJSON.Point> | undefined => {
+            const at = polygonPoint(rings)
+            return at ? point(at, `${TOILET_UID}${sourceId}-${part + 1}`) : undefined
+          })
+          .filter((f): f is GeoJSON.Feature<GeoJSON.Point> => Boolean(f))
+      }
+      return []
+    }),
   }
 }
 
-function ringCentre(ring: GeoJSON.Position[]): GeoJSON.Position | undefined {
-  if (!ring.length) return undefined
-  // The final coordinate closes a GeoJSON ring and duplicates the first.
-  const points = ring.length > 1 ? ring.slice(0, -1) : ring
-  const sum = points.reduce(([x, y], [lng, lat]) => [x + lng, y + lat], [0, 0])
-  return [sum[0] / points.length, sum[1] / points.length]
+/**
+ * A representative point for one polygon part of a toilet bank. Averaging the
+ * ring's vertices (the old approach) is not a centroid at all — it is skewed
+ * by however densely the survey happened to place vertices, and for an
+ * L-shaped or otherwise concave bank it can land outside the polygon
+ * entirely. `pointOnFeature` instead guarantees a point that actually lies on
+ * the surface it describes, which matters more here than the exact area
+ * centroid would: a toilet marker off the polygon can point at open playa.
+ */
+function polygonPoint(rings: GeoJSON.Position[][]): GeoJSON.Position | undefined {
+  if (!rings.length || rings[0].length < 4) return undefined
+  return turf.pointOnFeature(turf.polygon(rings)).geometry.coordinates
 }

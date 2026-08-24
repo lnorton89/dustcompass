@@ -82,6 +82,10 @@ export function ServiceLayers({
           type="circle"
           paint={{
             'circle-radius': 5,
+            // 'arrival' and 'info' fall through to the generic civic colour —
+            // deliberately: neither is emergency infrastructure worth its own
+            // hue, unlike 'landmark' (the Temple, named deep-playa points),
+            // which reads as a genuinely different kind of place. See #45.
             'circle-color': [
               'match',
               ['get', 'category'],
@@ -89,6 +93,8 @@ export function ServiceLayers({
               palette.medical,
               'ranger',
               palette.ranger,
+              'landmark',
+              palette.landmark,
               palette.civic,
             ] as unknown as string,
             'circle-stroke-color': palette.playa,
@@ -99,7 +105,23 @@ export function ServiceLayers({
           id="service-icon"
           type="symbol"
           layout={{
-            'text-field': ['match', ['get', 'category'], 'medical', '+', 'ranger', 'R', 'i'],
+            // landmark and arrival each get their own glyph so they read as
+            // distinct from the generic "ask a question here" civic/info 'i'
+            // (#45) — previously every category past medical/ranger fell
+            // through to that same 'i', including the Temple and the Airport.
+            'text-field': [
+              'match',
+              ['get', 'category'],
+              'medical',
+              '+',
+              'ranger',
+              'R',
+              'landmark',
+              'L',
+              'arrival',
+              'A',
+              'i',
+            ],
             'text-font': ['Open Sans Regular'],
             'text-size': labelSize(labelScale, 11),
           }}

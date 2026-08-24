@@ -53,13 +53,28 @@ const keyFor = (request) => {
 }
 
 class FakeCache {
-  constructor() {
+  constructor({ failPutAfter } = {}) {
     this.store = new Map()
+    // Lets a test simulate a `cache.put()` that fails independently of a
+    // successful fetch (storage quota, eviction) — the failure mode #47 is
+    // about. `undefined` means puts never fail; otherwise this many succeed
+    // before every later one throws.
+    this.failPutAfter = failPutAfter
+    this.putCount = 0
   }
   async match(request) {
-    return this.store.get(keyFor(request))
+    // A real Cache.match() hands back a Response whose body has never been
+    // read, independent of any earlier match() call — cloning here mirrors
+    // that so a stored entry can be matched (and its body read) more than
+    // once, the way the pointer record and revision entries both are here.
+    const stored = this.store.get(keyFor(request))
+    return stored ? stored.clone() : undefined
   }
   async put(request, response) {
+    if (this.failPutAfter !== undefined && this.putCount >= this.failPutAfter) {
+      throw new Error('simulated storage failure')
+    }
+    this.putCount += 1
     this.store.set(keyFor(request), response)
   }
   async keys() {
@@ -68,11 +83,15 @@ class FakeCache {
 }
 
 class FakeCacheStorage {
-  constructor() {
+  /** `failPut` is an optional `(cacheName) => number | undefined` deciding each new cache's `failPutAfter`. */
+  constructor({ failPut } = {}) {
     this.byName = new Map()
+    this.failPut = failPut
   }
   async open(name) {
-    if (!this.byName.has(name)) this.byName.set(name, new FakeCache())
+    if (!this.byName.has(name)) {
+      this.byName.set(name, new FakeCache({ failPutAfter: this.failPut?.(name) }))
+    }
     return this.byName.get(name)
   }
   async has(name) {
@@ -100,8 +119,14 @@ class FakeRequest {
   }
 }
 
+// Two refreshLiveData() calls in the same test can otherwise land in the
+// same real millisecond and mint the identical revision cache name, which
+// would make a "second refresh" silently reuse the first revision's cache
+// object instead of a fresh one.
+let fakeClock = 1700000000000
+
 /** Runs the generated worker source in a fresh sandboxed scope. */
-function loadWorker({ fetchImpl }) {
+function loadWorker({ fetchImpl, cacheStorage }) {
   const handlers = {}
   const notifications = []
   const sandbox = {
@@ -111,8 +136,9 @@ function loadWorker({ fetchImpl }) {
     AbortSignal,
     URL,
     setTimeout,
+    Date: { now: () => (fakeClock += 1) },
     fetch: (...args) => fetchImpl(...args),
-    caches: new FakeCacheStorage(),
+    caches: cacheStorage ?? new FakeCacheStorage(),
     self: undefined,
   }
   sandbox.self = {
@@ -155,6 +181,16 @@ function loadWorker({ fetchImpl }) {
 }
 
 const dataUrl = (name) => `/data/2025/${name}`
+
+const POINTER_CACHE = 'dust-compass-live-pointer'
+const POINTER_URL = `${ORIGIN}/__dust-compass-live-revision`
+
+/** The revision cache the pointer currently names, or undefined if none has ever promoted. */
+async function currentLiveRevision(worker) {
+  const pointer = await worker.caches.open(POINTER_CACHE)
+  const record = await pointer.match(POINTER_URL)
+  return record ? record.text() : undefined
+}
 
 describe('generated service worker', () => {
   it('is valid, executable JavaScript', () => {
@@ -225,9 +261,11 @@ describe('generated service worker', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
 
     expect(worker.notifications.some((m) => m.type === 'DATA_REFRESHED')).toBe(true)
-    const live = await worker.caches.open('dust-compass-live-data')
-    expect(await live.match(dataUrl('layout.json'))).toBeDefined()
-    expect(await live.match(dataUrl('camp.json'))).toBeDefined()
+    const revisionName = await currentLiveRevision(worker)
+    expect(revisionName).toBeDefined()
+    const revision = await worker.caches.open(revisionName)
+    expect(await revision.match(dataUrl('layout.json'))).toBeDefined()
+    expect(await revision.match(dataUrl('camp.json'))).toBeDefined()
   })
 
   it('does not promote a partial revision when one file in it fails', async () => {
@@ -252,24 +290,75 @@ describe('generated service worker', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
 
     expect(worker.notifications.some((m) => m.type === 'DATA_REFRESHED')).toBe(false)
-    const live = await worker.caches.open('dust-compass-live-data')
-    // Neither file was promoted — not layout.json (which did succeed) and
-    // certainly not camp.json (which did not). A half-applied revision is
-    // exactly the mixed snapshot this is meant to prevent.
-    expect(await live.match(dataUrl('layout.json'))).toBeUndefined()
-    expect(await live.match(dataUrl('camp.json'))).toBeUndefined()
+    // No revision was ever complete, so the pointer was never written and
+    // there is nothing for a reader to find.
+    expect(await currentLiveRevision(worker)).toBeUndefined()
   })
 
-  it('keeps the live-data cache through activate\'s stale-cache cleanup', async () => {
-    const worker = loadWorker({ fetchImpl: async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) })
-    const live = await worker.caches.open('dust-compass-live-data')
-    await live.put(dataUrl('layout.json'), new Response('{"kept":true}'))
-
+  it('keeps the live pointer and its revision through activate\'s stale-cache cleanup', async () => {
+    const worker = loadWorker({
+      fetchImpl: async (req) => {
+        const url = typeof req === 'string' ? req : req.url
+        if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+        return new Response('<html></html>', { status: 200 })
+      },
+    })
     await worker.fireInstall()
+    await worker.fireFetch(dataUrl('layout.json'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const revisionName = await currentLiveRevision(worker)
+    expect(revisionName).toBeDefined()
+
     await worker.fireActivate()
 
-    expect(await worker.caches.has('dust-compass-live-data')).toBe(true)
-    expect(await live.match(dataUrl('layout.json'))).toBeDefined()
+    expect(await worker.caches.has(POINTER_CACHE)).toBe(true)
+    expect(await worker.caches.has(revisionName)).toBe(true)
+    expect(await currentLiveRevision(worker)).toBe(revisionName)
+  })
+
+  /**
+   * The bug behind #47: promotion used to delete the fixed 'dust-compass-
+   * live-data' cache and copy files into it one at a time, so a `cache.put`
+   * that failed partway through — independently of every fetch having
+   * succeeded — could leave that cache holding neither the old nor the new
+   * revision complete. Each refresh now builds a freshly named revision
+   * cache and only switches the pointer once every file in it is confirmed
+   * present, so a failing `cache.put` here must leave the previously
+   * promoted revision exactly as it was.
+   */
+  it('leaves the previously promoted revision untouched when a cache.put fails partway through a later refresh', async () => {
+    const cacheStorage = new FakeCacheStorage()
+    const worker = loadWorker({
+      cacheStorage,
+      fetchImpl: async (req) => {
+        const url = typeof req === 'string' ? req : req.url
+        if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+        return new Response('<html></html>', { status: 200 })
+      },
+    })
+    await worker.fireInstall()
+
+    // First refresh: nothing fails, this becomes the "previously promoted"
+    // complete revision.
+    await worker.fireFetch(dataUrl('layout.json'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const firstRevision = await currentLiveRevision(worker)
+    expect(firstRevision).toBeDefined()
+    const firstLayout = await (await worker.caches.open(firstRevision)).match(dataUrl('layout.json'))
+    expect(firstLayout).toBeDefined()
+
+    // Second refresh: both fetches succeed, but the *second* destination
+    // cache.put() into the new revision cache throws (simulated quota).
+    cacheStorage.failPut = (name) => (name.startsWith('dust-compass-live-data-rev-') && name !== firstRevision ? 1 : undefined)
+    await worker.fireFetch(dataUrl('layout.json'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    // The pointer never moved: the same first revision is still the one served.
+    expect(await currentLiveRevision(worker)).toBe(firstRevision)
+    const stillLayout = await (await worker.caches.open(firstRevision)).match(dataUrl('layout.json'))
+    expect(await stillLayout.text()).toBe(await firstLayout.text())
   })
 
   /**

@@ -24,6 +24,7 @@ import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk'
 import DirectionsBikeIcon from '@mui/icons-material/DirectionsBike'
 import type { Position } from '../brc/geo'
 import { formatDistance, formatMinutes, travelBetween } from '../brc/travel'
+import { CATEGORY_LABEL, NON_SERVICE_CATEGORIES } from '../brc/services'
 import { PLAYA_TIME_ZONE, relevantOccurrence } from '../data/events'
 import type { EventItem, Poi } from '../data/types'
 
@@ -64,6 +65,19 @@ const KIND_LABEL: Record<Poi['kind'], string> = {
   event: 'Event',
   service: 'Service',
   landmark: 'Landmark',
+}
+
+/**
+ * The label shown on a POI's kind chip. `civicPois()` keeps every
+ * survey-derived place at `kind: 'service'` so filters/favorites treat them
+ * as one group, but a Temple or an Airport is not a service — #45. Anywhere
+ * the survey's own classification says so (`category` in
+ * `NON_SERVICE_CATEGORIES`), that classification is what gets shown instead
+ * of the generic kind label.
+ */
+function kindLabel(poi: Poi): string {
+  if (poi.category && NON_SERVICE_CATEGORIES.has(poi.category)) return CATEGORY_LABEL[poi.category]
+  return KIND_LABEL[poi.kind]
 }
 
 export function DetailDrawer({
@@ -178,7 +192,7 @@ export function DetailDrawer({
       <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 1 }}>
         <Chip
           size="small"
-          label={KIND_LABEL[poi.kind]}
+          label={kindLabel(poi)}
           color={poi.kind === 'art' ? 'primary' : poi.kind === 'camp' ? 'secondary' : 'default'}
         />
         {poi.address && <Chip size="small" variant="outlined" label={poi.address} />}

@@ -1,4 +1,4 @@
-import { CATEGORY_LABEL, CATEGORY_NOTE, type ServiceCategory } from '../brc/services'
+import { CATEGORY_LABEL, CATEGORY_NOTE, NON_SERVICE_CATEGORIES, type ServiceCategory } from '../brc/services'
 import { reverseGeocode } from '../brc/geocode'
 import type { CityLayout } from '../brc/layout'
 import type { Poi } from './types'
@@ -68,8 +68,11 @@ function toPoi(
     // "Civic" says nothing a person could not read off the name, and a bank
     // of toilets called "Toilets" does not need telling twice. Rangers,
     // medical and ice are worth spelling out under a name that hides them —
-    // "Rampart", "Ice Nine Arctica".
-    subtitle: category && category !== 'civic' && category !== 'toilet'
+    // "Rampart", "Ice Nine Arctica". landmark/arrival/info are excluded here
+    // too, but for the opposite reason: the kind chip itself now shows that
+    // label (see DetailDrawer's kindLabel()), so repeating it as a subtitle
+    // would just say "Landmark" twice.
+    subtitle: category && category !== 'civic' && category !== 'toilet' && !NON_SERVICE_CATEGORIES.has(category)
       ? CATEGORY_LABEL[category]
       : undefined,
     // The Man sits at the origin every address is measured from, so it has

@@ -88,3 +88,54 @@ describe.runIf(hasSurvey)(`${DATA_YEAR} survey places as listings`, () => {
 it('has a published survey to check the civic places against', () => {
   expect(hasSurvey, `run \`npm run fetch-data -- ${DATA_YEAR}\` before the tests`).toBe(true)
 })
+
+/**
+ * Issue #45: synthetic, so it runs without a fetched survey. `civicPois()`
+ * keeps every survey place at `kind: 'service'` so filters/favorites treat
+ * them as one group, but landmark/arrival/info categories are not services,
+ * and the drawer's kind chip (tested separately in DetailDrawer.test.tsx)
+ * now reads that classification instead. The subtitle should not repeat it.
+ */
+describe('civicPois — landmark/arrival/info subtitles (#45)', () => {
+  const layout: CityLayout = {
+    center: {
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'Point', coordinates: [-119.2032, 40.7864] },
+    },
+    bearing: 45,
+    fence_distance: 10000,
+    road_width: 40,
+    cStreets: [],
+    tStreets: [],
+    plazas: [],
+    portals: [],
+  }
+  const empty: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: 'FeatureCollection', features: [] }
+
+  // Representative current-2026 CPNS entries from #45 itself.
+  const services = buildServices({
+    features: [
+      { properties: { NAME: 'The Temple' }, geometry: { type: 'Point', coordinates: [-119.2, 40.79] } },
+      { properties: { NAME: 'Gate Actual' }, geometry: { type: 'Point', coordinates: [-119.21, 40.79] } },
+      { properties: { NAME: 'Yellow Bike Project' }, geometry: { type: 'Point', coordinates: [-119.22, 40.79] } },
+      { properties: { NAME: 'Rampart' }, geometry: { type: 'Point', coordinates: [-119.23, 40.79] } },
+    ],
+  })
+  const pois = civicPois(layout, services, empty, empty)
+  const poiNamed = (name: string) => pois.find((poi) => poi.name === name)
+
+  it('does not repeat the category as a subtitle for landmark/arrival/info places', () => {
+    expect(poiNamed('The Temple')?.category).toBe('landmark')
+    expect(poiNamed('The Temple')?.subtitle).toBeUndefined()
+    expect(poiNamed('Gate Actual')?.category).toBe('arrival')
+    expect(poiNamed('Gate Actual')?.subtitle).toBeUndefined()
+    expect(poiNamed('Yellow Bike Project')?.category).toBe('info')
+    expect(poiNamed('Yellow Bike Project')?.subtitle).toBeUndefined()
+  })
+
+  it('still gives a genuine service (medical) its subtitle', () => {
+    expect(poiNamed('Rampart')?.category).toBe('medical')
+    expect(poiNamed('Rampart')?.subtitle).toBe('Medical')
+  })
+})

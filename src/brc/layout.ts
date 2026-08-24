@@ -29,6 +29,8 @@ export interface AnnularStreet {
 export interface RadialStreet {
   /** Clock positions this definition applies to, e.g. ["3:00", "9:00"]. */
   refs: string[]
+  /** Absent for a radial the survey gives no width; falls back to `road_width`. */
+  width?: Feet
   segments: [RadiusRef, RadiusRef][]
 }
 

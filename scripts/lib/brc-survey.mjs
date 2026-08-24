@@ -26,13 +26,23 @@ export function nameOf(properties) {
   return properties?.NAME ?? properties?.Name ?? properties?.name ?? undefined
 }
 
-/** The repo has renamed these properties between years; accept either. */
+/**
+ * The repo has renamed these properties between years; accept either.
+ *
+ * `source: "radial"` is the schema Burning Man uses to mark a feature as
+ * radial independent of its `kind` — the 2026 survey splits radial geometry
+ * into `kind: "avenue"` (40 ft) and `kind: "path"` (20 ft), and a future year
+ * could add another kind spelling again. Checking `source` first means a new
+ * kind value is still recognized as radial rather than silently dropped; the
+ * explicit kind list is kept alongside it for years whose features carry no
+ * `source` property at all.
+ */
 export function streetShape(feature) {
   const p = feature.properties
   const kind = p.kind ?? p.type
   return {
     isRing: kind === 'annular' || kind === 'arc',
-    isRadial: kind === 'avenue' || kind === 'radial',
+    isRadial: p.source === 'radial' || kind === 'avenue' || kind === 'radial' || kind === 'path',
     name: p.name,
     width: Number(p.width_ft ?? p.width) || undefined,
   }

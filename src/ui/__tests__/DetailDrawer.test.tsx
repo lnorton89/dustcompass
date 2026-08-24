@@ -32,6 +32,47 @@ const baseProps = {
 }
 
 /**
+ * Issue #45: `civicPois()` keeps every survey-derived place at `kind:
+ * 'service'` so filters/favorites keep treating them as one group, but The
+ * Temple, Gate Actual and Yellow Bike Project are not services — the CPNS
+ * survey's own `category` already says so. The kind chip has to read that
+ * classification instead of falling back to the generic "Service" label.
+ */
+describe('DetailDrawer · kind chip for CPNS categories (#45)', () => {
+  const civicPoi = (category: Poi['category'], name: string): Poi => ({
+    uid: 'service:test',
+    kind: 'service',
+    name,
+    category,
+    position: [-119.2, 40.78],
+    positionSource: 'gps',
+  })
+
+  it('labels a landmark as Landmark, not Service', () => {
+    render(<DetailDrawer {...baseProps} poi={civicPoi('landmark', 'The Temple')} />)
+    expect(screen.getByText('Landmark')).toBeDefined()
+    expect(screen.queryByText('Service')).toBeNull()
+  })
+
+  it('labels arrival infrastructure as Arrival, not Service', () => {
+    render(<DetailDrawer {...baseProps} poi={civicPoi('arrival', 'Gate Actual')} />)
+    expect(screen.getByText('Arrival')).toBeDefined()
+    expect(screen.queryByText('Service')).toBeNull()
+  })
+
+  it('labels participant info as Info, not Service', () => {
+    render(<DetailDrawer {...baseProps} poi={civicPoi('info', 'Yellow Bike Project')} />)
+    expect(screen.getByText('Info')).toBeDefined()
+    expect(screen.queryByText('Service')).toBeNull()
+  })
+
+  it('still labels a genuine service (ranger station) as Service', () => {
+    render(<DetailDrawer {...baseProps} poi={civicPoi('ranger', 'Ranger HQ')} />)
+    expect(screen.getByText('Service')).toBeDefined()
+  })
+})
+
+/**
  * Issue #19: a plain ref callback on the sheet's Paper only fires when that
  * node is created or destroyed. Switching from one open listing straight to
  * another (without closing first) keeps the same Paper mounted the whole

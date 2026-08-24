@@ -63,7 +63,7 @@ function radialStreets(layout: CityLayout): GeoJSON.Feature<GeoJSON.LineString>[
             orientation: 'radial',
             ref: clock,
             name: clock,
-            width: layout.road_width,
+            width: radial.width ?? layout.road_width,
             id: `${clock}-${i}`,
           }),
         )

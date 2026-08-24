@@ -66,8 +66,21 @@ const DATA_FILES = PRECACHE.filter((url) => url.indexOf(DATA_PREFIX) === 0);
 // replaced an older, equally out-of-date file — would break that promise the
 // moment the two diverge from what was actually built and tested together.
 // Live data lives in its own cache that persists across worker versions.
-const LIVE_DATA_CACHE = 'dust-compass-live-data';
-const LIVE_STAGING_CACHE = 'dust-compass-live-data-staging';
+//
+// It is not one fixed cache name, though — each successful background
+// refresh writes into a freshly named revision cache, and a reader is only
+// ever pointed at one once every file in it is confirmed present. Promoting
+// used to mean deleting the fixed 'dust-compass-live-data' cache and copying
+// files into it one at a time, which left the previous complete revision
+// destroyed as soon as promotion started rather than once the new one was
+// actually ready — a cache write failing partway through that copy (quota,
+// storage eviction, a browser crash) left neither revision complete. Here,
+// the pointer switch is the only step that can make a new revision visible,
+// and it is a single cache.put() of one small Response — no partial states
+// for a reader to observe in between.
+const LIVE_POINTER_CACHE = 'dust-compass-live-pointer';
+const LIVE_REVISION_PREFIX = 'dust-compass-live-data-rev-';
+const LIVE_POINTER_URL = self.location.origin + '/__dust-compass-live-revision';
 
 async function notify(message) {
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
@@ -164,12 +177,16 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    // The live-data cache is deliberately not versioned by build — it is
-    // meant to persist across worker updates, not be swept as though it were
-    // one more stale precache.
-    const KEPT = new Set([CACHE_NAME, LIVE_DATA_CACHE, LIVE_STAGING_CACHE]);
+    // Live data is deliberately not versioned by build — the pointer cache
+    // and every revision cache persist across worker updates, managed by
+    // refreshLiveData()'s own promotion/cleanup rather than swept here as
+    // though they were one more stale precache.
     const names = await caches.keys();
-    await Promise.all(names.filter((name) => name.startsWith('dust-compass-') && !KEPT.has(name)).map((name) => caches.delete(name)));
+    await Promise.all(
+      names
+        .filter((name) => name.startsWith('dust-compass-') && name !== CACHE_NAME && name !== LIVE_POINTER_CACHE && !name.startsWith(LIVE_REVISION_PREFIX))
+        .map((name) => caches.delete(name)),
+    );
     await self.clients.claim();
     await notify({ type: 'OFFLINE_READY', total: PRECACHE.length });
   })());
@@ -185,16 +202,38 @@ async function fromCache(request) {
   return cache.match(request);
 }
 
+/** The revision name the pointer currently names, or undefined if none has ever promoted. */
+async function currentLiveRevision() {
+  const pointer = await caches.open(LIVE_POINTER_CACHE);
+  const record = await pointer.match(LIVE_POINTER_URL);
+  return record ? record.text() : undefined;
+}
+
 /**
- * A live-fetched data file that has not yet been promoted, if the whole
- * revision it belongs to fetched cleanly. Falls back to the byte-for-byte
- * build-time snapshot in the precache, which is always internally consistent
- * with the app code currently running, if a live revision was never
- * completed or a newer request beat it to a URL not yet promoted.
+ * A live-fetched data file from the currently pointed-to revision, if one
+ * exists and still has this file. Falls back to the byte-for-byte build-time
+ * snapshot in the precache, which is always internally consistent with the
+ * app code currently running, if a live revision was never completed or the
+ * current one predates this file being added to the manifest. Reads never
+ * combine files from two different live revisions, because the pointer only
+ * ever names one complete revision cache at a time.
  */
 async function fromLiveOrPrecache(request) {
-  const live = await caches.open(LIVE_DATA_CACHE);
-  return (await live.match(request)) || fromCache(request);
+  const revisionName = await currentLiveRevision();
+  if (revisionName) {
+    const revision = await caches.open(revisionName);
+    const cached = await revision.match(request);
+    if (cached) return cached;
+  }
+  return fromCache(request);
+}
+
+/** Revision caches nothing points at any more — safe to reclaim now the pointer has moved on. */
+async function deleteStaleRevisions(keep) {
+  const names = await caches.keys();
+  await Promise.all(
+    names.filter((name) => name.startsWith(LIVE_REVISION_PREFIX) && name !== keep).map((name) => caches.delete(name)),
+  );
 }
 
 let refreshing = null;
@@ -205,19 +244,23 @@ let refreshing = null;
  * map is instant and works offline, and refresh the *whole* data revision
  * behind the reader, one background attempt at a time.
  *
- * Every file in the manifest is staged before any of them is promoted. Only
- * a same-origin JSON response counts as a successful fetch — a captive
- * portal answers every request with its own 200 OK login page, and it
- * answers with HTML. Promoting file-by-file as each request resolved used to
- * let one deployment's camp/event data sit in the same cache as another
- * deployment's layout/services — a combination that was never built or
- * tested together — the moment a background refresh partially succeeded.
+ * Every file in the manifest is fetched into a freshly named revision cache
+ * before the pointer moves. Only a same-origin JSON response counts as a
+ * successful fetch — a captive portal answers every request with its own
+ * 200 OK login page, and it answers with HTML. Once every fetch has
+ * succeeded, every expected key is confirmed present in the revision cache
+ * itself (not merely inferred from the fetch results) before the pointer is
+ * ever switched — a cache.put() can fail independently of a successful
+ * fetch (storage quota, eviction), and that failure must never be allowed to
+ * make an incomplete revision visible to a reader.
  */
 function refreshLiveData() {
   if (refreshing) return refreshing;
   refreshing = (async () => {
+    const revisionName = LIVE_REVISION_PREFIX + Date.now();
+    let built = false;
     try {
-      const staging = await caches.open(LIVE_STAGING_CACHE);
+      const revision = await caches.open(revisionName);
       const results = await Promise.all(DATA_FILES.map(async (url) => {
         try {
           const response = await fetch(url, {
@@ -226,26 +269,37 @@ function refreshLiveData() {
           });
           const type = response.headers.get('content-type') || '';
           if (!response.ok || !type.includes('json')) return false;
-          await staging.put(url, response.clone());
+          await revision.put(url, response);
           return true;
         } catch {
           return false;
         }
       }));
       if (results.length > 0 && results.every(Boolean)) {
-        // The complete revision fetched cleanly — promote it as one unit
-        // rather than merging it entry-by-entry into whatever the live
-        // cache already held, which is exactly how a partial earlier
-        // attempt and this one could otherwise mix.
-        await caches.delete(LIVE_DATA_CACHE);
-        const live = await caches.open(LIVE_DATA_CACHE);
-        for (const url of DATA_FILES) {
-          const cached = await staging.match(url);
-          if (cached) await live.put(url, cached);
-        }
-        await notify({ type: 'DATA_REFRESHED' });
+        const matches = await Promise.all(DATA_FILES.map((url) => revision.match(url)));
+        built = matches.every(Boolean);
       }
-      await caches.delete(LIVE_STAGING_CACHE);
+    } catch {
+      built = false;
+    }
+
+    if (!built) {
+      // Nothing pointed at this revision yet, so discarding it changes
+      // nothing a reader can observe — the previous pointer (if any) is
+      // untouched and still names a complete revision.
+      await caches.delete(revisionName);
+      refreshing = null;
+      return;
+    }
+
+    // The revision is complete and immutable from here on; nothing below
+    // this point may delete it. The pointer write is the one atomic moment
+    // a reader can start seeing it.
+    try {
+      const pointer = await caches.open(LIVE_POINTER_CACHE);
+      await pointer.put(LIVE_POINTER_URL, new Response(revisionName));
+      await notify({ type: 'DATA_REFRESHED' });
+      await deleteStaleRevisions(revisionName);
     } finally {
       refreshing = null;
     }

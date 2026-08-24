@@ -26,6 +26,31 @@ function baseLayout(): CityLayout {
   }
 }
 
+describe('streets', () => {
+  it('falls back to the layout road_width when a radial carries none', () => {
+    const layout: CityLayout = {
+      ...baseLayout(),
+      tStreets: [{ refs: ['3:00'], segments: [['esplanade', 3000]] }],
+    }
+    const city = buildCity(layout)
+    const radial = city.streets.features.find((f) => f.properties?.orientation === 'radial')
+    expect(radial?.properties?.width).toBe(40)
+  })
+
+  // #48: the 2026 survey's narrower "path" radials carry their own surveyed
+  // width, and buildCity() must draw them at it rather than the generic
+  // road_width every other radial falls back to.
+  it('uses a radial\'s own surveyed width over the generic road_width', () => {
+    const layout: CityLayout = {
+      ...baseLayout(),
+      tStreets: [{ refs: ['4:15'], width: 20, segments: [['esplanade', 3000]] }],
+    }
+    const city = buildCity(layout)
+    const radial = city.streets.features.find((f) => f.properties?.orientation === 'radial')
+    expect(radial?.properties?.width).toBe(20)
+  })
+})
+
 describe('dmz', () => {
   it('renders a band of features at roughly the right radius when the survey supplies one', () => {
     const layout: CityLayout = {

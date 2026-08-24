@@ -24,6 +24,8 @@ export interface PlayaPalette {
   medical: string
   ranger: string
   civic: string
+  /** The Temple and other named deep-playa reference points — see ServiceCategory's 'landmark'. */
+  landmark: string
   saved: string
 }
 
@@ -47,6 +49,7 @@ export const DARK: PlayaPalette = {
   medical: '#ef4444',
   ranger: '#22c55e',
   civic: '#cbb994',
+  landmark: '#a78bfa',
   saved: '#facc15',
 }
 
@@ -75,6 +78,9 @@ export const NIGHT: PlayaPalette = {
   medical: '#ff8080',
   ranger: '#d95555',
   civic: '#a03535',
+  // Its own shade of the same night-mode red, not a different hue — see the
+  // file comment above on why every colour here stays on one low-luminance red.
+  landmark: '#cc6666',
   saved: '#ff9b9b',
 }
 
@@ -98,6 +104,7 @@ export const LIGHT: PlayaPalette = {
   medical: '#b91c1c',
   ranger: '#15803d',
   civic: '#7a6a45',
+  landmark: '#6d28d9',
   saved: '#a16207',
 }
 

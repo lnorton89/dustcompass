@@ -55,7 +55,15 @@ export interface CityLayout {
   bearing: number
   fence_distance: Feet
   road_width: Feet
-  entrance_road?: { distance: Feet; angle: number }
+  /**
+   * The gate road as actually surveyed: one coordinate array per
+   * `gate_road.geojson` LineString feature, in raw lon/lat — the same
+   * representation `center.geometry.coordinates` already uses. Carried
+   * through verbatim rather than reduced to a distance and bearing, so the
+   * rendered road follows the real curves and parallel edges Burning Man
+   * surveys instead of a synthetic straight segment.
+   */
+  entrance_road?: { lines: GeoJSON.Position[][] }
   dmz?: { distance: Feet; depth: Feet; segments: [string, string][] }
   center_camp?: {
     distance: Feet

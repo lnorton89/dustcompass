@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon'
 import type { CityLayout } from '../../brc/layout'
-import { destination, distanceBetween, feetToMeters, type Position } from '../../brc/geo'
+import { destination, feetToMeters, type Position } from '../../brc/geo'
 import { buildPlaya, SCENE_RADIUS_METERS } from '../../brc/playa'
 import { DATA_YEAR } from '../../config'
 
@@ -57,16 +57,13 @@ describe('the drawn desert', () => {
     }
   })
 
-  it('keeps the tracks out on the open playa, clear of the city', () => {
-    const fence = feetToMeters(layout.fence_distance)
-    for (const track of scene.tracks.features) {
-      const nearest = Math.min(
-        ...track.geometry.coordinates.map((point) =>
-          distanceBetween(centre, point as Position),
-        ),
-      )
-      expect(nearest).toBeGreaterThan(fence * 0.6)
-    }
+  it('never generates a fabricated line feature that could be mistaken for a real road', () => {
+    // #55: the scenery used to include nine procedurally generated "vehicle
+    // tracks" — LineStrings with real-looking bearings and curvature — with
+    // no way for a user to tell them apart from surveyed geometry. A line
+    // has cartographic meaning a filled polygon does not, so they were
+    // removed rather than disclosed some other way.
+    expect('tracks' in scene).toBe(false)
   })
 
   it('costs kilobytes, not megabytes — it ships in the offline cache', () => {

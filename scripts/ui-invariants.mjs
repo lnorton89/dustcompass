@@ -218,6 +218,48 @@ const LUMA = `(rgb) => {
  * its colours, the app bar took MUI's grey, and MapLibre's chrome was white in
  * every mode. Named rather than swept, so a failure says which one broke.
  */
+/**
+ * Nothing pinned to the top of the map may sit on top of anything else there.
+ *
+ * There are four of them now — the credit footnote and three notices — and they
+ * used to be positioned by hand at 56, 104 and 152 pixels, which is a guess
+ * about how tall a line of text is. The guess was wrong the moment the footnote
+ * above them grew a line, and it would have been wrong again the first time a
+ * reader turned the text size up. They share a column now; this is what says so.
+ */
+async function noticesDoNotOverlap(page, label) {
+  const overlaps = await page.evaluate(() => {
+    const boxes = [
+      ...document.querySelectorAll('[data-testid="api-disclaimer"], .MuiPaper-root'),
+    ]
+      .map((node) => ({ text: node.innerText.replace(/\s+/g, ' ').slice(0, 40), box: node.getBoundingClientRect() }))
+      .filter(({ box }) => box.top < 0.6 * window.innerHeight && box.width > 40 && box.height > 10)
+    const bad = []
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i].box
+        const b = boxes[j].box
+        if (a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top) {
+          bad.push(`"${boxes[i].text}" over "${boxes[j].text}"`)
+        }
+      }
+    }
+    return { bad, found: boxes.length }
+  })
+  // Finding nothing is not a pass. That is how the theme sweep quietly went on
+  // reporting clean over a scale bar that had been deleted.
+  if (overlaps.found < 2) {
+    fail(
+      `${label}: found nothing pinned to the top to check`,
+      `expected the credit footnote and at least one notice, saw ${overlaps.found}`,
+    )
+  } else if (overlaps.bad.length === 0) {
+    pass(`${label}: none of the ${overlaps.found} boxes pinned to the top overlap`)
+  } else {
+    fail(`${label}: notices are on top of each other`, overlaps.bad.join('; '))
+  }
+}
+
 const SURFACES = {
   'app bar': '.MuiAppBar-root',
   disclaimer: '[data-testid="api-disclaimer"]',
@@ -249,6 +291,7 @@ const readSurfaces = (page) =>
 {
   // A phone, because that is where the bottom bar and the compact chrome are.
   const { context, page } = await open({ name: '375', width: 375, height: 812 })
+  await noticesDoNotOverlap(page, '375')
   const byMode = {}
 
   byMode.dark = await readSurfaces(page)

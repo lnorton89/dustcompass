@@ -95,6 +95,21 @@ export interface UnplacedListing {
   reason: 'embargoed' | 'unpublished'
 }
 
+/**
+ * How sure the app can actually be that `position` is where the thing is.
+ *
+ * `positionSource` below says only how the *coordinate* was obtained — GPS
+ * fields vs. a geocoded address — and that conflates two different Burning
+ * Man data products behind the same word. The GIS survey's civic points
+ * (rangers, toilets, portals) really are surveyed. Camp/art `gps_latitude`/
+ * `gps_longitude` is a real coordinate too, but Burning Man's own API
+ * documentation describes it as best-effort and published ahead of
+ * Placement actually finishing — a camp can still move after that. Treating
+ * both as equally exact (#61) let the app drop the approximation caveat
+ * the moment any GPS field existed, regardless of which of these it was.
+ */
+export type PositionAccuracy = 'surveyed' | 'published' | 'derived'
+
 /** A camp, art piece or surveyed civic place resolved to a map position. */
 export interface Poi {
   uid: string
@@ -104,8 +119,10 @@ export interface Poi {
   description?: string
   address?: string
   position: [number, number]
-  /** GPS is a surveyed point; address means the pin is the shared street intersection. */
+  /** GPS is a coordinate field on the record; address means the pin is a geocoded street intersection. */
   positionSource: 'gps' | 'address'
+  /** How much that coordinate is actually worth trusting — see `PositionAccuracy`. */
+  accuracyClass: PositionAccuracy
   thumbnail?: string
   /** Services only: which coarse kind, so search and icons can tell them apart. */
   category?: ServiceCategory

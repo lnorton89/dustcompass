@@ -18,6 +18,7 @@ const host: Poi = {
   address: '3:00 & Esplanade',
   position: [-119.206, 40.782],
   positionSource: 'gps',
+  accuracyClass: 'surveyed',
 }
 
 const baseEvent: EventItem = {

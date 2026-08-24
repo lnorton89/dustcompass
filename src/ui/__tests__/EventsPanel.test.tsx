@@ -214,7 +214,14 @@ describe('EventsPanel · event rows (#20, #29)', () => {
   it('opens the event detail for a located row too — navigation is no longer the row\'s only action', () => {
     const onSelectEvent = vi.fn()
     const hosted = { ...event('Pancakes'), hosted_by_camp: 'camp-1' }
-    const host = { uid: 'camp-1', kind: 'camp' as const, name: 'Test Camp', position: [-119.2, 40.78] as [number, number], positionSource: 'gps' as const }
+    const host = {
+      uid: 'camp-1',
+      kind: 'camp' as const,
+      name: 'Test Camp',
+      position: [-119.2, 40.78] as [number, number],
+      positionSource: 'gps' as const,
+      accuracyClass: 'surveyed' as const,
+    }
     render(
       <EventsPanel
         {...baseProps}

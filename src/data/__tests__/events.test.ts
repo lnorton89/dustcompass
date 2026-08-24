@@ -189,6 +189,7 @@ if (existsSync(layoutPath)) {
       name: 'Test Camp',
       position: [-119.203, 40.786],
       positionSource: 'gps',
+      accuracyClass: 'surveyed',
     }
 
     const baseEvent: EventItem = {

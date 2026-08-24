@@ -83,6 +83,9 @@ function toPoi(
     // Surveyed coordinates, not a clock address geocoded back to a street
     // corner, so the pin is where the thing actually is.
     positionSource: 'gps',
+    // The GIS survey's own civic points, genuinely surveyed — unlike a
+    // camp/art record's API-published GPS, which is best-effort (#61).
+    accuracyClass: 'surveyed',
     category,
   }
 }

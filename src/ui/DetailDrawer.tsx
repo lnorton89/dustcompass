@@ -236,7 +236,7 @@ export function DetailDrawer({
        * listing has surveyed coordinates this year: said twice on every camp
        * the reader opens, it stops being read at all.
        */}
-      {poi.positionSource === 'address' && (
+      {poi.accuracyClass === 'derived' && (
         <Typography
           variant="caption"
           color="warning.main"
@@ -244,6 +244,26 @@ export function DetailDrawer({
         >
           Approximate pin at {poi.address ?? 'the listed address'}. Nearby camps can share this same
           map point.
+        </Typography>
+      )}
+      {/*
+       * #61: a camp/art record's `gps_latitude`/`gps_longitude` is a real
+       * coordinate, but Burning Man's own API documentation describes it as
+       * best-effort and published ahead of Placement finishing — a camp can
+       * still move after this location was published. That is a materially
+       * weaker claim than the GIS survey's own civic points (rangers,
+       * toilets, portals), which really are surveyed and get no caveat at
+       * all. Conflating the two by dropping this note the moment any GPS
+       * field existed is what #61 is about.
+       */}
+      {poi.accuracyClass === 'published' && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: 'block', mt: 0.75 }}
+        >
+          Officially published location — not surveyed. Camps and art can move after this was
+          published; if you can't find it, ask a Ranger.
         </Typography>
       )}
       {/*

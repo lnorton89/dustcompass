@@ -25,3 +25,7 @@ offline-next.png
 .env
 .env.*
 !.env.example
+
+# Editor-local debug config, not repo config — .claude/settings.json and
+# .claude/hooks/ are the tracked, shared parts of this directory.
+.claude/launch.json

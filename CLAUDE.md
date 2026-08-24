@@ -90,6 +90,29 @@ what shipped.
 Nothing may hard-code `public/data/2025`. Use `DATA_YEAR`, and skip cleanly when
 a year's data is absent — CI fetches one year and only one.
 
+## Theme mode is classic MUI, not CSS variables
+
+`playaTheme()` builds a whole new `theme` object on every mode change — dark,
+light and night are three fully recomputed palettes, not a fixed light/dark
+pair — and hands it straight to `<ThemeProvider theme={theme}>`. That pattern
+does not work with `createTheme({ cssVariables: true })`: MUI's CSS-variables
+provider applies a theme's `palette.mode` exactly once, via the uncontrolled
+`defaultMode` prop at mount, and never again. Every mode switch after the
+first kept recomputing `theme.palette.*` correctly while the AppBar, the
+disclaimer and the bottom bar stayed frozen at whatever mode was active on
+first paint — only `paletteFor(mode)` (plain JS, driving the map's own
+chrome) tracked every change.
+
+It only reproduces against a real static export; `next dev`'s per-request
+SSR never showed it, which is how it survived an entire UI audit
+(`UI-REVIEW.md`) undetected. `scripts/ui-invariants.mjs` is the guard now —
+run it against `out/` after any theme change, not just `next dev`.
+
+If CSS variables come back for a real reason (SSR flash prevention,
+`prefers-color-scheme`), define `colorSchemes: { light: {...}, dark: {...} }`
+once in `createTheme` and switch between them at runtime with
+`useColorScheme().setMode()` — never by recreating the theme object.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know

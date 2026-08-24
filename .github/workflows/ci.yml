@@ -65,6 +65,12 @@ jobs:
         run: npm run build
 
       - name: Production browser, accessibility, and offline tests
+        # GitHub Actions runs each `run:` block under `bash -e`, so the first
+        # of these four that exits non-zero stops the rest cold — a failing
+        # test:smoke silently means test:a11y/test:ui/test:offline never run
+        # at all, not that they passed. That let real, unrelated bugs in the
+        # later scripts (a broken theme switch, an undersized touch target)
+        # sit invisible in CI for a long time behind an earlier failure.
         env:
           NEXT_PUBLIC_BASE_PATH: /dustcompass
         run: |

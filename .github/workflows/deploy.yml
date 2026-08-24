@@ -101,6 +101,9 @@ jobs:
           npm run build
 
       - name: Production browser, accessibility, and offline tests
+        # bash -e stops at the first failing line — a failing test:smoke means
+        # test:a11y/test:offline never ran, not that they passed. See ci.yml's
+        # copy of this step for the incident that made this worth calling out.
         env:
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
         run: |

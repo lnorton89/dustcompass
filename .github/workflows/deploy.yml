@@ -156,6 +156,7 @@ jobs:
       # straight to upload: the full suite runs again, against this exact
       # `out/` directory, before actions/upload-pages-artifact ever sees it.
       - name: Build (production — this is what gets published)
+        id: build-production
         run: |
           echo "::notice::Building production artifact (no NEXT_PUBLIC_E2E). This is the exact build that will be uploaded to Pages if the tests below pass."
           NEXT_PUBLIC_BASE_PATH="/${GITHUB_REPOSITORY#*/}" \
@@ -163,20 +164,27 @@ jobs:
           NEXT_PUBLIC_DATA_YEAR=2026 \
           npm run build
 
+      # `steps.start-server.outcome` alone is not enough here the way it was
+      # for the first round of tests above: a custom `if:` replaces the
+      # default `success()` gate rather than adding to it, so without also
+      # naming `build-production` these four would still attempt to run
+      # against a stale or half-written `out/` if the production build
+      # itself failed — testing (and possibly passing against) exactly the
+      # build issue #68 says must never reach Pages untested.
       - name: Smoke tests (production build — tested artifact)
-        if: steps.start-server.outcome == 'success'
+        if: steps.start-server.outcome == 'success' && steps.build-production.outcome == 'success'
         run: npm run test:smoke "http://127.0.0.1:4173/${{ github.event.repository.name }}/"
 
       - name: Accessibility tests (production build — tested artifact)
-        if: steps.start-server.outcome == 'success'
+        if: steps.start-server.outcome == 'success' && steps.build-production.outcome == 'success'
         run: npm run test:a11y "http://127.0.0.1:4173/${{ github.event.repository.name }}/"
 
       - name: UI invariant tests (production build — tested artifact)
-        if: steps.start-server.outcome == 'success'
+        if: steps.start-server.outcome == 'success' && steps.build-production.outcome == 'success'
         run: npm run test:ui "http://127.0.0.1:4173/${{ github.event.repository.name }}/"
 
       - name: Offline tests (production build — tested artifact)
-        if: steps.start-server.outcome == 'success'
+        if: steps.start-server.outcome == 'success' && steps.build-production.outcome == 'success'
         run: npm run test:offline "http://127.0.0.1:4173/${{ github.event.repository.name }}/"
 
       - name: Upload failure screenshots

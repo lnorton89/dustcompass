@@ -184,6 +184,11 @@ export function EventsPanel({
             row.host?.name,
             row.event.other_location,
             row.event.event_type?.label,
+            // A word that lives only in what an event is about — "coffee",
+            // "karaoke" — used to be unfindable even though the description
+            // is right there in the offline data.
+            row.event.description,
+            row.event.print_description,
           ].some((field) => field?.toLowerCase().includes(term)),
         )
       : located

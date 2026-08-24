@@ -201,3 +201,32 @@ describe('EventsPanel · event rows (#20, #29)', () => {
     expect(screen.queryByText(/location not listed/i)).toBeNull()
   })
 })
+
+/**
+ * Issue #64: the search box only matched `title`, `event_type.label`, the
+ * host's name and `other_location` — a word that only appears in an event's
+ * own description ("coffee", "karaoke") returned nothing.
+ */
+describe('EventsPanel · description search (#64)', () => {
+  it('finds an event by a word that only lives in its description', () => {
+    const described = { ...event('Morning gathering'), description: 'Fresh coffee and quiet conversation.' }
+    render(
+      <EventsPanel {...baseProps} events={[described, event('Unrelated thing')]} origin={undefined} locationStatus="idle" />,
+    )
+    fireEvent.change(screen.getByPlaceholderText(/search events or camps/i), { target: { value: 'coffee' } })
+
+    expect(screen.getByText('Morning gathering')).toBeDefined()
+    expect(screen.queryByText('Unrelated thing')).toBeNull()
+  })
+
+  it('finds an event by a word that only lives in its print_description', () => {
+    const printed = { ...event('Evening set'), print_description: 'A karaoke session under the stars.' }
+    render(
+      <EventsPanel {...baseProps} events={[printed, event('Unrelated thing')]} origin={undefined} locationStatus="idle" />,
+    )
+    fireEvent.change(screen.getByPlaceholderText(/search events or camps/i), { target: { value: 'karaoke' } })
+
+    expect(screen.getByText('Evening set')).toBeDefined()
+    expect(screen.queryByText('Unrelated thing')).toBeNull()
+  })
+})

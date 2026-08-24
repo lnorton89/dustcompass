@@ -36,7 +36,7 @@ jobs:
   build:
     if: github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -70,9 +70,60 @@ jobs:
       - name: Test against the data being published
         run: npm test
 
-      - name: Build
-        # A GitHub Pages project site is served from /<repo>/, so the app has to
-        # be built with that prefix.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Next.js's own incremental build cache, shared by both builds below
+      # (the second is a clean rebuild of the same code/data, so it benefits
+      # from what the first one just populated). Keyed on the lockfile plus
+      # every source file, so a dependency bump or any code change still gets
+      # a correct (if partial-hit) cache rather than a stale one.
+      - uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*.[jt]s', 'src/**/*.[jt]sx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-
+
+      # A Pages project site is served from /<repo>/, so both builds below use
+      # that prefix. Exported once with NEXT_PUBLIC_E2E so the browser suite
+      # can drive the map the same way CI's build does, against the exact
+      # freshly-fetched data this run is about to publish — a scheduled deploy
+      # is precisely the run that has never seen this data before, so this is
+      # the one point that can actually catch a bad response shape or a
+      # rendering regression before it goes out.
+      - name: Build (for browser/a11y/offline testing)
+        run: |
+          NEXT_PUBLIC_BASE_PATH="/${GITHUB_REPOSITORY#*/}" \
+          NEXT_PUBLIC_SITE_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/" \
+          NEXT_PUBLIC_DATA_YEAR=2026 \
+          NEXT_PUBLIC_E2E=1 \
+          npm run build
+
+      - name: Production browser, accessibility, and offline tests
+        env:
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+        run: |
+          node scripts/serve-export.mjs &
+          npx wait-on -t 60000 "http://127.0.0.1:4173${NEXT_PUBLIC_BASE_PATH}/"
+          npm run test:smoke "http://127.0.0.1:4173${NEXT_PUBLIC_BASE_PATH}/"
+          npm run test:a11y "http://127.0.0.1:4173${NEXT_PUBLIC_BASE_PATH}/"
+          npm run test:offline "http://127.0.0.1:4173${NEXT_PUBLIC_BASE_PATH}/"
+
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots
+          path: '*.png'
+          if-no-files-found: ignore
+
+      # The suite above ran against a build carrying NEXT_PUBLIC_E2E, which
+      # exposes a raw map handle on `window` for the test scripts to drive —
+      # deliberately not something to ship. Data/code are identical to what
+      # was just proven working; only that debug flag differs, so this is a
+      # clean rebuild rather than a reason to distrust the result above.
+      - name: Build (for publishing)
         run: |
           NEXT_PUBLIC_BASE_PATH="/${GITHUB_REPOSITORY#*/}" \
           NEXT_PUBLIC_SITE_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/" \

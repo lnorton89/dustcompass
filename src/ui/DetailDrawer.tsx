@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Chip,
@@ -7,6 +7,7 @@ import {
   IconButton,
   List,
   ListItem,
+  ListItemButton,
   ListItemText,
   Paper,
   Stack,
@@ -23,6 +24,7 @@ import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk'
 import DirectionsBikeIcon from '@mui/icons-material/DirectionsBike'
 import type { Position } from '../brc/geo'
 import { formatDistance, formatMinutes, travelBetween } from '../brc/travel'
+import { PLAYA_TIME_ZONE, relevantOccurrence } from '../data/events'
 import type { EventItem, Poi } from '../data/types'
 
 interface Props {
@@ -31,10 +33,20 @@ interface Props {
   /** Where to measure from — the user's GPS fix, or the Man as a fallback. */
   origin: Position
   originLabel: string
+  /** The playa schedule clock, so a repeating event shows its current showing. */
+  now: Date
   isFavorite: boolean
+  /**
+   * False for kinds the Saved/Favorites filter always shows regardless of
+   * favorite state (civic infrastructure) — starring one of those would be a
+   * durable action with no observable effect anywhere in the app.
+   */
+  canFavorite: boolean
   onToggleFavorite: (uid: string) => void
   onShare: (poi: Poi) => void
   onNavigate: (poi: Poi) => void
+  /** Opens an individual hosted event's own detail (description, full schedule). */
+  onSelectEvent: (event: EventItem) => void
   onClose: () => void
   /**
    * How much of the map this sheet is covering, reported as it opens so the
@@ -59,15 +71,24 @@ export function DetailDrawer({
   events,
   origin,
   originLabel,
+  now,
   isFavorite,
+  canFavorite,
   onToggleFavorite,
   onShare,
   onNavigate,
+  onSelectEvent,
   onClose,
   onMeasure,
   compact,
 }: Props) {
   const travel = poi ? travelBetween(origin, poi.position) : undefined
+  // Whichever showing is worth reading right now, not whichever the API
+  // listed first — a Sunday occurrence is not the useful one on Thursday.
+  const sortedEvents = useMemo(
+    () => [...events].sort((a, b) => occurrenceSortKey(a, now) - occurrenceSortKey(b, now)),
+    [events, now],
+  )
   const [imageState, setImageState] = useState<{ uid?: string; failed: boolean }>({
     failed: false,
   })
@@ -78,15 +99,44 @@ export function DetailDrawer({
   if (poi && imageState.uid !== poi.uid) setImageState({ uid: poi.uid, failed: false })
   const imageFailed = imageState.failed
 
+  // The initial cap is a display choice, not a limit on what is reachable —
+  // "Show all" is remembered per listing the same way the image attempt is,
+  // so switching to a different camp starts collapsed again rather than
+  // carrying an unrelated listing's expanded state along with it.
+  const [eventsShown, setEventsShown] = useState<{ uid?: string; all: boolean }>({ all: false })
+  if (poi && eventsShown.uid !== poi.uid) setEventsShown({ uid: poi.uid, all: false })
+  const visibleEvents = eventsShown.all ? sortedEvents : sortedEvents.slice(0, 40)
+
   // Measured off the paper itself rather than guessed at a fraction of the
   // window: what is in here decides how tall it is, and a listing with a photo
   // and forty events is not the same sheet as one with an address.
-  const measure = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (node && onMeasure) onMeasure(node.getBoundingClientRect().height)
-    },
-    [onMeasure],
-  )
+  //
+  // A plain ref callback only fires when the node itself is created or
+  // destroyed. Two things break on that alone: switching from one open
+  // listing straight to another (rather than closing first) keeps the same
+  // Paper mounted the whole time, so the new content's height is never
+  // reported; and MUI's Drawer mounts that Paper behind an internal
+  // transition, so on the very first open the node may not exist yet when a
+  // plain effect keyed on props would have looked for it, with no second
+  // chance once it does. Routing the node through state instead — so its own
+  // arrival drives the effect below — fixes the second problem, and a
+  // `ResizeObserver` on that persistent node (re-armed on `poi?.uid` too, for
+  // the first) fixes both: it fires on a new listing's content, a
+  // lazy-loaded photo finishing late, or anything else that changes the
+  // sheet's actual height.
+  const [paperNode, setPaperNode] = useState<HTMLDivElement | null>(null)
+  const paperRef = useCallback((node: HTMLDivElement | null) => setPaperNode(node), [])
+
+  useEffect(() => {
+    if (!paperNode || !onMeasure) return
+    onMeasure(paperNode.getBoundingClientRect().height)
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) onMeasure(entry.contentRect.height)
+    })
+    observer.observe(paperNode)
+    return () => observer.disconnect()
+  }, [paperNode, onMeasure, poi?.uid])
 
   const body = poi && (
     <>
@@ -109,14 +159,16 @@ export function DetailDrawer({
           <IconButton onClick={() => onShare(poi)} size="small" aria-label="Share this location">
             <IosShareIcon fontSize="small" />
           </IconButton>
-          <IconButton
-            onClick={() => onToggleFavorite(poi.uid)}
-            size="small"
-            aria-label={isFavorite ? 'Remove from favourites' : 'Add to favourites'}
-            color={isFavorite ? 'primary' : 'default'}
-          >
-            {isFavorite ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
-          </IconButton>
+          {canFavorite && (
+            <IconButton
+              onClick={() => onToggleFavorite(poi.uid)}
+              size="small"
+              aria-label={isFavorite ? 'Remove from favourites' : 'Add to favourites'}
+              color={isFavorite ? 'primary' : 'default'}
+            >
+              {isFavorite ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
+            </IconButton>
+          )}
           <IconButton onClick={onClose} size="small" aria-label="Close details">
             <CloseIcon fontSize="small" />
           </IconButton>
@@ -228,18 +280,38 @@ export function DetailDrawer({
           <Divider sx={{ my: 2 }} />
           <Typography variant="subtitle2" gutterBottom>
             {events.length} event{events.length === 1 ? '' : 's'}
+            {/* The heading used to promise the full count while the list
+                silently cut off at 40 with no indication anything was
+                missing — for an event-heavy camp, dozens of real schedule
+                entries were simply unreachable from here (issue #28). */}
+            {!eventsShown.all && events.length > 40 && ` (showing 40)`}
           </Typography>
           <List dense disablePadding>
-            {events.slice(0, 40).map((event) => (
-              <ListItem key={event.uid} disableGutters>
-                <ListItemText
-                  primary={event.title}
-                  secondary={formatOccurrences(event)}
-                  slotProps={{ primary: { variant: 'body2' } }}
-                />
+            {visibleEvents.map((event) => (
+              <ListItem key={event.uid} disableGutters disablePadding>
+                {/* Hosted events used to be plain, noninteractive text —
+                    reading the title and time here was as far as they went.
+                    Every row now opens the event's own detail, the same
+                    place EventsPanel's rows lead to (issue #20). */}
+                <ListItemButton onClick={() => onSelectEvent(event)} sx={{ py: 0.75 }}>
+                  <ListItemText
+                    primary={event.title}
+                    secondary={formatOccurrences(event, now)}
+                    slotProps={{ primary: { variant: 'body2' } }}
+                  />
+                </ListItemButton>
               </ListItem>
             ))}
           </List>
+          {!eventsShown.all && events.length > 40 && (
+            <Button
+              size="small"
+              onClick={() => setEventsShown({ uid: poi?.uid, all: true })}
+              sx={{ mt: 0.5 }}
+            >
+              Show all {events.length}
+            </Button>
+          )}
         </>
       )}
     </>
@@ -307,7 +379,7 @@ export function DetailDrawer({
       onClose={onClose}
       slotProps={{
         paper: {
-          ref: measure,
+          ref: paperRef,
           sx: {
             maxHeight: 'min(82dvh, calc(100dvh - var(--safe-top) - 16px))',
             borderTopLeftRadius: 16,
@@ -343,16 +415,30 @@ function missingDescription(kind: Poi['kind']): string {
   return 'No description published yet. Camps often add one closer to the event.'
 }
 
-function formatOccurrences(event: EventItem): string {
+function formatOccurrences(event: EventItem, now: Date): string {
   const type = event.event_type?.label
-  const first = event.occurrence_set[0]
-  if (!first) return type ?? ''
-  const start = new Date(first.start_time)
+  const relevant = relevantOccurrence(event, now)
+  if (!relevant) return type ?? ''
+  const start = new Date(relevant.occurrence.start_time)
   const when = start.toLocaleString(undefined, {
+    timeZone: PLAYA_TIME_ZONE,
     weekday: 'short',
     hour: 'numeric',
     minute: '2-digit',
   })
+  const suffix = relevant.state === 'ended' ? ' (ended)' : ''
   const more = event.occurrence_set.length > 1 ? ` +${event.occurrence_set.length - 1} more` : ''
-  return [type, when + more].filter(Boolean).join(' · ')
+  return [type, when + suffix + more].filter(Boolean).join(' · ')
+}
+
+/** Running first, then soonest upcoming, then most-recently-ended last. */
+function occurrenceSortKey(event: EventItem, now: Date): number {
+  const relevant = relevantOccurrence(event, now)
+  if (!relevant) return Infinity
+  const time = new Date(
+    relevant.state === 'ended' ? relevant.occurrence.end_time : relevant.occurrence.start_time,
+  ).getTime()
+  if (relevant.state === 'running') return time
+  if (relevant.state === 'upcoming') return 1e15 + time
+  return 2e15 - time
 }

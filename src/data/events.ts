@@ -1,10 +1,43 @@
-import type { EventItem, Occurrence } from './types'
+import { geocode } from '../brc/geocode'
+import type { CityLayout } from '../brc/layout'
+import type { EventItem, Occurrence, Poi } from './types'
 
 export interface LiveEvent {
   event: EventItem
   occurrence: Occurrence
   start: Date
   end: Date
+}
+
+/**
+ * Where an event actually is, distinguishing every state a reader needs told
+ * apart: a registered host beats everything else; `other_location` free text
+ * that the same geocoder the search box uses can resolve gets to behave like
+ * a real address (distance, navigation); text present but unresolvable is
+ * shown as-is rather than pretending to be a registered host; and only a
+ * truly empty field is "not listed" at all (issue #29 — these three used to
+ * collapse into "location not listed" whenever there was no host, even when
+ * `other_location` plainly had something in it).
+ */
+export type EventLocation =
+  | { kind: 'host'; poi: Poi }
+  | { kind: 'geocoded'; label: string; position: Poi['position'] }
+  | { kind: 'unmapped'; label: string }
+  | { kind: 'none' }
+
+export function resolveEventLocation(
+  event: EventItem,
+  host: Poi | undefined,
+  layout: CityLayout,
+): EventLocation {
+  if (host) return { kind: 'host', poi: host }
+  const label = event.other_location?.trim()
+  if (!label) return { kind: 'none' }
+  // Conservative on purpose: only a location the same geocoder the search
+  // box trusts can actually parse gets treated as a real place. Anything
+  // else is shown for what it is — text a person wrote, not a coordinate.
+  const located = geocode(label, layout)
+  return located ? { kind: 'geocoded', label, position: located.position } : { kind: 'unmapped', label }
 }
 
 export type EventWindow = 'now' | 'next3h' | 'today' | 'all'
@@ -77,6 +110,34 @@ function toLive(event: EventItem, occurrence: Occurrence): LiveEvent {
 
 const byStart = (a: LiveEvent, b: LiveEvent) => a.start.getTime() - b.start.getTime()
 
+export interface RelevantOccurrence {
+  occurrence: Occurrence
+  state: 'running' | 'upcoming' | 'ended'
+}
+
+/**
+ * Which showing of a repeating event is worth showing right now: the one
+ * running, otherwise the next one coming up, otherwise (for an event whose
+ * week is entirely behind it) the one that ran most recently.
+ */
+export function relevantOccurrence(event: EventItem, now: Date): RelevantOccurrence | undefined {
+  let upcoming: RelevantOccurrence | undefined
+  let past: RelevantOccurrence | undefined
+  for (const occurrence of event.occurrence_set) {
+    const start = new Date(occurrence.start_time)
+    const end = new Date(occurrence.end_time)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue
+    if (start <= now && end > now) return { occurrence, state: 'running' }
+    if (start > now && (!upcoming || start < new Date(upcoming.occurrence.start_time))) {
+      upcoming = { occurrence, state: 'upcoming' }
+    }
+    if (end <= now && (!past || end > new Date(past.occurrence.end_time))) {
+      past = { occurrence, state: 'ended' }
+    }
+  }
+  return upcoming ?? past
+}
+
 export function formatWhen(live: LiveEvent, now: Date = new Date()): string {
   if (live.start <= now && live.end > now) {
     const left = Math.round((live.end.getTime() - now.getTime()) / 60000)
@@ -84,7 +145,12 @@ export function formatWhen(live: LiveEvent, now: Date = new Date()): string {
   }
   const mins = Math.round((live.start.getTime() - now.getTime()) / 60000)
   if (mins > 0 && mins < 180) return `in ${mins} min`
-  return live.start.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+  return live.start.toLocaleString(undefined, {
+    timeZone: PLAYA_TIME_ZONE,
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 export interface EventRange {

@@ -35,6 +35,30 @@ export function CityLayers({ city, campOutlines, palette, labelScale }: Props) {
       </Source>
 
       {/*
+        The DMZ: a no-camping buffer band, present only in years whose survey
+        draws one. An empty FeatureCollection here paints nothing, so absent
+        years need no extra guard. Styled like the fence — a boundary, not a
+        street — but filled rather than just outlined, since it's an area.
+      */}
+      <Source id="dmz" type="geojson" data={city.dmz}>
+        <Layer
+          id="dmz-fill"
+          type="fill"
+          paint={{ 'fill-color': palette.fence, 'fill-opacity': 0.12 }}
+        />
+        <Layer
+          id="dmz-outline"
+          type="line"
+          paint={{
+            'line-color': palette.fence,
+            'line-width': 1,
+            'line-dasharray': [2, 3],
+            'line-opacity': 0.7,
+          }}
+        />
+      </Source>
+
+      {/*
         The surveyed footprints of the camp blocks. Only from z15 up: below
         that they are finer than a pixel and just muddy the streets.
       */}
@@ -90,6 +114,25 @@ export function CityLayers({ city, campOutlines, palette, labelScale }: Props) {
             'text-color': palette.label,
             'text-halo-color': palette.labelHalo,
             'text-halo-width': 1.4,
+          }}
+        />
+      </Source>
+
+      {/*
+        Where the gate road crosses into the city — present only in years
+        whose survey draws it. Dashed and thin like the fence, but in its own
+        colour so it doesn't get read as an ordinary street.
+      */}
+      <Source id="entrance-road" type="geojson" data={city.entranceRoad}>
+        <Layer
+          id="entrance-road-line"
+          type="line"
+          layout={{ 'line-cap': 'round' }}
+          paint={{
+            'line-color': palette.entranceRoad,
+            'line-width': 3,
+            'line-dasharray': [1, 1.5],
+            'line-opacity': 0.85,
           }}
         />
       </Source>

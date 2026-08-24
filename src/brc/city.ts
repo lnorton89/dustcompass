@@ -1,6 +1,6 @@
 import type { CityLayout, Feet, RadiusRef } from './layout'
 import { resolveRadius } from './layout'
-import { arc, clockToMinutes, feetToMeters, polarToPosition, type Position } from './geo'
+import { arc, clockToMinutes, destination, feetToMeters, polarToPosition, type Position } from './geo'
 
 /**
  * The Man and the portals are generated here rather than fetched, so they need
@@ -13,6 +13,10 @@ export interface CityGeometry {
   plazas: GeoJSON.FeatureCollection<GeoJSON.Polygon>
   fence: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.LineString>
   landmarks: GeoJSON.FeatureCollection<GeoJSON.Point>
+  /** The no-camping buffer band just inside the fence. Only some years' surveys draw one. */
+  dmz: GeoJSON.FeatureCollection<GeoJSON.Polygon>
+  /** Where the gate road crosses into the city. Only some years' surveys draw one. */
+  entranceRoad: GeoJSON.FeatureCollection<GeoJSON.LineString>
 }
 
 /**
@@ -26,6 +30,8 @@ export function buildCity(layout: CityLayout): CityGeometry {
     plazas: fc(plazas(layout)),
     fence: fc([fence(layout)]),
     landmarks: fc(landmarks(layout)),
+    dmz: fc(dmz(layout)),
+    entranceRoad: fc(entranceRoad(layout)),
   }
 }
 
@@ -99,6 +105,55 @@ function fence(layout: CityLayout): GeoJSON.Feature<GeoJSON.Polygon> {
     properties: { kind: 'fence', name: 'Trash Fence' },
     geometry: { type: 'Polygon', coordinates: [corners] },
   }
+}
+
+/**
+ * The DMZ: a no-camping buffer band running from `distance` out to
+ * `distance + depth`, over the same clock-arc spans an annular street uses.
+ * Only some years' surveys draw one — do not invent one when absent.
+ */
+function dmz(layout: CityLayout): GeoJSON.Feature<GeoJSON.Polygon>[] {
+  const spec = layout.dmz
+  if (!spec) return []
+  const outer = spec.distance + spec.depth
+  return spec.segments.map((segment, i) => {
+    // Walk the inner edge forward, then the outer edge backward, so the ring
+    // closes without crossing itself instead of jumping straight across the band.
+    const inner = arc(layout, spec.distance, segment[0], segment[1])
+    const outerEdge = arc(layout, outer, segment[0], segment[1]).reverse()
+    const ring = [...inner, ...outerEdge, inner[0]]
+    return {
+      type: 'Feature',
+      properties: { kind: 'dmz', name: 'DMZ', id: `dmz-${i}` },
+      geometry: { type: 'Polygon', coordinates: [ring] },
+    }
+  })
+}
+
+/** How far either side of the gate road's marked point to draw its line. */
+const ENTRANCE_ROAD_HALF_LENGTH: Feet = 300
+
+/**
+ * The gate road's crossing point: the survey gives it as a compass bearing
+ * and radius from the Man, not a clock position, so it's placed with
+ * `destination()` directly rather than `polarToPosition()`'s clock lookup.
+ * Only some years' surveys draw one — do not invent one when absent.
+ */
+function entranceRoad(layout: CityLayout): GeoJSON.Feature<GeoJSON.LineString>[] {
+  const spec = layout.entrance_road
+  if (!spec) return []
+  const center = layout.center.geometry.coordinates as Position
+  const from = destination(
+    center,
+    feetToMeters(spec.distance - ENTRANCE_ROAD_HALF_LENGTH),
+    spec.angle,
+  )
+  const to = destination(
+    center,
+    feetToMeters(spec.distance + ENTRANCE_ROAD_HALF_LENGTH),
+    spec.angle,
+  )
+  return [line([from, to], { kind: 'entrance-road', name: 'Entrance Road' })]
 }
 
 function landmarks(layout: CityLayout): GeoJSON.Feature<GeoJSON.Point>[] {

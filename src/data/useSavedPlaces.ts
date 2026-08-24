@@ -1,7 +1,30 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Position } from '../brc/geo'
+import { DATA_YEAR } from '../config'
 
-const KEY = 'playa-map.places.v1'
+// Storage is scoped per data year: each year's survey moves the city centre,
+// bearing, and street geometry by enough that a prior year's coordinates are
+// not safe to draw as current. Keying by year means a build for a new
+// DATA_YEAR simply never sees last year's spots instead of drawing them on
+// the wrong city.
+const KEY_PREFIX = 'playa-map.places.v1'
+const KEY = `${KEY_PREFIX}.${DATA_YEAR}`
+
+// Builds before this fix wrote to one unversioned key with no year attached.
+// Those coordinates can't be assumed to match any particular year's survey,
+// so they are archived under their own key (never merged into a year's data)
+// and the unversioned key is cleared so it can't be picked up again. Losing
+// that old data silently is safe; drawing it as current-year would not be.
+const LEGACY_ARCHIVE_KEY = `${KEY_PREFIX}.legacy-unversioned`
+
+function migrateLegacyUnversionedStorage(): void {
+  const legacy = localStorage.getItem(KEY_PREFIX)
+  if (legacy === null) return
+  if (localStorage.getItem(LEGACY_ARCHIVE_KEY) === null) {
+    localStorage.setItem(LEGACY_ARCHIVE_KEY, legacy)
+  }
+  localStorage.removeItem(KEY_PREFIX)
+}
 
 export interface SavedPlace {
   id: string
@@ -9,6 +32,28 @@ export interface SavedPlace {
   position: Position
   address: string
   savedAt: number
+}
+
+// Generous cap, not a UI limit — it exists so a corrupted write can't turn
+// into an unbounded string that has to be carried through storage and render.
+const MAX_NAME_LENGTH = 200
+
+function isValidPlace(candidate: Partial<SavedPlace>): candidate is SavedPlace {
+  if (typeof candidate.id !== 'string' || candidate.id.trim().length === 0) return false
+  if (
+    typeof candidate.name !== 'string' ||
+    candidate.name.trim().length === 0 ||
+    candidate.name.length > MAX_NAME_LENGTH
+  ) {
+    return false
+  }
+  if (typeof candidate.address !== 'string') return false
+  if (typeof candidate.savedAt !== 'number' || !Number.isFinite(candidate.savedAt)) return false
+  if (!Array.isArray(candidate.position) || candidate.position.length !== 2) return false
+  const [lng, lat] = candidate.position
+  if (typeof lng !== 'number' || !Number.isFinite(lng) || lng < -180 || lng > 180) return false
+  if (typeof lat !== 'number' || !Number.isFinite(lat) || lat < -90 || lat > 90) return false
+  return true
 }
 
 /**
@@ -26,21 +71,22 @@ export function parsePlaces(raw: string | null): SavedPlace[] {
   }
   if (!Array.isArray(parsed)) return []
 
+  const seenIds = new Set<string>()
   return parsed.filter((place): place is SavedPlace => {
     if (typeof place !== 'object' || place === null) return false
     const candidate = place as Partial<SavedPlace>
-    return (
-      typeof candidate.id === 'string' &&
-      typeof candidate.name === 'string' &&
-      Array.isArray(candidate.position) &&
-      candidate.position.length === 2 &&
-      candidate.position.every((n) => typeof n === 'number' && Number.isFinite(n))
-    )
+    if (!isValidPlace(candidate)) return false
+    // First entry wins a duplicate id — later ones lose the collision
+    // deterministically instead of clobbering whichever the array visits last.
+    if (seenIds.has(candidate.id)) return false
+    seenIds.add(candidate.id)
+    return true
   })
 }
 
 function read(): SavedPlace[] {
   try {
+    migrateLegacyUnversionedStorage()
     return parsePlaces(localStorage.getItem(KEY))
   } catch {
     // Reading site data can throw outright in a private window.

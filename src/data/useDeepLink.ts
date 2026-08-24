@@ -9,13 +9,42 @@ export interface DeepLink {
   poi?: string
   /** A dropped pin, carried as a playa address rather than raw coordinates. */
   at?: string
+  /**
+   * The exact coordinate behind `at`, for the cases an address alone would
+   * lose: a dropped pin keeps the tapped spot, but `at` only ever carries what
+   * `reverseGeocode` rounds it to (nearest 15 minutes of clock, nearest 50 ft
+   * of open-playa radius, or snapped onto a nearby street). Always paired with
+   * `at` — there is no separate exact point for an ordinary camp-intersection
+   * address, which already names an exact place.
+   */
+  ll?: Position
+}
+
+/** `?ll=<lng>,<lat>`, or undefined if it is missing, malformed, or out of range. */
+function parsePosition(raw: string): Position | undefined {
+  const [lngRaw, latRaw] = raw.split(',')
+  if (lngRaw === undefined || latRaw === undefined) return undefined
+  const lng = Number(lngRaw)
+  const lat = Number(latRaw)
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return undefined
+  if (lng < -180 || lng > 180 || lat < -90 || lat > 90) return undefined
+  return [lng, lat]
+}
+
+// 6 decimal places is sub-meter precision — plenty for a tapped point, and far
+// short of the coordinate's own float noise, so it doesn't bloat the URL.
+const roundCoord = (n: number) => Math.round(n * 1e6) / 1e6
+function formatPosition([lng, lat]: Position): string {
+  return `${roundCoord(lng)},${roundCoord(lat)}`
 }
 
 /**
  * Locations travel between people as addresses, not coordinates — "meet us at
  * 7:30 & Esplanade" is what gets said out loud. Keeping the URL in that form
  * means the link is still useful when it is pasted into a message and read by a
- * human, or typed off someone else's screen.
+ * human, or typed off someone else's screen. `ll`, when present, rides along
+ * silently for the app itself to prefer — it is never the only thing in the
+ * link, and a human reading the URL still has the address to go on.
  */
 export function readDeepLink(
   search = typeof window === 'undefined' ? '' : window.location.search,
@@ -24,8 +53,13 @@ export function readDeepLink(
   const link: DeepLink = {}
   const poi = params.get('poi')
   const at = params.get('at')
+  const ll = params.get('ll')
   if (poi) link.poi = poi
   if (at) link.at = at
+  if (ll) {
+    const position = parsePosition(ll)
+    if (position) link.ll = position
+  }
   return link
 }
 
@@ -37,6 +71,7 @@ export function deepLinkUrl(
   url.search = ''
   if (link.poi) url.searchParams.set('poi', link.poi)
   if (link.at) url.searchParams.set('at', link.at)
+  if (link.ll) url.searchParams.set('ll', formatPosition(link.ll))
   return url.toString()
 }
 
@@ -60,9 +95,31 @@ export function shareUrl(
   return url.toString()
 }
 
-/** Resolve the `at` parameter to a position, if it names a real place. */
-export function resolveDeepLink(link: DeepLink, layout: CityLayout): Position | undefined {
-  return link.at ? geocode(link.at, layout)?.position : undefined
+/**
+ * Result of resolving a deep link's location. A bare `Position | undefined`
+ * cannot tell a caller "there was nothing to resolve" from "resolution was
+ * attempted and the address didn't parse" — and a caller that gates one-time
+ * restoration on that distinction (only advancing past a cold deep link once
+ * it has been resolved, successfully or not) would otherwise stay stuck
+ * waiting forever on an `at` that will never resolve.
+ */
+export type DeepLinkResolution =
+  | { status: 'resolved'; position: Position }
+  | { status: 'unresolvable' }
+  | { status: 'none' }
+
+/**
+ * Resolve a deep link to a position. `ll`, when present, is the exact tapped
+ * coordinate and wins outright — it costs nothing to trust and geocoding `at`
+ * again would only reintroduce the rounding it was carried to avoid. Falling
+ * back to `at` keeps old links (from before `ll` existed, or typed by hand)
+ * working exactly as before.
+ */
+export function resolveDeepLink(link: DeepLink, layout: CityLayout): DeepLinkResolution {
+  if (link.ll) return { status: 'resolved', position: link.ll }
+  if (!link.at) return { status: 'none' }
+  const result = geocode(link.at, layout)
+  return result ? { status: 'resolved', position: result.position } : { status: 'unresolvable' }
 }
 
 export function addressFor(position: Position, layout: CityLayout): string {

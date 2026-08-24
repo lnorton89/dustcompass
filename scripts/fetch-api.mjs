@@ -13,8 +13,9 @@
  * geocodes `location_string` at load time using the same code that powers
  * search, so doing it twice would just be two places to get it wrong.
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { commitAtomically, discardStaged, stageTempDir } from './lib/atomic-write.mjs'
 import {
   embargoNote,
   ENDPOINTS,
@@ -57,75 +58,81 @@ async function fetchKind(kind) {
   return response.json()
 }
 
-await mkdir(OUT, { recursive: true })
+// Everything below is fetched and validated into a staging directory, a
+// sibling of OUT, and never touches OUT until the whole refresh is known
+// good. OUT also holds geometry files fetch-data.mjs owns, so the eventual
+// commit only overwrites the listing files this script writes, leaving that
+// geometry untouched.
+const stage = await stageTempDir(OUT)
 
-let refused = false
-for (const kind of ENDPOINTS) {
-  let records
-  try {
-    records = await fetchKind(kind)
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error))
-    process.exit(1)
-  }
-  const result = validateDataset(kind, records)
-
-  for (const problem of result.problems) {
-    console.error(`  ! ${problem}`)
-    refused = true
-  }
-  const now = new Date()
-  const note = embargoNote(kind, result, now, RELEASE)
-  if (note) console.warn(`  · ${note}`)
-
-  if (result.problems.length === 0) {
-    const publishable = redactEmbargoedLocations(kind, records, now, RELEASE)
-    await writeFile(`${OUT}/${kind}.json`, JSON.stringify(publishable))
-    // Summarise what was written, not what arrived. Reporting the API's own
-    // location count next to an embargoed dataset reads as though embargoed
-    // positions had just been published.
-    console.log(`  ✓ ${summarize(kind, validateDataset(kind, publishable))}`)
-  }
-}
-
-// The event window used to come from a third-party file. The occurrences the
-// API already returns describe it exactly, and they are the same records the
-// schedule is built from, so the two can never disagree.
 try {
-  const events = JSON.parse(await readFile(`${OUT}/event.json`, 'utf8'))
-  const times = events
-    .flatMap((event) => event.occurrence_set ?? [])
-    .flatMap((slot) => [slot.start_time, slot.end_time])
-    .filter(Boolean)
-    .sort()
-  if (times.length > 0) {
-    const rangeInfo = { startDate: times[0], endDate: times[times.length - 1] }
-    await writeFile(`${OUT}/dates_info.json`, JSON.stringify({ rangeInfo }))
-    console.log(`  ✓ event window ${rangeInfo.startDate.slice(0, 10)} to ${rangeInfo.endDate.slice(0, 10)}`)
+  let refused = false
+  for (const kind of ENDPOINTS) {
+    const records = await fetchKind(kind)
+    const result = validateDataset(kind, records)
+
+    for (const problem of result.problems) {
+      console.error(`  ! ${problem}`)
+      refused = true
+    }
+    const now = new Date()
+    const note = embargoNote(kind, result, now, RELEASE)
+    if (note) console.warn(`  · ${note}`)
+
+    if (result.problems.length === 0) {
+      const publishable = redactEmbargoedLocations(kind, records, now, RELEASE)
+      await writeFile(`${stage}/${kind}.json`, JSON.stringify(publishable))
+      // Summarise what was written, not what arrived. Reporting the API's own
+      // location count next to an embargoed dataset reads as though embargoed
+      // positions had just been published.
+      console.log(`  ✓ ${summarize(kind, validateDataset(kind, publishable))}`)
+    }
   }
-} catch {
-  console.warn('  · could not derive the event window from the occurrences')
-}
 
-await writeFile(
-  `${OUT}/LISTINGS-ATTRIBUTION.md`,
-  [
-    `# ${YEAR} listings`,
-    '',
-    'Fetched from the Burning Man Project public API and subject to its terms of',
-    'service, including the embargo on location data that `src/data/embargo.ts`',
-    'enforces at load time.',
-    '',
-    'https://innovate.burningman.org/terms-of-service-for-burning-man-apis-and-datasets/',
-    '',
-  ].join('\n'),
-)
+  if (refused) {
+    throw new Error(
+      'Some datasets did not match what the app reads. Refusing to publish any part\n' +
+        'of this refresh — the previous public/data is still in place, unchanged.',
+    )
+  }
 
-if (refused) {
-  console.error(
-    `\nSome datasets were not written because their shape did not match what the app reads.\n` +
-      `Nothing was overwritten for those, so the previous data is still in place.`,
+  // The event window used to come from a third-party file. The occurrences
+  // the API already returns describe it exactly, and they are the same
+  // records the schedule is built from, so the two can never disagree.
+  try {
+    const events = JSON.parse(await readFile(`${stage}/event.json`, 'utf8'))
+    const times = events
+      .flatMap((event) => event.occurrence_set ?? [])
+      .flatMap((slot) => [slot.start_time, slot.end_time])
+      .filter(Boolean)
+      .sort()
+    if (times.length > 0) {
+      const rangeInfo = { startDate: times[0], endDate: times[times.length - 1] }
+      await writeFile(`${stage}/dates_info.json`, JSON.stringify({ rangeInfo }))
+      console.log(`  ✓ event window ${rangeInfo.startDate.slice(0, 10)} to ${rangeInfo.endDate.slice(0, 10)}`)
+    }
+  } catch {
+    console.warn('  · could not derive the event window from the occurrences')
+  }
+
+  await writeFile(
+    `${stage}/LISTINGS-ATTRIBUTION.md`,
+    [
+      `# ${YEAR} listings`,
+      '',
+      'Fetched from the Burning Man Project public API and subject to its terms of',
+      'service, including the embargo on location data that `src/data/embargo.ts`',
+      'enforces at load time.',
+      '',
+      'https://innovate.burningman.org/terms-of-service-for-burning-man-apis-and-datasets/',
+      '',
+    ].join('\n'),
   )
+
+  await commitAtomically(stage, OUT)
+} catch (error) {
+  await discardStaged(stage)
+  console.error(error instanceof Error ? error.message : String(error))
   process.exit(1)
 }
 console.log(`\nWrote public/data/${YEAR}. Set VITE_DATA_YEAR=${YEAR} to use it.`)

@@ -23,6 +23,17 @@ const EXPECTED = {
   event: ['event_type', 'hosted_by_camp'],
 }
 
+/**
+ * Required fields the app reads as an array (`Array.prototype.map`/`.flatMap`
+ * calls right into them — see `occurrencesInWindow` in `src/data/events.ts`),
+ * as opposed to the required string fields, which the app reads as text.
+ */
+const REQUIRED_ARRAY_FIELDS = new Set(['occurrence_set'])
+
+const isPlainRecord = (v) => typeof v === 'object' && v !== null && !Array.isArray(v)
+const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0
+const isFiniteInRange = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max
+
 export function validateDataset(kind, records) {
   const problems = []
 
@@ -35,9 +46,72 @@ export function validateDataset(kind, records) {
     return { problems, located: 0, total: 0 }
   }
 
+  const notRecords = records.filter((r) => !isPlainRecord(r)).length
+  if (notRecords) {
+    problems.push(`${kind}: ${notRecords}/${records.length} records are not objects`)
+  }
+
+  // `=== undefined` alone lets `null`, `{}` and other wrong-shaped values
+  // through — they satisfy "present" but not "usable", and every one of them
+  // is a real API response that has shipped before. Check the runtime shape
+  // the app actually needs: a non-empty string for text fields, an array for
+  // `occurrence_set`.
   for (const field of REQUIRED[kind] ?? []) {
-    const missing = records.filter((r) => r?.[field] === undefined).length
-    if (missing) problems.push(`${kind}: ${missing}/${records.length} records have no "${field}"`)
+    const invalid = records.filter((r) =>
+      REQUIRED_ARRAY_FIELDS.has(field) ? !Array.isArray(r?.[field]) : !isNonEmptyString(r?.[field]),
+    ).length
+    if (invalid) problems.push(`${kind}: ${invalid}/${records.length} records have no "${field}"`)
+  }
+
+  // A duplicate uid does not just fail a uniqueness rule — it collides in every
+  // Map the client indexes by uid, so one record silently overwrites another
+  // in favorites, deep links and feature identity.
+  if ((REQUIRED[kind] ?? []).includes('uid')) {
+    const counts = new Map()
+    for (const r of records) {
+      if (!isNonEmptyString(r?.uid)) continue
+      counts.set(r.uid, (counts.get(r.uid) ?? 0) + 1)
+    }
+    for (const [uid, count] of counts) {
+      if (count > 1) problems.push(`${kind}: uid "${uid}" appears ${count} times`)
+    }
+  }
+
+  // Every occurrence the client iterates (`occurrencesInWindow`) needs a
+  // start strictly before its end, both parseable as dates — a bad pair here
+  // either throws downstream or schedules an event that never shows or never
+  // ends.
+  if (kind === 'event') {
+    let badOccurrences = 0
+    for (const r of records) {
+      if (!Array.isArray(r?.occurrence_set)) continue
+      for (const occurrence of r.occurrence_set) {
+        const start = Date.parse(occurrence?.start_time)
+        const end = Date.parse(occurrence?.end_time)
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) badOccurrences++
+      }
+    }
+    if (badOccurrences) {
+      problems.push(`${kind}: ${badOccurrences} occurrence(s) have an unparseable or non-positive start/end time`)
+    }
+  }
+
+  // GPS is optional (see the embargo), but when present it has to be a real
+  // coordinate — a string, an out-of-range value or a NaN reaches the map
+  // layer as-is and either crashes it or drops a pin off the earth.
+  if (kind !== 'event') {
+    let badGps = 0
+    for (const r of records) {
+      const location = r?.location
+      if (!isPlainRecord(location)) continue
+      const { gps_latitude: lat, gps_longitude: lon } = location
+      const latOk = lat === undefined || isFiniteInRange(lat, -90, 90)
+      const lonOk = lon === undefined || isFiniteInRange(lon, -180, 180)
+      if (!latOk || !lonOk) badGps++
+    }
+    if (badGps) {
+      problems.push(`${kind}: ${badGps}/${records.length} records have invalid GPS coordinates`)
+    }
   }
 
   for (const field of EXPECTED[kind] ?? []) {

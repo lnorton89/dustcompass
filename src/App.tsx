@@ -22,6 +22,8 @@ import SearchIcon from '@mui/icons-material/Search'
 import InputAdornment from '@mui/material/InputAdornment'
 import CloseIcon from '@mui/icons-material/Close'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
+import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import LinkOffIcon from '@mui/icons-material/LinkOff'
 import TuneIcon from '@mui/icons-material/Tune'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import NightlightIcon from '@mui/icons-material/Nightlight'
@@ -31,7 +33,6 @@ import EventIcon from '@mui/icons-material/Event'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import GroupsIcon from '@mui/icons-material/Groups'
 import WcIcon from '@mui/icons-material/Wc'
-import LocalHospitalIcon from '@mui/icons-material/LocalHospital'
 import StarIcon from '@mui/icons-material/Star'
 import type { MapRef } from '@vis.gl/react-maplibre'
 import { MapView } from './map/MapView'
@@ -40,10 +41,11 @@ import { DetailDrawer } from './ui/DetailDrawer'
 import { UnplacedSheet } from './ui/UnplacedSheet'
 import { StackSheet } from './ui/StackSheet'
 import { EventsPanel } from './ui/EventsPanel'
+import { EventDetail } from './ui/EventDetail'
 import { FilterSheet } from './ui/FilterSheet'
 import { NavBar } from './ui/NavBar'
 import { playaTheme } from './ui/theme'
-import { useEventsByHost, usePlayaData } from './data/usePlayaData'
+import { useEventsByHost, usePlayaData, type PartialDataWarning } from './data/usePlayaData'
 import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
 import { useGeolocation } from './data/useGeolocation'
@@ -51,9 +53,9 @@ import { useSavedPlaces } from './data/useSavedPlaces'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
 import { travelBetween } from './brc/travel'
-import { bearingToClock, bearingBetween, isNearCity } from './brc/geo'
+import { bearingToClock, bearingBetween, bearingsMatch, isNearCity } from './brc/geo'
 import { shareLink } from './ui/share'
-import type { Poi, PoiKind, UnplacedListing } from './data/types'
+import type { EventItem, Poi, PoiKind, UnplacedListing } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
 import {
@@ -102,20 +104,106 @@ const FILTERS: {
   { key: 'art', label: 'Art', accent: 'art', icon: <AutoAwesomeIcon /> },
   { key: 'camp', label: 'Camps', accent: 'camp', icon: <GroupsIcon /> },
   { key: 'toilets', label: 'Toilets', accent: 'toilet', icon: <WcIcon /> },
-  { key: 'services', label: 'Services', accent: 'medical', icon: <LocalHospitalIcon /> },
+  // Rangers, medical and ice/civic stations all live in this one layer and
+  // draw in their own colours (see ServiceLayers) — a medical-red hospital
+  // icon here claimed the whole layer was medical, which was never true and
+  // was misleading exactly when someone was specifically looking for
+  // emergency infrastructure. `civic` is the layer's actual default color
+  // (everything that isn't specifically medical or ranger), and a neutral
+  // info glyph doesn't claim a single category the way a hospital cross does.
+  { key: 'services', label: 'Services', accent: 'civic', icon: <InfoOutlinedIcon /> },
   { key: 'favorites', label: 'Saved', accent: 'saved', icon: <StarIcon /> },
 ]
+
+/** What to say when a safety/schedule-relevant dataset failed to load. */
+const PARTIAL_DATA_LABEL: Record<PartialDataWarning, string> = {
+  toilets: 'toilet locations',
+  services: 'ranger, medical, and ice station locations',
+  dates: "this year's event date range",
+}
+
+function joinWithAnd(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  if (items.length === 2) return `${items[0]} and ${items[1]}`
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`
+}
+
+// Persisted local preferences: theme mode, map orientation, and the active
+// filter set. Every reader falls back to the same default a fresh install
+// would use rather than trusting stored JSON blindly — corrupted or
+// hand-edited storage should lose the preference, not the map.
+export const MODE_KEY = 'dust-compass:mode'
+export const CITY_UP_KEY = 'dust-compass:city-up'
+export const ACTIVE_FILTERS_KEY = 'dust-compass:active-filters'
+const DEFAULT_FILTERS: Filter[] = ['art', 'camp', 'toilets', 'services']
+const VALID_FILTER_KEYS = new Set<Filter>(FILTERS.map((f) => f.key))
+
+export function isThemeMode(value: unknown): value is ThemeMode {
+  return value === 'dark' || value === 'light' || value === 'night'
+}
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}
+
+/** Exported for the tests: the corruption boundary for every persisted preference below. */
+export function readStored<T>(key: string, isValid: (value: unknown) => value is T, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw === null) return fallback
+    const parsed: unknown = JSON.parse(raw)
+    return isValid(parsed) ? parsed : fallback
+  } catch {
+    // Private windows and blocked site data both throw; landing back on the
+    // default preference is a far smaller problem than the map not opening.
+    return fallback
+  }
+}
+
+function writeStored(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    /* nothing to do — see readStored */
+  }
+}
+
+/** Exported for the tests. */
+export function readStoredFilters(): Set<Filter> {
+  try {
+    const raw = localStorage.getItem(ACTIVE_FILTERS_KEY)
+    if (raw === null) return new Set(DEFAULT_FILTERS)
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set(DEFAULT_FILTERS)
+    const valid = parsed.filter((key): key is Filter => VALID_FILTER_KEYS.has(key))
+    // An array that was never empty but produced zero valid entries is
+    // corruption, not someone deliberately switching every filter off —
+    // only the latter should be allowed to persist as an empty set.
+    if (valid.length === 0 && parsed.length > 0) return new Set(DEFAULT_FILTERS)
+    return new Set(valid)
+  } catch {
+    return new Set(DEFAULT_FILTERS)
+  }
+}
 
 export default function App() {
   const { data, error, retry } = usePlayaData()
   const { favorites, toggle: toggleFavorite } = useFavorites()
   const { places, save: savePlace, remove: removePlace, restore: restorePlace } = useSavedPlaces()
   const [saving, setSaving] = useState<{ position: Position; address: string }>()
-  const [mode, setMode] = useState<ThemeMode>('dark')
-  const [cityUp, setCityUp] = useState(true)
-  const [active, setActive] = useState<Set<Filter>>(
-    () => new Set<Filter>(['art', 'camp', 'toilets', 'services']),
-  )
+  // Night mode is a functional night-vision feature, not decoration, so
+  // reloading — or a crash recovering — back to a bright default would be a
+  // real regression, not just a lost preference. Orientation and the active
+  // filter set get the same treatment for the same reason: nothing about
+  // them should reset just because the tab did.
+  const [mode, setMode] = useState<ThemeMode>(() => readStored(MODE_KEY, isThemeMode, 'dark'))
+  // Only the map's *initial* bearing on first load — after that, orientation
+  // display is derived from the map's actual reported bearing below, since a
+  // gesture or the built-in compass control can change it independently of
+  // whatever this last remembered choice was.
+  const [initialCityUp] = useState(() => readStored(CITY_UP_KEY, isBoolean, true))
+  const [active, setActive] = useState<Set<Filter>>(() => readStoredFilters())
+  useEffect(() => writeStored(MODE_KEY, mode), [mode])
+  useEffect(() => writeStored(ACTIVE_FILTERS_KEY, [...active]), [active])
   /**
    * How tall the footnote is, so the embargo notice can sit under it on a
    * phone where both are pinned to the top. This was a hard-coded 56px, which
@@ -129,44 +217,27 @@ export default function App() {
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
-  const [selected, setSelected] = useState<Poi>()
-  /** Everything sharing one tapped point, when that is more than one place. */
-  const [stack, setStack] = useState<Poi[]>()
-  // A listing with no location to open on — before Gates, all of the art.
-  const [unplaced, setUnplaced] = useState<UnplacedListing>()
-  const [probe, setProbe] = useState<string>()
-  const [deletedPlace, setDeletedPlace] = useState<(typeof places)[number]>()
-  // The map's own locate button and the "take me there" flow feed the same
-  // watch, so a heading stays live however it was started.
-  const location = useGeolocation()
-  const [manualHere, setManualHere] = useState<Position>()
-  const here = location.position ?? manualHere
-  const [eventsOpen, setEventsOpen] = useState(false)
-  const [filtersOpen, setFiltersOpen] = useState(false)
   /**
-   * Dismissing the embargo notice has to stick. It is true for weeks before the
-   * event, and re-announcing it on every launch turns a useful explanation into
-   * something the user has to swat away each time they open the map. Keyed by
-   * year so next year's embargo introduces itself again.
+   * The map's own current bearing, reported by MapView on every rotate —
+   * gesture, MapLibre's built-in compass control, or our own `easeTo` calls
+   * all go through the same event. `cityUp`/`northUp` below are derived from
+   * this rather than tracked as their own toggle state, so the control can
+   * never claim an orientation the map has since rotated away from.
    */
-  const EMBARGO_NOTICE_KEY = `dust-compass:embargo-notice:${DATA_YEAR}`
-  const [embargoNoticeSeen, setEmbargoNoticeSeen] = useState(() => {
-    try {
-      return localStorage.getItem(EMBARGO_NOTICE_KEY) === 'seen'
-    } catch {
-      // Private windows and blocked site data both throw. The notice showing
-      // twice is a far smaller problem than the map not opening.
-      return false
-    }
-  })
-  const dismissEmbargoNotice = useCallback(() => {
-    setEmbargoNoticeSeen(true)
-    try {
-      localStorage.setItem(EMBARGO_NOTICE_KEY, 'seen')
-    } catch {
-      /* nothing to do — see above */
-    }
-  }, [EMBARGO_NOTICE_KEY])
+  const [mapBearing, setMapBearing] = useState<number>()
+  const cityUp = mapBearing !== undefined && data !== undefined && bearingsMatch(mapBearing, data.layout.bearing)
+  const northUp = mapBearing !== undefined && bearingsMatch(mapBearing, 0)
+  // Only remember an explicit canonical choice — a mid-rotation gesture that
+  // passes through neither orientation on its way elsewhere shouldn't
+  // overwrite what the next cold load should start facing.
+  useEffect(() => {
+    if (cityUp) writeStored(CITY_UP_KEY, true)
+    else if (northUp) writeStored(CITY_UP_KEY, false)
+  }, [cityUp, northUp])
+  // Neither canonical label is true mid-gesture or after a manual rotation
+  // that lands somewhere else — claiming one anyway is exactly the bug this
+  // exists to fix.
+  const orientationLabel = cityUp ? '12:00 up' : northUp ? 'North up' : 'Free rotation'
   /**
    * "I cannot read this" is a real complaint out there and it has nothing to do
    * with eyesight: full sun, a screen under a week of dust, and reading glasses
@@ -193,10 +264,105 @@ export default function App() {
       return next
     })
   }, [])
+  // The static <meta name="theme-color"> in layout.tsx only covers first
+  // paint; browser/PWA chrome should follow the live theme afterward, the
+  // same as everything else on screen does.
+  const theme = useMemo(() => playaTheme(mode, reading), [mode, reading])
+  useEffect(() => {
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      'content',
+      theme.palette.background.default,
+    )
+  }, [theme])
+  const [selected, setSelected] = useState<Poi>()
+  /** Everything sharing one tapped point, when that is more than one place. */
+  const [stack, setStack] = useState<Poi[]>()
+  // A listing with no location to open on — before Gates, all of the art.
+  const [unplaced, setUnplaced] = useState<UnplacedListing>()
+  // The event itself, opened from an Events row or a hosted-event row in a
+  // camp/art detail — both used to lead only to the host (or, for an event
+  // with no registered host, nowhere at all), with no way to read the
+  // event's own description (issue #20).
+  const [selectedEvent, setSelectedEvent] = useState<EventItem>()
+  const [probe, setProbe] = useState<string>()
+  const [deletedPlace, setDeletedPlace] = useState<(typeof places)[number]>()
+  // The map's own locate control and the "take me there" flow feed the same
+  // watch, so a heading stays live however it was started, only one
+  // high-accuracy tracker is ever running, and stopping navigation reliably
+  // stops it.
+  const location = useGeolocation()
+  const here = location.position
+  /**
+   * More than one feature can want a live fix at once — navigation and the
+   * Events panel's "Closest" sort, at minimum — and the watch has to keep
+   * running for as long as any of them still need it, but no longer.
+   * Without reference counting, whichever feature stopped last (or the only
+   * one that ever explicitly stops) could kill a watch another feature still
+   * owns, or a feature that never releases its own claim (the map's locate
+   * button has no "off" control) could never be cleaned up at all.
+   */
+  const locationOwners = useRef<Set<'navigation' | 'events' | 'map'>>(new Set())
+  const acquireLocation = useCallback(
+    (owner: 'navigation' | 'events' | 'map') => {
+      locationOwners.current.add(owner)
+      location.start()
+    },
+    [location.start],
+  )
+  const releaseLocation = useCallback(
+    (owner: 'navigation' | 'events' | 'map') => {
+      locationOwners.current.delete(owner)
+      if (locationOwners.current.size === 0) location.stop()
+    },
+    [location.stop],
+  )
+  /**
+   * `useGeolocation()` returns a fresh object every render, so an inline
+   * `() => acquireLocation('events')` at the EventsPanel callsite would be a
+   * new function every time regardless of `acquireLocation` itself — and
+   * EventsPanel's location-ownership effect is keyed on that identity. Every
+   * incoming GPS fix re-rendered App, which handed EventsPanel a "new"
+   * onNeedLocation/onDoneWithLocation, tearing the watch down and starting it
+   * over before it ever settled — wiping `here` back to undefined in a loop
+   * instead of converging on a fix.
+   */
+  const acquireEventsLocation = useCallback(() => acquireLocation('events'), [acquireLocation])
+  const releaseEventsLocation = useCallback(() => releaseLocation('events'), [releaseLocation])
+  const [eventsOpen, setEventsOpen] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  /**
+   * Dismissing the embargo notice has to stick. It is true for weeks before the
+   * event, and re-announcing it on every launch turns a useful explanation into
+   * something the user has to swat away each time they open the map. Keyed by
+   * year so next year's embargo introduces itself again.
+   */
+  const EMBARGO_NOTICE_KEY = `dust-compass:embargo-notice:${DATA_YEAR}`
+  // Starts false — matching what the static export's prerendered HTML has to
+  // assume, since localStorage does not exist at build time — and corrected
+  // right after mount if the visitor already dismissed it. Reading the real
+  // value straight from the useState initializer instead made the very first
+  // client render disagree with the server-rendered markup on a return visit,
+  // which is a hydration error, not merely a startup flash.
+  const [embargoNoticeSeen, setEmbargoNoticeSeen] = useState(false)
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(EMBARGO_NOTICE_KEY) === 'seen') setEmbargoNoticeSeen(true)
+    } catch {
+      // Private windows and blocked site data both throw. The notice showing
+      // twice is a far smaller problem than the map not opening.
+    }
+  }, [EMBARGO_NOTICE_KEY])
+  const dismissEmbargoNotice = useCallback(() => {
+    setEmbargoNoticeSeen(true)
+    try {
+      localStorage.setItem(EMBARGO_NOTICE_KEY, 'seen')
+    } catch {
+      /* nothing to do — see above */
+    }
+  }, [EMBARGO_NOTICE_KEY])
   const [realNow, setRealNow] = useState(() => new Date())
   const clock = useMemo(() => scheduleClock(data?.range, realNow), [data?.range, realNow])
   const mapRef = useRef<MapRef>(null)
-  const theme = useMemo(() => playaTheme(mode, reading), [mode, reading])
   const palette = useMemo(() => paletteFor(mode), [mode])
   // Phones are the real target here; the desktop layout is the special case.
   const compact = useMediaQuery(theme.breakpoints.down('md'))
@@ -220,6 +386,8 @@ export default function App() {
     position: Position
     address?: string
     approximate?: boolean
+    /** Present when heading to a listed camp/art piece, so the URL can name it. */
+    uid?: string
   }>()
 
   // "On now" has to stay true as time passes, or the panel quietly lies.
@@ -264,7 +432,7 @@ export default function App() {
         else if (selected) setSelected(undefined)
         else if (heading) {
           setHeading(undefined)
-          location.stop()
+          releaseLocation('navigation')
         } else if (typing) searchInput.current?.blur()
         return
       }
@@ -280,23 +448,33 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [eventsOpen, filtersOpen, heading, location, saving, selected])
+  }, [eventsOpen, filtersOpen, heading, releaseLocation, saving, selected])
 
   /**
    * A shared link names either a listing or an address. Resolve it to a
    * position once and hand it to the map as its opening camera, so it is not
    * competing with the initial city framing.
    */
+  const deepLinkResolution = useMemo(() => {
+    if (!data || deepLink.poi) return undefined
+    return resolveDeepLink(deepLink, data.layout)
+  }, [data, deepLink])
   const initialTarget = useMemo(() => {
     if (!data) return undefined
     if (deepLink.poi) {
       const target = data.pois.find((poi) => poi.uid === deepLink.poi)
       if (target) return target.position
     }
-    return resolveDeepLink(deepLink, data.layout)
-  }, [data, deepLink])
+    return deepLinkResolution?.status === 'resolved' ? deepLinkResolution.position : undefined
+  }, [data, deepLink, deepLinkResolution])
 
   const [restoredLink, setRestoredLink] = useState<string | null>(null)
+  // A `?poi=` naming a uid that is neither a located POI nor an unplaced
+  // listing — a listing removed/cancelled since the link was shared, or an
+  // old-year link outliving its dataset. Kept separately from `unplaced`
+  // (undefined) so the app can say what happened instead of silently
+  // collapsing to the bare map.
+  const [staleLink, setStaleLink] = useState<string>()
   const linkKey = deepLink.poi ?? deepLink.at ?? null
   // Apply restoration during render so the selection/pin and its guard commit
   // together. This also prevents the URL-mirroring effect from erasing a cold
@@ -313,11 +491,24 @@ export default function App() {
     }
     setRestoredLink(linkKey)
   }
+  // An `at` that could not be resolved — a stale or malformed address — is a
+  // completed restoration attempt, not one still in progress. Leaving
+  // `restoredLink` unset here is what used to wedge the URL-mirroring effect
+  // below for the rest of the session: it stayed gated on a `linkKey` that
+  // was never going to resolve, so the address bar kept the dead address no
+  // matter what the user went on to select.
+  if (data && !initialTarget && deepLinkResolution?.status === 'unresolvable' && restoredLink !== linkKey) {
+    setRestoredLink(linkKey)
+  }
   // A shared link to something with no location still has to land on it. There
   // is no camera move to make, so this sits outside the block above, which
-  // exists to aim one.
+  // exists to aim one. A uid matching neither a located POI nor an unplaced
+  // listing is not a listing to open at all — it is a dead link, and says so
+  // rather than quietly resolving to nothing.
   if (data && !initialTarget && deepLink.poi && restoredLink !== linkKey) {
-    setUnplaced(data.unplaced.find((listing) => listing.uid === deepLink.poi))
+    const listing = data.unplaced.find((entry) => entry.uid === deepLink.poi)
+    if (listing) setUnplaced(listing)
+    else setStaleLink(deepLink.poi)
     setRestoredLink(linkKey)
   }
 
@@ -329,11 +520,30 @@ export default function App() {
     // arrives. Restoration commits first; only then does normal URL mirroring
     // take over.
     if (linkKey && restoredLink !== linkKey) return
+    // A stale link's uid stays in the address bar, unexplained-looking as
+    // that may seem, for as long as the notice explaining it is still up —
+    // publishing here would erase the very link the notice is about before
+    // the reader has done anything with it. Dismissing the notice clears
+    // `staleLink` and lets this effect resume normally on the next run.
+    if (staleLink) return
     if (selected) publish({ poi: selected.uid })
     else if (unplaced) publish({ poi: unplaced.uid })
-    else if (pin) publish({ at: pin.address })
+    // The active navigation destination outranks a leftover dropped pin —
+    // otherwise starting navigation to a listing while an earlier pin was
+    // still on the map published that unrelated pin's address, and starting
+    // navigation to a place with no pin at all lost the destination from the
+    // URL entirely, falling back to the bare app root.
+    else if (heading)
+      publish(
+        heading.uid
+          ? { poi: heading.uid }
+          : heading.address
+            ? { at: heading.address, ll: heading.position }
+            : {},
+      )
+    else if (pin) publish({ at: pin.address, ll: pin.position })
     else publish({})
-  }, [data, selected, unplaced, pin, publish, linkKey, restoredLink])
+  }, [data, selected, unplaced, heading, pin, publish, linkKey, restoredLink, staleLink])
 
   const visiblePois = useMemo(() => {
     if (!data) return []
@@ -384,10 +594,24 @@ export default function App() {
   const arrived = useRef(false)
   useEffect(() => {
     if (!navigation || arrived.current) return
-    if (navigation.travel.meters > 25) return
+    // `origin` falls back to the Man's own coordinates until a real GPS fix
+    // exists, so a destination within 25m of the Man could otherwise arm a
+    // false arrival the instant navigation starts, while the phone is still
+    // locating and the walker may be nowhere near it. Only a fix belonging
+    // to the active session may confirm arrival.
+    if (!here) return
+    // The buzz is trusted without looking at the screen, so a merely nearby
+    // computed point is not enough — the fix has to be accurate enough to
+    // actually support the claim. A conservative, uncertainty-aware check:
+    // even in the worst case implied by the fix's own reported accuracy, the
+    // true position could still be inside the arrival radius. Missing
+    // accuracy (not guaranteed by the Geolocation API, though effectively
+    // always present) is treated as unbounded rather than zero.
+    const accuracy = location.accuracy ?? Infinity
+    if (navigation.travel.meters + accuracy > 25) return
     arrived.current = true
     haptic('arrive')
-  }, [navigation])
+  }, [navigation, here, location.accuracy])
 
 
   /**
@@ -419,23 +643,46 @@ export default function App() {
   )
 
   const navigateTo = useCallback(
-    (target: { name: string; position: Position; address?: string; positionSource?: 'gps' | 'address' }) => {
-      setHeading({ ...target, approximate: target.positionSource === 'address' })
+    (target: {
+      name: string
+      position: Position
+      address?: string
+      positionSource?: 'gps' | 'address'
+      uid?: string
+    }) => {
+      setHeading({
+        name: target.name,
+        position: target.position,
+        address: target.address,
+        approximate: target.positionSource === 'address',
+        uid: target.uid,
+      })
       arrived.current = false
       setSelected(undefined)
+      // An earlier dropped pin is unrelated to this destination — leaving it
+      // behind meant it could out-rank the new heading in the URL-mirroring
+      // effect below, sharing the old pin's address while navigating to
+      // somewhere else entirely.
+      setPin(undefined)
       mapRef.current?.flyTo({
         center: target.position,
         zoom: 16.5,
         duration: 900,
         padding: navigationPadding(),
       })
-      location.start()
+      acquireLocation('navigation')
     },
-    [location, navigationPadding],
+    [acquireLocation, navigationPadding],
   )
 
   const flyTo = useCallback(
     (position: Position, poi?: Poi) => {
+      // A previous listing's measured height is unrelated to this one — reset
+      // to the fallback estimate rather than framing this sheet, sight
+      // unseen, off however tall the last one happened to be. The real
+      // height, once `onMeasure` reports it below, triggers one bounded
+      // correction to the same target rather than a second guess.
+      if (poi) detailHeight.current = 0
       mapRef.current?.flyTo({
         center: position,
         zoom: 16.5,
@@ -444,13 +691,38 @@ export default function App() {
       })
       setSelected(poi)
       setUnplaced(undefined)
-      if (!poi && data) setPin({ position, address: addressFor(position, data.layout) })
+      // A pin marks bare playa the user tapped; selecting a listed place is a
+      // different target and should not leave that earlier pin sitting on
+      // the map as an unrelated, unexplained marker.
+      if (poi) setPin(undefined)
+      else if (data) setPin({ position, address: addressFor(position, data.layout) })
     },
     [data, focusPadding],
   )
 
+  /**
+   * Re-frames the currently selected sheet once its real measured height is
+   * known — a bounded correction after the initial fallback-estimated move,
+   * so the map ends up keeping the selected place in the visible area
+   * whatever this particular sheet's actual height turns out to be, instead
+   * of trusting a guess or a previous listing's height for good.
+   */
+  const reframeSelected = useCallback(() => {
+    if (!selected) return
+    mapRef.current?.easeTo({ center: selected.position, padding: focusPadding(), duration: 300 })
+  }, [selected, focusPadding])
+
+  const onDetailMeasure = useCallback(
+    (height: number) => {
+      if (detailHeight.current === height) return
+      detailHeight.current = height
+      reframeSelected()
+    },
+    [reframeSelected],
+  )
+
   const share = useCallback(
-    async (link: { poi?: string; at?: string }, title: string, unfurls = true) => {
+    async (link: { poi?: string; at?: string; ll?: Position }, title: string, unfurls = true) => {
       // Only listings have a page of their own to unfurl. The survey's places
       // are not in the API's export, so a link to one has to be the app's own
       // URL — a `/p/` link would 404 rather than open anything.
@@ -471,12 +743,13 @@ export default function App() {
   }, [])
 
   const toggleCityUp = useCallback(() => {
-    setCityUp((current) => {
-      const next = !current
-      mapRef.current?.easeTo({ bearing: next ? (data?.layout.bearing ?? 45) : 0, duration: 600 })
-      return next
-    })
-  }, [data])
+    // Toggling out of city-up (however the map actually got there — a tap, a
+    // gesture, or the compass control) always goes to north-up; anything
+    // else, including free rotation, goes to city-up. The map's own 'rotate'
+    // event reports the result back through onBearingChange.
+    const next = !cityUp
+    mapRef.current?.easeTo({ bearing: next ? (data?.layout.bearing ?? 45) : 0, duration: 600 })
+  }, [cityUp, data])
 
   const kinds = useMemo(() => {
     const set = new Set<PoiKind>()
@@ -486,7 +759,7 @@ export default function App() {
   }, [active])
 
   return (
-    <ThemeProvider theme={theme} defaultMode={mode === 'light' ? 'light' : 'dark'}>
+    <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box sx={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
         {/* MUI's "default" AppBar is grey-900, which put a cold neutral slab
@@ -543,6 +816,7 @@ export default function App() {
                   unplaced={data.unplaced}
                   places={places}
                   onGo={flyTo}
+                  onGoToPlace={navigateTo}
                   onOpenUnplaced={(listing) => {
                     setSelected(undefined)
                     setUnplaced(listing)
@@ -629,7 +903,7 @@ export default function App() {
                     <ControlButton
                       icon={<ExploreIcon />}
                       title="Orient the map so 12:00 points up"
-                      tooltip={cityUp ? '12:00 is up' : 'North is up'}
+                      tooltip={orientationLabel}
                       selected={cityUp}
                       pressed={cityUp}
                       onClick={toggleCityUp}
@@ -715,7 +989,8 @@ export default function App() {
                 visible={kinds}
                 showServices={active.has('services')}
                 showToilets={active.has('toilets')}
-                cityUp={cityUp}
+                cityUp={initialCityUp}
+                onBearingChange={setMapBearing}
                 mapRef={mapRef}
                 onSelect={(poi) => {
                   if (poi) flyTo(poi.position, poi)
@@ -729,15 +1004,30 @@ export default function App() {
                   setProbe(address)
                   setPin({ position, address })
                 }}
-                onLocate={setManualHere}
+                // The control's own one-shot fix is not kept — pressing it
+                // hands ownership of tracking to `useGeolocation`'s single
+                // watch instead of running a second one in parallel. There is
+                // no "off" control for this one, so its claim is never
+                // explicitly released — matching the existing behaviour that
+                // a fix started this way keeps running for the rest of the
+                // session.
+                onLocate={() => acquireLocation('map')}
                 savedPlaces={places}
                 onSelectPlace={(id) => {
                   const place = places.find((p) => p.id === id)
                   if (place) navigateTo(place)
                 }}
                 pin={pin}
+                onPinClick={() => pin && setProbe(pin.address)}
                 initialTarget={initialTarget}
-                route={heading && origin ? { from: origin, to: heading.position } : undefined}
+                // Withheld until a real fix exists rather than drawn from the
+                // Man fallback with no fix at all — a route line with no
+                // ambiguity about where it starts, matching what NavBar's own
+                // copy already says. Once a real fix exists, `origin` is what
+                // actually draws it (not `here` directly): a fix nowhere near
+                // the city still resolves to the Man, same as the distance
+                // readout, rather than a route line running off the map.
+                route={heading && here && origin ? { from: origin, to: heading.position } : undefined}
                 selected={selected}
                 destination={heading}
               />
@@ -812,7 +1102,7 @@ export default function App() {
                   onRetryLocation={location.start}
                   onClear={() => {
                     setHeading(undefined)
-                    location.stop()
+                    releaseLocation('navigation')
                   }}
                 />
               )}
@@ -860,6 +1150,103 @@ export default function App() {
                   </IconButton>
                 </Paper>
               )}
+              {data.partialDataWarnings.length > 0 && (
+                // Toilets/services/dates falling back to empty used to be
+                // indistinguishable from a normal map with nothing wrong —
+                // silently dropping the safety-relevant layer entirely rather
+                // than saying so. This does not block the app the way the
+                // required-dataset error above does; it names what is
+                // missing and offers a retry.
+                <Paper
+                  elevation={0}
+                  sx={{
+                    position: 'absolute',
+                    // Stack below the embargo notice on a phone when both are
+                    // showing at once, rather than overlapping it.
+                    top:
+                      !data.embargo.artReleased && !embargoNoticeSeen
+                        ? { xs: 'calc(104px + var(--safe-top))', sm: 56 }
+                        : { xs: 'calc(56px + var(--safe-top))', sm: 8 },
+                    left: 8,
+                    right: { xs: 8, sm: 'auto' },
+                    maxWidth: { sm: 420 },
+                    zIndex: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    pl: 1.25,
+                    pr: 0.5,
+                    py: 0.25,
+                    border: '1px solid',
+                    borderColor: 'warning.main',
+                  }}
+                >
+                  <WarningAmberIcon sx={{ fontSize: 18, color: 'warning.main', flexShrink: 0 }} />
+                  <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
+                    Could not load {joinWithAnd(data.partialDataWarnings.map((w) => PARTIAL_DATA_LABEL[w]))}.
+                    Retry when you have signal.
+                  </Typography>
+                  <Button size="small" color="warning" onClick={retry}>
+                    Retry
+                  </Button>
+                </Paper>
+              )}
+              {staleLink && (
+                // A `?poi=` naming a listing that is neither placed nor
+                // unplaced-but-embargoed — removed/cancelled since the link
+                // was shared, or from a year whose dataset has moved on. The
+                // old behaviour silently erased the link and landed on the
+                // bare map with no explanation; this says what happened and
+                // keeps the link in the address bar (see the URL-mirroring
+                // effect's own `staleLink` guard) until it is dismissed.
+                <Paper
+                  elevation={0}
+                  sx={{
+                    position: 'absolute',
+                    // Stack below whichever of the embargo/partial-data
+                    // banners are also showing, rather than overlapping them.
+                    top:
+                      (!data.embargo.artReleased && !embargoNoticeSeen ? 1 : 0) +
+                        (data.partialDataWarnings.length > 0 ? 1 : 0) ===
+                      2
+                        ? { xs: 'calc(152px + var(--safe-top))', sm: 104 }
+                        : (!data.embargo.artReleased && !embargoNoticeSeen ? 1 : 0) +
+                              (data.partialDataWarnings.length > 0 ? 1 : 0) ===
+                            1
+                          ? { xs: 'calc(104px + var(--safe-top))', sm: 56 }
+                          : { xs: 'calc(56px + var(--safe-top))', sm: 8 },
+                    left: 8,
+                    right: { xs: 8, sm: 'auto' },
+                    maxWidth: { sm: 420 },
+                    zIndex: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    pl: 1.25,
+                    pr: 0.5,
+                    py: 0.25,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                  }}
+                >
+                  <LinkOffIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+                  <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
+                    This shared listing is no longer in the current map.
+                  </Typography>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setStaleLink(undefined)
+                      searchInput.current?.focus()
+                    }}
+                  >
+                    Search
+                  </Button>
+                  <Button size="small" onClick={() => setStaleLink(undefined)}>
+                    Show map
+                  </Button>
+                </Paper>
+              )}
             </>
           )}
         </Box>
@@ -872,14 +1259,21 @@ export default function App() {
             events={selected ? (eventsByHost.get(selected.uid) ?? []) : []}
             origin={origin ?? [0, 0]}
             originLabel={originLabel}
+            now={clock.now}
             isFavorite={selected ? favorites.has(selected.uid) : false}
+            // The Saved/Favorites filter always keeps every civic place
+            // visible regardless of favorite state — on purpose, since
+            // toilets/rangers/medical are safety infrastructure a filter
+            // meant to cut clutter should never hide. Starring one currently
+            // has no effect anywhere else in the app, so the action is not
+            // offered rather than making a promise it doesn't keep.
+            canFavorite={selected ? !isCivic(selected) : false}
             onToggleFavorite={toggleFavorite}
             onShare={(poi) => void share({ poi: poi.uid }, poi.name, !isCivic(poi))}
             onNavigate={navigateTo}
+            onSelectEvent={setSelectedEvent}
             onClose={() => setSelected(undefined)}
-            onMeasure={(height) => {
-              detailHeight.current = height
-            }}
+            onMeasure={onDetailMeasure}
             compact={compact}
           />
           <UnplacedSheet
@@ -922,7 +1316,7 @@ export default function App() {
               },
               {
                 key: 'orient',
-                label: cityUp ? '12:00 up' : 'North up',
+                label: orientationLabel,
                 title: 'Orient the map so 12:00 points up',
                 icon: <ExploreIcon />,
                 selected: cityUp,
@@ -992,16 +1386,33 @@ export default function App() {
           open={eventsOpen}
           events={data.events}
           hosts={hostsByUid}
+          layout={data.layout}
           now={clock.now}
           preview={clock.preview}
           origin={here}
-          onNeedLocation={location.start}
-          onSelect={(poi) => {
-            setEventsOpen(false)
-            flyTo(poi.position, poi)
-          }}
+          locationStatus={location.status}
+          onNeedLocation={acquireEventsLocation}
+          onDoneWithLocation={releaseEventsLocation}
+          onSelectEvent={setSelectedEvent}
           onClose={() => setEventsOpen(false)}
           compact={compact}
+        />
+      )}
+
+      {data && (
+        <EventDetail
+          event={selectedEvent}
+          host={hostsByUid.get(
+            selectedEvent?.hosted_by_camp ?? selectedEvent?.located_at_art ?? '',
+          )}
+          layout={data.layout}
+          origin={origin}
+          now={clock.now}
+          onClose={() => setSelectedEvent(undefined)}
+          onNavigate={(target) => {
+            setEventsOpen(false)
+            navigateTo(target)
+          }}
         />
       )}
 
@@ -1032,9 +1443,21 @@ export default function App() {
               <Button
                 color="secondary"
                 size="small"
-                onClick={() => void share({ at: pin.address }, `Meet me at ${pin.address}`)}
+                onClick={() =>
+                  void share({ at: pin.address, ll: pin.position }, `Meet me at ${pin.address}`)
+                }
               >
                 Share
+              </Button>
+              <Button
+                color="secondary"
+                size="small"
+                onClick={() => {
+                  setPin(undefined)
+                  setProbe(undefined)
+                }}
+              >
+                Clear
               </Button>
             </>
           ) : undefined

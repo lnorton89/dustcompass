@@ -14,9 +14,10 @@
  * Camp and art listings come from the Burning Man API, which requires a key:
  * https://api.burningman.org/api-key-request/
  */
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { readdir, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
+import { commitAtomically, discardStaged, stageTempDir } from './lib/atomic-write.mjs'
 
 const YEAR = process.argv[2] ?? '2026'
 const ROOT = resolve(import.meta.dirname, '..')
@@ -55,57 +56,76 @@ async function get(url, required, label) {
 }
 
 console.log(`Fetching Burning Man's published ${YEAR} survey...`)
-await mkdir(OUT, { recursive: true })
-await mkdir(FONTS, { recursive: true })
 
-// A geometry fetch must never leave an older listing payload in place where a
-// later build could mistake it for a fresh official fetch.
-for (const stale of ['art.json', 'camp.json', 'event.json', 'points.json', 'dates_info.json', 'LISTINGS-ATTRIBUTION.md', 'services.json', 'camp_outlines.geojson']) {
-  await rm(join(OUT, stale), { force: true })
+// Everything below is staged into temp directories, siblings of the real
+// ones, and never touches public/data or public/fonts until every fetch and
+// derivation has succeeded. A geometry fetch must never leave an older
+// listing payload in place where a later build could mistake it for a fresh
+// official fetch — but that invalidation happens in the final swap below,
+// as part of the same all-or-nothing commit, not as an eager pre-step that
+// could outlive a failed fetch.
+const outStage = await stageTempDir(OUT)
+const fontsStage = await stageTempDir(FONTS)
+
+try {
+  for (const [name, { path, required }] of Object.entries(LAYERS)) {
+    const response = await get(`${GIS}/${path}`, required, name)
+    if (!response) continue
+    await writeFile(join(outStage, name), await response.text())
+    console.log(`  ${name}`)
+  }
+
+  // The layout is derived from the same survey, and refuses to write itself
+  // if the fitted city centre disagrees with the surveyed Man. It writes
+  // straight into the staged directory, not the live one.
+  execFileSync(
+    process.execPath,
+    [join(import.meta.dirname, 'derive-layout.mjs'), YEAR, join(outStage, 'layout.json')],
+    { stdio: 'inherit' },
+  )
+
+  console.log('Fetching offline glyphs...')
+  for (const range of GLYPH_RANGES) {
+    const response = await get(`${GLYPHS}/${range}.pbf`, true, `glyph range ${range}`)
+    await writeFile(join(fontsStage, `${range}.pbf`), Buffer.from(await response.arrayBuffer()))
+  }
+
+  await writeFile(
+    join(outStage, 'ATTRIBUTION.md'),
+    [
+      `# ${YEAR} city geometry`,
+      '',
+      "Every part of the city comes from Burning Man's own published survey:",
+      'https://github.com/burningmantech/innovate-GIS-data',
+      '',
+      '`layout.json` is not copied from anywhere. It is derived from that survey by',
+      '`scripts/derive-layout.mjs`, which fits the annular street centrelines to',
+      'recover the polar spec the app generates the city from, and refuses to write',
+      'a layout unless that fitted centre agrees with the surveyed "The Man" control',
+      'point. See https://innovate.burningman.org/dataset/ for the dataset terms.',
+      '',
+      'Offline map glyphs are Open Sans (Apache-2.0), prebuilt into SDF ranges by',
+      'https://github.com/openmaptiles/fonts. They are a typeface, not map data.',
+      '',
+      'Listings are intentionally not vendored here. Run `npm run fetch-api -- YEAR`',
+      'with the key issued for this app so Event Data is obtained from the official',
+      'API under its terms of service.',
+      '',
+    ].join('\n'),
+  )
+
+  // Nothing below this line can fail, so this is the one moment the live
+  // directories are touched — and only with fully-fetched, fully-derived
+  // data. `replaceAll` is what invalidates any listings a previous
+  // fetch-api/fetch-archive run left in OUT: a new geometry year makes them
+  // stale, and that has to happen atomically with everything else here.
+  await commitAtomically(outStage, OUT, { replaceAll: true })
+  await commitAtomically(fontsStage, FONTS, { replaceAll: true })
+} catch (error) {
+  await discardStaged(outStage)
+  await discardStaged(fontsStage)
+  throw error
 }
-
-for (const [name, { path, required }] of Object.entries(LAYERS)) {
-  const response = await get(`${GIS}/${path}`, required, name)
-  if (!response) continue
-  await writeFile(join(OUT, name), await response.text())
-  console.log(`  ${name}`)
-}
-
-// The layout is derived from the same survey, and refuses to write itself if
-// the fitted city centre disagrees with the surveyed Man.
-execFileSync(process.execPath, [join(import.meta.dirname, 'derive-layout.mjs'), YEAR], {
-  stdio: 'inherit',
-})
-
-console.log('Fetching offline glyphs...')
-for (const range of GLYPH_RANGES) {
-  const response = await get(`${GLYPHS}/${range}.pbf`, true, `glyph range ${range}`)
-  await writeFile(join(FONTS, `${range}.pbf`), Buffer.from(await response.arrayBuffer()))
-}
-
-await writeFile(
-  join(OUT, 'ATTRIBUTION.md'),
-  [
-    `# ${YEAR} city geometry`,
-    '',
-    "Every part of the city comes from Burning Man's own published survey:",
-    'https://github.com/burningmantech/innovate-GIS-data',
-    '',
-    '`layout.json` is not copied from anywhere. It is derived from that survey by',
-    '`scripts/derive-layout.mjs`, which fits the annular street centrelines to',
-    'recover the polar spec the app generates the city from, and refuses to write',
-    'a layout unless that fitted centre agrees with the surveyed "The Man" control',
-    'point. See https://innovate.burningman.org/dataset/ for the dataset terms.',
-    '',
-    'Offline map glyphs are Open Sans (Apache-2.0), prebuilt into SDF ranges by',
-    'https://github.com/openmaptiles/fonts. They are a typeface, not map data.',
-    '',
-    'Listings are intentionally not vendored here. Run `npm run fetch-api -- YEAR`',
-    'with the key issued for this app so Event Data is obtained from the official',
-    'API under its terms of service.',
-    '',
-  ].join('\n'),
-)
 
 const files = await readdir(OUT)
 console.log(`\nWrote public/data/${YEAR}: ${files.join(', ')}`)

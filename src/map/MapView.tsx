@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   GeolocateControl,
   Map as MapGL,
@@ -7,6 +7,8 @@ import {
   type MapLayerMouseEvent,
   type MapRef,
 } from '@vis.gl/react-maplibre'
+import { Button, Stack, Typography } from '@mui/material'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
 import type { GeoJSONSource } from 'maplibre-gl'
 import type { PlayaData } from '../data/usePlayaData'
 import type { Poi, PoiKind } from '../data/types'
@@ -25,12 +27,17 @@ import {
 
 /** How far from the tap to look for the label that names what was tapped. */
 const LABEL_HIT_RADIUS = 18
-/** The same allowance for the survey's dots, which carry no label to aim at. */
+/**
+ * The same allowance for the survey's dots, which carry no label to aim at.
+ * Also used for saved spots: their dot is the same kind of small circular
+ * target, and the priority they need over everything else (see
+ * `handleClick`) is about hit-test *order*, not a bigger hit box.
+ */
 const DOT_HIT_RADIUS = 12
 import { RouteLayer } from './RouteLayer'
 import { SAVED_LAYER_ID, SavedPlacesLayer } from './SavedPlacesLayer'
 import { SERVICE_LAYER_ID, ServiceLayers, TOILET_LAYER_ID } from './ServiceLayers'
-import { nearestFeature } from './pick'
+import { pickByPriority } from './pick'
 import { baseStyle, paletteFor, type ThemeMode } from './style'
 import { FocusMarker } from './FocusMarker'
 import { PlayaScene } from './PlayaScene'
@@ -49,6 +56,14 @@ interface Props {
   showToilets: boolean
   /** True to rotate the map so 12:00 points up, which is how the city reads. */
   cityUp: boolean
+  /**
+   * Fires with the map's actual current bearing whenever it changes, for any
+   * reason — a gesture, the built-in compass control, or a programmatic
+   * `easeTo`. The caller derives its own orientation display from this
+   * rather than from whichever toggle last requested a rotation, since only
+   * this reflects what the map is actually showing.
+   */
+  onBearingChange?: (bearing: number) => void
   onSelect: (poi: Poi | undefined) => void
   /**
    * A tap that lands on several listings at once. Until the survey publishes
@@ -58,10 +73,12 @@ interface Props {
    */
   onSelectStack: (pois: Poi[]) => void
   onProbe: (address: string, position: Position) => void
-  /** Fires when the browser reports the user's position. */
-  onLocate: (position: Position) => void
+  /** Fires when the map's locate control is pressed. */
+  onLocate: () => void
   /** A dropped or shared location to mark, if any. */
   pin?: { position: Position; address: string }
+  /** Fires when the pin marker itself is tapped, to reopen its actions. */
+  onPinClick?: () => void
   /**
    * Where a shared link wants the camera. Framing the whole city on load would
    * otherwise race this and win, dropping the visitor on the city view instead
@@ -80,6 +97,33 @@ interface Props {
 }
 
 const GLYPHS = assetUrl('fonts/{fontstack}/{range}.pbf')
+
+export type RenderStatus = 'starting' | 'ready' | 'failed'
+export type RenderStatusEvent = 'load' | 'error' | 'context-lost' | 'context-restored' | 'timeout'
+
+/**
+ * Pure so the failure/recovery logic can be tested without a real MapLibre
+ * instance — jsdom has no WebGL, so nothing that actually drives a `Map` can
+ * run in a unit test. `error` and `timeout` are only fatal while still
+ * `starting`: once the map has genuinely loaded, most 'error' events are
+ * transient (a source hiccup, a style warning), and treating every one of
+ * those as fatal would be worse than the blank-map bug this exists to catch.
+ * Context loss is the one event that can strike a map that already loaded
+ * fine, so it goes straight to `failed` regardless of current status.
+ */
+export function nextRenderStatus(current: RenderStatus, event: RenderStatusEvent): RenderStatus {
+  switch (event) {
+    case 'load':
+      return 'ready'
+    case 'context-restored':
+      return 'ready'
+    case 'context-lost':
+      return 'failed'
+    case 'error':
+    case 'timeout':
+      return current === 'starting' ? 'failed' : current
+  }
+}
 
 /**
  * Ranger stations, medical, ice, toilets, the Man and the portals. They come
@@ -104,11 +148,13 @@ export function MapView({
   showServices,
   showToilets,
   cityUp,
+  onBearingChange,
   onSelect,
   onSelectStack,
   onProbe,
   onLocate,
   pin,
+  onPinClick,
   initialTarget,
   route,
   selected,
@@ -124,6 +170,30 @@ export function MapView({
     () => new globalThis.Map(data.pois.map((poi) => [poi.uid, poi])),
     [data.pois],
   )
+
+  /**
+   * A blank/background-only map is a materially worse failure than a data
+   * error: there is nothing on screen telling the user to reload, and for an
+   * offline-first navigation app that may be the only recovery available. A
+   * missing/corrupt worker asset, WebGL init failure, or context loss can all
+   * leave the map exactly there — background painted, `load` never firing —
+   * without ever reaching React's own error boundary, since none of this is a
+   * render exception.
+   */
+  const [renderStatus, setRenderStatus] = useState<RenderStatus>('starting')
+  const renderStatusRef = useRef(renderStatus)
+  const applyRenderEvent = useCallback((event: RenderStatusEvent) => {
+    renderStatusRef.current = nextRenderStatus(renderStatusRef.current, event)
+    setRenderStatus(renderStatusRef.current)
+  }, [])
+
+  // Bounded watchdog: `onLoad` racing an indefinitely stuck worker/style init
+  // otherwise leaves the loading state (or nothing at all) on screen forever.
+  useEffect(() => {
+    if (renderStatus !== 'starting') return
+    const timeout = setTimeout(() => applyRenderEvent('timeout'), 15_000)
+    return () => clearTimeout(timeout)
+  }, [renderStatus, applyRenderEvent])
 
   /**
    * Everything sharing each point, over exactly what the map is drawing.
@@ -170,11 +240,102 @@ export function MapView({
 
   const handleClick = useCallback(
     (event: MapLayerMouseEvent) => {
-      const hit = event.features?.[0]
-      if (hit?.layer?.id === SAVED_LAYER_ID && hit.properties?.id) {
-        onSelectPlace(String(hit.properties.id))
+      const { x, y } = event.point
+      const project = (position: [number, number]) => event.target.project(position)
+      const queryLayer = (layers: string[], radius: number) =>
+        event.target.queryRenderedFeatures(
+          [
+            [x - radius, y - radius],
+            [x + radius, y + radius],
+          ],
+          { layers },
+        )
+
+      // Deliberate, deterministic priority across every tappable layer —
+      // never `event.features[0]`, whose order follows paint order (saved
+      // places are drawn *before* ServiceLayers/PoiLayers) rather than what
+      // the tap meant. `pickByPriority` walks these groups in order and
+      // takes the first one with a candidate near the tap, regardless of
+      // whether a later group's candidate happens to be a pixel closer:
+      //
+      // 1. Saved spots — the user's own placements. A "My camp" or meeting
+      //    point dropped on top of a camp/service/landmark must still open
+      //    the saved spot, not whatever the renderer stacked over it. This
+      //    is the fix for issue #26: previously a saved spot only won when
+      //    it happened to be `event.features[0]`, so one visually underneath
+      //    something else was untappable from the map.
+      // 2. Civic/safety features (rangers, medical, ice, toilets, the Man,
+      //    the portals) — survey-sourced and safety-relevant, so they beat
+      //    ordinary listings. Each stands alone at its own point, so nearest
+      //    to the tap is unambiguous.
+      // 3. POI labels — a playa address names an intersection, so several
+      //    camps can genuinely share one point. Only one wins the label, and
+      //    that is the name that was actually tapped.
+      const picked = pickByPriority(
+        [
+          { id: 'saved', idKey: 'id', features: queryLayer([SAVED_LAYER_ID], DOT_HIT_RADIUS) },
+          { id: 'civic', features: queryLayer(CIVIC_LAYER_IDS, DOT_HIT_RADIUS) },
+          // A dot the tap landed on is the least ambiguous thing there is, so
+          // it goes ahead of labels. Labels used to win instead, because when
+          // several camps sat on one point only one of them was named and
+          // that was the name the reader had aimed at. But a label's hit box
+          // is 18px wide, so a neighbouring camp's label could take a tap that
+          // was squarely on someone else's dot — aiming at Jelly Dance opened
+          // Stoop, two hundred feet away. Coincident camps no longer need the
+          // label to disambiguate them: they all share a point below, so they
+          // all open the same list.
+          { id: 'poi-dot', features: queryLayer([POI_LAYER_ID], DOT_HIT_RADIUS) },
+          // The label search stays as the fallback for a dot with no label
+          // visible yet at this zoom: the label is drawn below its dot, so a
+          // reader aiming at the name lands on no dot at all.
+          { id: 'poi-label', features: queryLayer([POI_LABEL_LAYER_ID], LABEL_HIT_RADIUS) },
+        ],
+        event.point,
+        project,
+      )
+      if (picked?.groupId === 'saved' && picked.feature.properties?.id) {
+        onSelectPlace(String(picked.feature.properties.id))
         return
       }
+      if (
+        picked &&
+        (picked.groupId === 'poi-dot' || picked.groupId === 'poi-label') &&
+        picked.feature.properties?.uid
+      ) {
+        const poi = poiIndex.get(String(picked.feature.properties.uid))
+        // Whichever of several coincident listings the renderer happened to
+        // hand back used to be the only one reachable from the map — the
+        // others were invisible, with no way to admit they existed. Hand over
+        // the whole point instead and let the reader say which one they meant.
+        const sharing = sharedWith(poi)
+        if (sharing) {
+          onSelectStack(sharing)
+          return
+        }
+        onSelect(poi)
+        return
+      }
+      if (picked?.groupId === 'civic' && picked.feature.properties?.uid) {
+        const poi = poiIndex.get(String(picked.feature.properties.uid))
+        // A camp addressed "3:00 Portal" geocodes to the portal's own
+        // surveyed point, exactly — so a civic hit can share its pixel with a
+        // listing too, and used to always win outright with no way for the
+        // reader to reach whatever it was standing on.
+        const sharing = sharedWith(poi)
+        if (sharing) {
+          onSelectStack(sharing)
+          return
+        }
+        onSelect(poi)
+        return
+      }
+
+      // Cluster bubbles are checked after saved spots (which must remain
+      // reachable even if a saved marker happens to sit under one) but have
+      // no equivalent of "nearest anchor" — expanding the wrong cluster
+      // isn't a coherent fallback, so this stays tied to MapLibre's own
+      // top-of-stack hit the way it always was.
+      const hit = event.features?.[0]
       if (hit?.layer?.id === POI_CLUSTER_LAYER_ID && hit.properties?.cluster_id) {
         const source = event.target.getSource('pois') as GeoJSONSource
         const center = (hit.geometry as GeoJSON.Point).coordinates as Position
@@ -183,54 +344,12 @@ export function MapView({
         })
         return
       }
-      const { x, y } = event.point
-      const nearestIn = (layers: string[], radius: number) =>
-        nearestFeature(
-          event.target.queryRenderedFeatures(
-            [
-              [x - radius, y - radius],
-              [x + radius, y + radius],
-            ],
-            { layers },
-          ),
-          event.point,
-          (position) => event.target.project(position),
-        )
-      const listed = (feature: ReturnType<typeof nearestIn>) =>
-        feature && poiIndex.get(String(feature.properties.uid))
 
-      // The city's own places first. Each is one dot standing alone, so the
-      // nearest one to the tap is unambiguously the one meant — unlike the
-      // camps below, which pile up on a shared intersection. Their own dots
-      // are small, and a thumb is not, so they are given a little room.
-      const civic = listed(nearestIn(CIVIC_LAYER_IDS, DOT_HIT_RADIUS))
-      if (civic) {
-        const sharing = sharedWith(civic)
-        if (sharing) onSelectStack(sharing)
-        else onSelect(civic)
-        return
-      }
-
-      // A dot the tap landed on is the least ambiguous thing there is, so it
-      // goes first. Labels used to win instead, because when several camps sat
-      // on one point only one of them was named and that name was the one the
-      // reader had aimed at. But the box a label is hunted in is 18px wide, so
-      // a neighbouring camp's label could take a tap that was squarely on
-      // someone else's dot — aiming at Jelly Dance opened Stoop, two hundred
-      // feet away. Coincident camps no longer need the label to disambiguate
-      // them: they all share a point, so they all open the same list.
-      //
-      // The label search stays as the fallback. The label is drawn below its
-      // dot, so a reader aiming at the name lands on no dot at all, and among
-      // whatever is labelled nearby the one anchored nearest the tap is theirs.
-      const onDot = event.features?.find((feature) => feature.properties?.uid)
-      const chosen = onDot ?? nearestIn([POI_LABEL_LAYER_ID], LABEL_HIT_RADIUS)
-      if (chosen?.properties?.uid) {
-        const poi = poiIndex.get(String(chosen.properties.uid))
-        // Whichever of the six the renderer happened to hand back was the one
-        // the reader got, and the other five were unreachable — the map had no
-        // way of admitting they existed. Hand over the whole point instead and
-        // let them say which one they meant.
+      // Whatever MapLibre's own hit under the cursor was, if none of the
+      // boxed queries above found anything nameable.
+      const fallback = event.features?.find((feature) => feature.properties?.uid)
+      if (fallback?.properties?.uid) {
+        const poi = poiIndex.get(String(fallback.properties.uid))
         const sharing = sharedWith(poi)
         if (sharing) {
           onSelectStack(sharing)
@@ -249,6 +368,7 @@ export function MapView({
   )
 
   return (
+    <>
     <MapGL
       ref={mapRef}
       initialViewState={{
@@ -262,13 +382,29 @@ export function MapView({
       mapStyle={style}
       interactiveLayerIds={INTERACTIVE_LAYER_IDS}
       onClick={handleClick}
-      onError={(event) => console.error('Map rendering error:', event.error)}
+      onError={(event) => {
+        console.error('Map rendering error:', event.error)
+        // Before the map has ever loaded, any error is startup-fatal — there
+        // is no known-good render to fall back to. Once it has loaded, most
+        // 'error' events are transient (a source hiccup, a style warning);
+        // turning every one of those into a full failure screen would be
+        // worse than the bug this exists to catch. WebGL context loss is the
+        // one exception — handled separately below, since it can happen at
+        // any point, not just during startup.
+        applyRenderEvent('error')
+      }}
       onMouseMove={(event) => setCursor(event.features?.length ? 'pointer' : undefined)}
       onMouseLeave={() => setCursor(undefined)}
       cursor={cursor}
+      onRotate={(event) => onBearingChange?.(event.viewState.bearing)}
       onLoad={(event) => {
         const map = event.target
         const bearing = cityUp ? data.layout.bearing : 0
+        // `jumpTo` below only fires MapLibre's own 'rotate' event when the
+        // bearing actually changes from whatever `initialViewState` set —
+        // report it directly too, so the caller's orientation state is
+        // correct from the first frame even when it doesn't.
+        onBearingChange?.(bearing)
 
         if (initialTarget) {
           map.jumpTo({ center: initialTarget, zoom: 16.5, bearing })
@@ -289,6 +425,15 @@ export function MapView({
         if (process.env.NEXT_PUBLIC_E2E === '1') {
           ;(window as unknown as Record<string, unknown>).__map = event.target
         }
+        applyRenderEvent('load')
+        // Not surfaced by @vis.gl/react-maplibre as its own prop — attached
+        // directly to the underlying maplibre-gl Map. A lost GL context can
+        // strike a map that already loaded fine minutes ago (a backgrounded
+        // tab, a GPU driver reset), and MapLibre does not recover from it on
+        // its own the way it silently replays sources/layers after most
+        // other disruptions.
+        map.on('webglcontextlost', () => applyRenderEvent('context-lost'))
+        map.on('webglcontextrestored', () => applyRenderEvent('context-restored'))
       }}
       maxPitch={60}
       /*
@@ -301,32 +446,53 @@ export function MapView({
       style={{ position: 'absolute', inset: 0 }}
     >
       <NavigationControl position="bottom-right" visualizePitch showCompass />
+      {/*
+       * `trackUserLocation` is deliberately off. With it on, this control ran
+       * its own continuous `watchPosition` independent of `useGeolocation`'s —
+       * two high-accuracy trackers that could both be active at once, with no
+       * single place to stop them from. As a one-shot locate button it fires
+       * once per press and hands ownership of ongoing tracking to the app's
+       * one watch instead.
+       */}
       <GeolocateControl
         position="bottom-right"
-        trackUserLocation
         positionOptions={{ enableHighAccuracy: true }}
-        onGeolocate={(event) => onLocate([event.coords.longitude, event.coords.latitude])}
+        onGeolocate={() => onLocate()}
       />
       {pin && (
         <Marker longitude={pin.position[0]} latitude={pin.position[1]} anchor="bottom">
-          <div
+          {/*
+           * Otherwise inert once the six-second Save/Share snackbar that
+           * created it auto-hides: the pin stayed on the map with no way
+           * back to those actions short of dropping a fresh one on top of it.
+           */}
+          <button
+            type="button"
             title={pin.address}
-            aria-label={`Marked location: ${pin.address}`}
+            aria-label={`Marked location: ${pin.address}. Reopen save and share options.`}
+            onClick={onPinClick}
             style={{
               width: 16,
               height: 16,
+              padding: 0,
+              border: `2px solid ${palette.playa}`,
               borderRadius: '50% 50% 50% 0',
               transform: 'rotate(-45deg)',
               background: palette.art,
-              border: `2px solid ${palette.playa}`,
               boxShadow: '0 1px 4px rgba(0,0,0,0.6)',
+              cursor: 'pointer',
             }}
           />
         </Marker>
       )}
 
       {selected && !destination && (
-        <FocusMarker position={selected.position} name={selected.name} address={selected.address} />
+        <FocusMarker
+          position={selected.position}
+          name={selected.name}
+          address={selected.address}
+          palette={palette}
+        />
       )}
       {destination && (
         <FocusMarker
@@ -335,6 +501,7 @@ export function MapView({
           address={destination.address}
           navigating
           approximate={destination.approximate}
+          palette={palette}
         />
       )}
 
@@ -365,5 +532,35 @@ export function MapView({
         focusPosition={destination?.position ?? selected?.position}
       />
     </MapGL>
+    {renderStatus === 'failed' && (
+      // A blank/background-only map has no other way to tell the user
+      // anything is wrong, let alone how to fix it — this is deliberately
+      // the loudest thing on screen while it's showing, covering the map
+      // and its controls rather than sharing space with them.
+      <Stack
+        sx={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 5,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 2,
+          px: 4,
+          textAlign: 'center',
+          bgcolor: 'background.default',
+        }}
+      >
+        <ErrorOutlineIcon sx={{ fontSize: 40, color: 'error.main' }} />
+        <Typography variant="h6">The map stopped rendering</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 340 }}>
+          Something kept the map from drawing — often fixed by reloading. Saved spots and
+          favourites are stored on this device and are not affected.
+        </Typography>
+        <Button variant="contained" onClick={() => window.location.reload()}>
+          Reload
+        </Button>
+      </Stack>
+    )}
+    </>
   )
 }

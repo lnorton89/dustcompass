@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Box, Button, Dialog, Stack, Typography } from '@mui/material'
 import ExploreIcon from '@mui/icons-material/Explore'
 import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined'
@@ -42,15 +42,25 @@ const CARDS: { icon: ReactElement; title: string; body: string }[] = [
  * three-step wizard: nobody came here to be onboarded.
  */
 export function FirstRun() {
-  const [open, setOpen] = useState(() => {
+  // Starts closed — matching what the static export's prerendered HTML has
+  // to assume, since localStorage does not exist at build time — and
+  // corrected right after mount for anyone who hasn't seen it. Reading the
+  // real value straight from the useState initializer instead made the very
+  // first client render disagree with the server-rendered markup for any
+  // returning visitor, which is a hydration error, not merely a startup
+  // flash: every fresh page load hit it, since this dialog gates virtually
+  // everything else the app renders.
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
     try {
-      return localStorage.getItem(SEEN_KEY) !== 'seen'
+      if (localStorage.getItem(SEEN_KEY) !== 'seen') setOpen(true)
     } catch {
-      // Private windows and blocked site data both throw. Better to show this
-      // twice than to let it stop the map from opening.
-      return false
+      // Private windows and blocked site data both throw. Open rather than
+      // skip: dismiss() below swallows its own write failure, so the worst
+      // case is this screen coming back every launch — never zero onboarding.
+      setOpen(true)
     }
-  })
+  }, [])
 
   const dismiss = useCallback(() => {
     setOpen(false)
@@ -105,7 +115,8 @@ export function FirstRun() {
         </Stack>
 
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 3 }}>
-          Your location is only ever read while you are navigating, and it stays on this device.
+          Your location is only ever read when you ask for it — navigating, sorting events by
+          distance, or the map's own locate button — and it stays on this device.
         </Typography>
 
         <Button variant="contained" fullWidth onClick={dismiss} sx={{ mt: 2 }}>

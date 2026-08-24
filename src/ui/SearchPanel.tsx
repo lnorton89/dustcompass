@@ -16,6 +16,7 @@ import StarIcon from '@mui/icons-material/Star'
 import LocalHospitalIcon from '@mui/icons-material/LocalHospital'
 import type { CityLayout } from '../brc/layout'
 import { geocode } from '../brc/geocode'
+import type { ServiceCategory } from '../brc/services'
 import type { Poi, UnplacedListing } from '../data/types'
 
 /** Why a result cannot be gone to, said in the width of a result row. */
@@ -33,6 +34,13 @@ interface Props {
   unplaced: UnplacedListing[]
   places: SavedPlace[]
   onGo: (position: Position, poi?: Poi) => void
+  /**
+   * A saved spot chosen from search — routed separately from `onGo` so it
+   * gets the same deliberate saved-place navigation a map marker or the
+   * saved-spots list gives it, instead of becoming a generic dropped pin at
+   * the same coordinate.
+   */
+  onGoToPlace: (place: SavedPlace) => void
   /** Opens a listing that has no position, so `onGo` has nothing to move to. */
   onOpenUnplaced: (listing: UnplacedListing) => void
   /** So "/" can put the cursor here from anywhere on the page. */
@@ -44,10 +52,14 @@ interface Option {
   label: string
   detail: string
   kind: 'address' | 'art' | 'camp' | 'service' | 'landmark' | 'saved'
+  /** Only set for `kind: 'service'` results — which icon it earns. See optionIcon. */
+  category?: ServiceCategory
   /** Absent for a listing that has no location to go to. */
   position?: Position
   poi?: Poi
   unplaced?: UnplacedListing
+  /** Only set for `kind: 'saved'` results — the saved place's own identity. */
+  savedPlace?: SavedPlace
   score: number
 }
 
@@ -62,6 +74,7 @@ export function SearchPanel({
   unplaced,
   places,
   onGo,
+  onGoToPlace,
   onOpenUnplaced,
   inputRef,
   compact = false,
@@ -83,6 +96,7 @@ export function SearchPanel({
           detail: place.address,
           kind: 'saved',
           position: place.position,
+          savedPlace: place,
           score: score + 50,
         })
       }
@@ -110,6 +124,7 @@ export function SearchPanel({
           label: poi.name,
           detail: poi.subtitle ? [poi.subtitle, poi.address].filter(Boolean).join(' · ') : (poi.address ?? ''),
           kind: optionKind(poi.kind),
+          category: poi.category,
           position: poi.position,
           poi,
           score,
@@ -143,8 +158,24 @@ export function SearchPanel({
       inputValue={query}
       onInputChange={(_, value) => setQuery(value)}
       onChange={(_, value) => {
-        if (!value || typeof value === 'string') return
-        if (value.unplaced) onOpenUnplaced(value.unplaced)
+        if (!value) return
+        // freeSolo hands back the raw text when Enter is pressed with no
+        // suggestion highlighted — which is the common case for typing a
+        // full address and submitting it, rather than pointer-selecting the
+        // option the box generated for it. Geocode it directly rather than
+        // silently doing nothing.
+        if (typeof value === 'string') {
+          const result = geocode(value, layout)
+          if (result) onGo(result.position)
+          return
+        }
+        // Checked ahead of the generic position path: a saved result's
+        // position happens to be set too (for the freeSolo/geocode fallback
+        // to have something consistent to render), but selecting it must
+        // never synthesize a competing generic dropped pin over the user's
+        // own saved marker.
+        if (value.savedPlace) onGoToPlace(value.savedPlace)
+        else if (value.unplaced) onOpenUnplaced(value.unplaced)
         else if (value.position) onGo(value.position, value.poi)
       }}
       getOptionLabel={(option) => (typeof option === 'string' ? option : option.label)}
@@ -153,7 +184,7 @@ export function SearchPanel({
         return (
           <ListItem key={key} {...rest} dense>
             <ListItemIcon sx={{ minWidth: 36, color: option.kind === 'art' ? 'primary.main' : option.kind === 'camp' ? 'secondary.main' : 'text.secondary' }}>
-              {optionIcon(option.kind)}
+              {optionIcon(option)}
             </ListItemIcon>
             <ListItemText primary={option.label} secondary={option.detail} />
             <Chip
@@ -217,10 +248,21 @@ function optionKind(kind: Poi['kind']): Option['kind'] {
   return 'camp'
 }
 
-function optionIcon(kind: Option['kind']) {
+/**
+ * A `service` result covers everything from Rampart to The Temple to the
+ * airport — see `categorise()` in `brc/services.ts`. Only medical and ranger
+ * stations are actually emergency infrastructure; showing the same hospital
+ * cross on "The Temple" or "Box Office" was issue #43.
+ */
+// Exported for a focused unit test of the icon-selection logic (issue #43) —
+// exercising it through the full Autocomplete would mean driving MUI's open
+// state for no more signal than this gives directly.
+export function optionIcon({ kind, category }: Pick<Option, 'kind' | 'category'>) {
   if (kind === 'art') return <AutoAwesomeIcon fontSize="small" />
   if (kind === 'camp') return <GroupsIcon fontSize="small" />
   if (kind === 'saved') return <StarIcon fontSize="small" />
-  if (kind === 'service') return <LocalHospitalIcon fontSize="small" />
+  if (kind === 'service' && (category === 'medical' || category === 'ranger')) {
+    return <LocalHospitalIcon fontSize="small" />
+  }
   return <PlaceIcon fontSize="small" />
 }

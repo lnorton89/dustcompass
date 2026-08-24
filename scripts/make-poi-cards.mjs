@@ -18,7 +18,7 @@
  * These are for crawlers and are deliberately excluded from the offline
  * precache: nobody on playa needs a quarter of a gigabyte of share images.
  */
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { poiOg } from './lib/poi-card.mjs'
@@ -28,6 +28,11 @@ const YEAR = process.argv[2] ?? process.env.NEXT_PUBLIC_DATA_YEAR ?? '2026'
 const ROOT = resolve(import.meta.dirname, '..')
 const DATA = join(ROOT, 'public', 'data', YEAR)
 const OUT = join(ROOT, 'public', 'share')
+// Rendered as a sibling *inside* public/ — not the OS temp dir — so the final
+// swap-in is a same-filesystem rename() and therefore atomic. A failed or
+// interrupted run must never leave public/share missing cards it used to have.
+const TMP = join(ROOT, 'public', '.share.tmp')
+const BACKUP = join(ROOT, 'public', '.share.old')
 // Photos change far less often than the listings around them, and a scheduled
 // rebuild runs twice a day. Keeping them out of the network path costs a few
 // megabytes of disk and saves a thousand round trips.
@@ -88,12 +93,12 @@ if (camps.length === 0 && art.length === 0) {
   process.exit(2)
 }
 
-await mkdir(OUT, { recursive: true })
 await mkdir(PHOTOS, { recursive: true })
-// A listing that has gone away must not leave its card behind to be shared.
-for (const stale of await readdir(OUT).catch(() => [])) {
-  await rm(join(OUT, stale), { force: true })
-}
+// Render into a scratch directory rather than OUT directly, so a failed run
+// never touches the cards that are already live. A listing that has gone away
+// simply has no file written for it here — TMP starts empty every run.
+await rm(TMP, { recursive: true, force: true })
+await mkdir(TMP, { recursive: true })
 
 const listings = [
   ...camps.map((camp) => ({ item: camp, kindLabel: 'THEME CAMP' })),
@@ -121,12 +126,17 @@ async function renderOne({ item, kindLabel }) {
     alt: item.location_string ? `${item.name} — ${item.location_string}` : item.name,
     image,
   })
-  await writeFile(join(OUT, `${item.uid}.png`), png)
+  await writeFile(join(TMP, `${item.uid}.png`), png)
   bytes += png.length
   done += 1
   if (done % 200 === 0) console.log(`  ${done}/${listings.length}`)
 }
 
+// Every listing here is required to get a card: it has no photo of its own, so
+// src/app/p/[uid]/page.tsx will point OpenGraph/Twitter metadata straight at
+// share/${uid}.png. A missing file after this script exits 0 is a shipped
+// broken link, so failures are collected rather than merely logged.
+const failed = []
 const queue = [...listings]
 await Promise.all(
   Array.from({ length: CONCURRENCY }, async () => {
@@ -136,12 +146,40 @@ await Promise.all(
         await renderOne(next)
       } catch (error) {
         console.warn(`  ! ${next.item.name}: ${error instanceof Error ? error.message : error}`)
+        failed.push(next.item)
       }
     }
   }),
 )
 
-console.log(
-  `\nWrote ${done} share cards to public/share (${withPhoto} with a photo, ` +
-    `${(bytes / 1024 / 1024).toFixed(0)}MB total).`,
-)
+// Belt-and-suspenders: a render() that resolves without throwing but somehow
+// leaves no file behind (or a listing the loop above never got to) is just as
+// broken as a thrown error, so check the filesystem rather than trust the try/
+// catch alone.
+const missing = listings
+  .map(({ item }) => item)
+  .filter((item) => !failed.includes(item) && !existsSync(join(TMP, `${item.uid}.png`)))
+const brokenCount = failed.length + missing.length
+
+if (brokenCount > 0) {
+  for (const item of missing) console.warn(`  ! ${item.name}: no output file after render()`)
+  console.error(
+    `\n${brokenCount} of ${listings.length} share cards failed to render. ` +
+      `Leaving public/share untouched (not swapping in a partial batch).`,
+  )
+  await rm(TMP, { recursive: true, force: true })
+  process.exitCode = 1
+} else {
+  // Atomic swap: move the old directory aside, move the new one in, then
+  // discard the old one. Same-filesystem rename() is atomic, so there is no
+  // window where public/share is missing or partially replaced.
+  await rm(BACKUP, { recursive: true, force: true })
+  if (existsSync(OUT)) await rename(OUT, BACKUP)
+  await rename(TMP, OUT)
+  await rm(BACKUP, { recursive: true, force: true })
+
+  console.log(
+    `\nWrote ${done} share cards to public/share (${withPhoto} with a photo, ` +
+      `${(bytes / 1024 / 1024).toFixed(0)}MB total).`,
+  )
+}

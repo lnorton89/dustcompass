@@ -262,6 +262,26 @@ if (await closest.count()) {
   assert(false, 'distance sort offered when a fix is available')
 }
 
+// #20: every event row — hosted or not — has to open the event's own
+// detail, not do nothing (unlocated) or jump straight past the description
+// to the venue (located). Clicking any row must open a dialog naming that
+// exact event, not the map underneath it.
+{
+  const firstRow = page.locator('.MuiDrawer-root .MuiListItemButton-root').first()
+  const rowTitle = (
+    await firstRow.locator('.MuiListItemText-primary').first().innerText()
+  ).trim()
+  await firstRow.click()
+  await page.waitForTimeout(500)
+  const dialog = page.getByRole('dialog').filter({ hasText: rowTitle })
+  assert(
+    (await dialog.count()) > 0,
+    `clicking an events-list row opens that event's own detail (#20) (wanted "${rowTitle}")`,
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+}
+
 await page.screenshot({ path: shot })
 await page.getByLabel('Close events').click()
 await page.waitForTimeout(500)
@@ -580,21 +600,42 @@ await page.waitForTimeout(500)
 await page.getByRole('button', { name: 'My camp' }).click()
 await page.waitForTimeout(700)
 
-const savedJson = await page.evaluate(() => localStorage.getItem('playa-map.places.v1'))
+// Saved-place storage is scoped per data year (a prior year's coordinates
+// are not safe to draw as current), so the key carries the same suffix.
+const savedJson = await page.evaluate(
+  (year) => localStorage.getItem(`playa-map.places.v1.${year}`),
+  DATA_YEAR,
+)
 assert(Boolean(savedJson) && savedJson.includes('My camp'), 'saved spot persisted to the device')
 assert(
   (await page.evaluate(() => window.__map.queryRenderedFeatures({ layers: ['saved-dot'] }).length)) > 0,
   'saved spot is marked on the map',
 )
 
-// It has to be findable by name, and lead somewhere.
+// It has to be findable by name, and lead somewhere. #21: selecting the
+// saved result directly out of the search dropdown must start saved-place
+// navigation on its own — the same thing choosing it from the saved-spots
+// list or its map marker does — rather than requiring a detour through the
+// filter sheet to actually go anywhere.
 await search.fill('')
 await search.fill('My camp')
 await page.waitForTimeout(700)
 await page.keyboard.press('ArrowDown')
 await page.keyboard.press('Enter')
 await page.waitForTimeout(1000)
+assert(
+  await page.getByTestId('navigation-target').isVisible(),
+  'selecting a saved result directly from search starts navigation on its own (#21)',
+)
+assert(
+  (await page.getByTestId('navigation-target').innerText()).includes('My camp'),
+  "the saved result's own identity is preserved, not a generic dropped pin (#21)",
+)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(400)
 
+// Consistent with the same saved spot reached the other way — from the
+// saved-spots list in the filter sheet.
 await page.getByLabel('Filters and saved spots').click()
 await page.waitForTimeout(700)
 await page.getByRole('button', { name: /^My camp/ }).click()
@@ -609,6 +650,57 @@ assert(
   'saved-spot destination is named on the map',
 )
 
+// #14: the orientation control has to track the map's actual bearing, not
+// just whichever toggle last requested a rotation — a gesture or MapLibre's
+// own compass control can change it independently of that toggle. Driven at
+// a phone-width viewport, since the visible "12:00 up"/"North up" label only
+// renders in the compact bottom bar; the desktop toolbar shows the same
+// state as a hover tooltip, which isn't practical to assert here.
+{
+  const mobile = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  const orient = await mobile.newPage()
+  await orient.addInitScript(() => {
+    try {
+      localStorage.setItem('dust-compass:first-run:1', 'seen')
+    } catch {
+      /* private-mode storage throws; the dialog is harmless if it appears */
+    }
+  })
+  await orient.goto(url, { waitUntil: 'load' })
+  await orient.waitForFunction(() => window.__map, null, { timeout: 30000 })
+  await orient.waitForTimeout(3000)
+
+  const orientButton = orient.getByRole('button', { name: 'Orient the map so 12:00 points up' })
+  const orientLabel = () => orientButton.innerText()
+
+  assert((await orientLabel()).includes('12:00 up'), 'orientation control starts city-up on a fresh load')
+
+  // Rotate the map directly through MapLibre, bypassing every React state
+  // setter — this is exactly what the built-in compass control and a
+  // two-finger rotate gesture also do.
+  await orient.evaluate(() => window.__map.setBearing(0))
+  await orient.waitForTimeout(300)
+  assert(
+    (await orientLabel()).includes('North up'),
+    'rotating to north outside React updates the control to North up',
+  )
+
+  await orient.evaluate(() => window.__map.setBearing(200))
+  await orient.waitForTimeout(300)
+  assert(
+    !(await orientLabel()).includes('12:00 up') && !(await orientLabel()).includes('North up'),
+    'a manual rotation to neither canonical bearing leaves neither orientation selected',
+  )
+
+  await orientButton.click()
+  await orient.waitForTimeout(700)
+  assert(
+    (await orientLabel()).includes('12:00 up'),
+    'tapping the orientation control still snaps to city-up from a free rotation',
+  )
+
+  await mobile.close()
+}
 
 // That URL, opened cold, must restore the same place.
 const shared = await context.newPage()
@@ -657,6 +749,147 @@ await shared.close()
     `a shared listing link opens that listing (wanted "${camp.name}", got "${opened.trim()}")`,
   )
   await linked.close()
+}
+
+// #22: a `?poi=` naming a uid that matches nothing in the current dataset —
+// a removed/cancelled listing, or an old link — used to resolve to nothing
+// and silently collapse to the bare map with no explanation. It has to say
+// what happened instead, keep the dead link in the address bar until
+// dismissed, and offer a way forward. This is also exactly the state an
+// offline `/p/<uid>/` fallback lands in for an unknown uid: the service
+// worker (scripts/build-sw.mjs) redirects an offline listing page straight
+// to `?poi=<uid>`, so a cold load of that URL exercises the same path a
+// stale offline share link would.
+{
+  const stale = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await stale.newPage()
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('dust-compass:first-run:1', 'seen')
+    } catch {
+      /* private-mode storage throws; the dialog is harmless if it appears */
+    }
+  })
+  const staleUid = 'not-a-real-listing-00000'
+  await page.goto(new URL(`?poi=${staleUid}`, url).href, { waitUntil: 'load' })
+  await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+  await page.waitForTimeout(3000)
+
+  assert(
+    await page.getByText(/no longer in the current map/i).isVisible(),
+    'an unknown ?poi= uid shows a stale-link explanation, not a silent bare map (#22)',
+  )
+  assert(
+    new URL(page.url()).searchParams.get('poi') === staleUid,
+    'the dead link stays in the address bar until the notice is dismissed (#22)',
+  )
+
+  await page.getByRole('button', { name: 'Show map' }).click()
+  await page.waitForTimeout(700)
+  assert(
+    !(await page.getByText(/no longer in the current map/i).isVisible()),
+    'dismissing the notice returns to the normal map (#22)',
+  )
+  assert(
+    new URL(page.url()).searchParams.get('poi') !== staleUid,
+    'dismissing the notice resumes normal URL mirroring, clearing the dead link (#22)',
+  )
+  await stale.close()
+}
+
+// #19: flyTo() used to frame the camera off whichever listing's sheet
+// height had been measured *first* — reused for every later selection
+// regardless of how tall that particular sheet actually was — because the
+// old ref-callback measurement never fired again for a listing switched to
+// directly. The bounded correction after a real measurement should leave
+// noticeably more bottom padding reserved for a tall sheet (many hosted
+// events) than a short one (bare address, no events), rather than the same
+// number either way.
+{
+  const detail = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  const page = await detail.newPage()
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('dust-compass:first-run:1', 'seen')
+    } catch {
+      /* private-mode storage throws; the dialog is harmless if it appears */
+    }
+  })
+
+  const [camps, events] = await Promise.all([
+    (await detail.request.get(new URL(`data/${DATA_YEAR}/camp.json`, url).href)).json(),
+    (await detail.request.get(new URL(`data/${DATA_YEAR}/event.json`, url).href)).json(),
+  ])
+  const hostedEventCount = new Map()
+  for (const event of events) {
+    if (!event.hosted_by_camp) continue
+    hostedEventCount.set(event.hosted_by_camp, (hostedEventCount.get(event.hosted_by_camp) ?? 0) + 1)
+  }
+  const placed = camps.filter((c) => c.location_string && c.uid && c.name)
+  // No events or image is not enough on its own — a long description alone
+  // can push a sheet past the drawer's own 82dvh clamp just as surely as a
+  // list of events can, and once both sheets hit that same ceiling their
+  // padding reads identically regardless of which one is actually taller.
+  const short = placed.find(
+    (c) => !hostedEventCount.get(c.uid) && !c.images?.length && (c.description?.length ?? 0) < 100,
+  )
+  const tall = [...placed].sort(
+    (a, b) => (hostedEventCount.get(b.uid) ?? 0) - (hostedEventCount.get(a.uid) ?? 0),
+  )[0]
+
+  if (!short || !tall || short.uid === tall.uid) {
+    assert(false, 'skipped #19 sheet-height test — could not find two sufficiently different camps in this dataset')
+  } else {
+    // The #19 fix lives entirely in flyTo()'s padding estimate/correction —
+    // a cold `?poi=` load frames the camera through MapView's own
+    // `initialTarget` jumpTo instead, which carries no padding at all, so
+    // driving this through a deep link would measure a code path the fix
+    // never touches. Selecting through search is what actually exercises it.
+    await page.goto(url, { waitUntil: 'load' })
+    await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+    await page.waitForTimeout(2000)
+    const detailSearch = page.getByPlaceholder(/Camp, art, or an address|Search the playa/)
+    const bottomPaddingFor = async (name) => {
+      // At this compact width the sheet is a modal bottom Drawer, not the
+      // non-modal side column the wide-viewport tests search past — left
+      // open, its backdrop made the second search's interactions land
+      // nowhere, so the second camp silently never opened.
+      const closeDetail = page.getByLabel('Close details')
+      if (await closeDetail.count()) {
+        await closeDetail.click()
+        await page.waitForTimeout(400)
+      }
+      await detailSearch.fill('')
+      await detailSearch.fill(name)
+      await page.waitForTimeout(700)
+      await page.keyboard.press('ArrowDown')
+      await page.keyboard.press('Enter')
+      // Confirm the intended camp is the one that actually opened, rather
+      // than trusting timing alone — two searches back to back on the same
+      // page is exactly the kind of thing a slow-to-settle Autocomplete can
+      // silently drop, which would otherwise read the previous selection's
+      // padding twice and pass or fail for the wrong reason.
+      await page
+        .getByTestId('detail-panel')
+        .locator('h5, h6')
+        .filter({ hasText: name })
+        .first()
+        .waitFor({ timeout: 5000 })
+      // Long enough for the bounded correction that follows the real
+      // measurement (300ms) to finish settling.
+      await page.waitForTimeout(1000)
+      return page.evaluate(() => window.__map.getPadding().bottom)
+    }
+
+    const shortPadding = await bottomPaddingFor(short.name)
+    const tallPadding = await bottomPaddingFor(tall.name)
+    assert(
+      tallPadding > shortPadding,
+      `a taller detail sheet (${tall.name}, ${hostedEventCount.get(tall.uid) ?? 0} events) reserves more bottom padding (${tallPadding}) than a shorter one (${short.name}, ${shortPadding}) (#19)`,
+    )
+  }
+
+  await detail.close()
 }
 
 /**

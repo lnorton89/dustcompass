@@ -83,6 +83,139 @@ describe('refusing a response the app cannot use', () => {
   })
 })
 
+/**
+ * A key present with the wrong runtime value — `null`, an object where an
+ * array belongs, a non-string name — passes the old `=== undefined` check
+ * but still crashes or corrupts the client downstream. These fixtures are
+ * hand-written, not read from public/data, so they exercise exactly the
+ * malformed shapes a real API response has produced before.
+ */
+describe('refusing malformed-but-present values', () => {
+  it('rejects a record that is not an object', () => {
+    const problems = validateDataset('camp', [null, { uid: 'a', name: 'Fine' }]).problems
+    expect(problems).toContain('camp: 1/2 records are not objects')
+  })
+
+  it('rejects an array standing in for a record', () => {
+    const problems = validateDataset('camp', [['uid', 'a']]).problems
+    expect(problems).toContain('camp: 1/1 records are not objects')
+  })
+
+  it('treats a null occurrence_set as missing, not present', () => {
+    const problems = validateDataset('event', [
+      { uid: 'e1', title: 'Fire Talk', occurrence_set: null },
+    ]).problems
+    expect(problems).toContain('event: 1/1 records have no "occurrence_set"')
+  })
+
+  it('treats a non-array occurrence_set as missing', () => {
+    const problems = validateDataset('event', [
+      { uid: 'e1', title: 'Fire Talk', occurrence_set: {} },
+    ]).problems
+    expect(problems).toContain('event: 1/1 records have no "occurrence_set"')
+  })
+
+  it('treats a null title as missing', () => {
+    const problems = validateDataset('event', [
+      { uid: 'e1', title: null, occurrence_set: [] },
+    ]).problems
+    expect(problems).toContain('event: 1/1 records have no "title"')
+  })
+
+  it('treats a null name as missing', () => {
+    const problems = validateDataset('camp', [{ uid: 'a', name: null }]).problems
+    expect(problems).toContain('camp: 1/1 records have no "name"')
+  })
+
+  it('treats a blank-string name as missing', () => {
+    const problems = validateDataset('camp', [{ uid: 'a', name: '   ' }]).problems
+    expect(problems).toContain('camp: 1/1 records have no "name"')
+  })
+
+  it('flags duplicate uids within a dataset', () => {
+    const problems = validateDataset('camp', [
+      { uid: 'a', name: 'First' },
+      { uid: 'a', name: 'Second' },
+      { uid: 'b', name: 'Third' },
+    ]).problems
+    expect(problems).toContain('camp: uid "a" appears 2 times')
+  })
+
+  it('rejects an occurrence with an unparseable start time', () => {
+    const problems = validateDataset('event', [
+      {
+        uid: 'e1',
+        title: 'Fire Talk',
+        occurrence_set: [{ start_time: 'not-a-date', end_time: '2026-08-30T12:00:00-07:00' }],
+      },
+    ]).problems
+    expect(problems).toContain('event: 1 occurrence(s) have an unparseable or non-positive start/end time')
+  })
+
+  it('rejects an occurrence with a missing end time', () => {
+    const problems = validateDataset('event', [
+      {
+        uid: 'e1',
+        title: 'Fire Talk',
+        occurrence_set: [{ start_time: '2026-08-30T12:00:00-07:00' }],
+      },
+    ]).problems
+    expect(problems).toContain('event: 1 occurrence(s) have an unparseable or non-positive start/end time')
+  })
+
+  it('rejects an occurrence whose end is not after its start', () => {
+    const problems = validateDataset('event', [
+      {
+        uid: 'e1',
+        title: 'Fire Talk',
+        occurrence_set: [
+          { start_time: '2026-08-30T12:00:00-07:00', end_time: '2026-08-30T12:00:00-07:00' },
+        ],
+      },
+    ]).problems
+    expect(problems).toContain('event: 1 occurrence(s) have an unparseable or non-positive start/end time')
+  })
+
+  it('accepts a well-formed occurrence', () => {
+    const problems = validateDataset('event', [
+      {
+        uid: 'e1',
+        title: 'Fire Talk',
+        occurrence_set: [
+          { start_time: '2026-08-30T12:00:00-07:00', end_time: '2026-08-30T13:00:00-07:00' },
+        ],
+      },
+    ]).problems
+    // Not toEqual([]): a single record legitimately trips the unrelated
+    // "no record has event_type/hosted_by_camp" EXPECTED-field warning.
+    expect(problems.some((p) => p.includes('occurrence'))).toBe(false)
+  })
+
+  it('rejects out-of-range GPS coordinates', () => {
+    const problems = validateDataset('camp', [
+      { uid: 'a', name: 'Off the map', location: { gps_latitude: 91, gps_longitude: 0 } },
+    ]).problems
+    expect(problems).toContain('camp: 1/1 records have invalid GPS coordinates')
+  })
+
+  it('rejects non-finite and wrong-type GPS coordinates', () => {
+    const problems = validateDataset('art', [
+      { uid: 'a1', name: 'NaN Piece', location: { gps_latitude: NaN, gps_longitude: 0 } },
+      { uid: 'a2', name: 'String Piece', location: { gps_latitude: '40.7', gps_longitude: -119.2 } },
+    ]).problems
+    expect(problems).toContain('art: 2/2 records have invalid GPS coordinates')
+  })
+
+  it('accepts valid GPS coordinates', () => {
+    const problems = validateDataset('camp', [
+      { uid: 'a', name: 'Well Placed', location: { gps_latitude: 40.7864, gps_longitude: -119.2065 } },
+    ]).problems
+    // Not toEqual([]): a single record legitimately trips the unrelated
+    // "no record has location_string" EXPECTED-field warning.
+    expect(problems.some((p) => p.includes('GPS'))).toBe(false)
+  })
+})
+
 describe('telling an embargo apart from a broken key', () => {
   const unlocated = { located: 0, total: 100 }
 

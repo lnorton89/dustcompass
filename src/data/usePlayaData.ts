@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CityLayout } from '../brc/layout'
 import { buildCity, type CityGeometry } from '../brc/city'
 import { buildServices, toiletPoints } from '../brc/services'
@@ -8,6 +8,16 @@ import type { ArtItem, CampItem, EventItem, Poi, UnplacedListing } from './types
 import { applyEmbargo, embargoState, embargoWindowForYear, type EmbargoState } from './embargo'
 import type { EventRange } from './events'
 import { DATA_YEAR, assetUrl } from '../config'
+
+/**
+ * A dataset whose fetch failed and fell back to empty. `toilets`/`services`/
+ * `dates` are safety- or schedule-relevant — silently showing a normal-
+ * looking map with zero toilets, or a schedule with no event window because
+ * `dates_info.json` never loaded, is worse than saying so. `outlines` is
+ * cosmetic camp-block geometry and is not tracked: it can fail without the
+ * user needing to know.
+ */
+export type PartialDataWarning = 'toilets' | 'services' | 'dates'
 
 export interface PlayaData {
   layout: CityLayout
@@ -25,6 +35,8 @@ export interface PlayaData {
   /** Surveyed camp block footprints, drawn at high zoom. */
   campOutlines: GeoJSON.FeatureCollection
   embargo: EmbargoState
+  /** Safety/schedule-relevant datasets that failed to load this attempt. */
+  partialDataWarnings: PartialDataWarning[]
 }
 
 function empty(): GeoJSON.FeatureCollection {
@@ -47,24 +59,123 @@ export function usePlayaData() {
     setAttempt((current) => current + 1)
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
+  // The pre-embargo dataset from the most recent successful fetch, kept
+  // around so a release-boundary transition can be recomputed locally —
+  // `art`/`camps`/`pois`/`unplaced` all derive from this plus the current
+  // time — without going back to the network. `civic` (services/toilets/
+  // landmarks) isn't embargoed and doesn't change across a transition, so
+  // it's cached alongside rather than recomputed.
+  const rawRef = useRef<
+    { layout: CityLayout; art: ArtItem[]; camps: CampItem[]; civic: Poi[] } | undefined
+  >(undefined)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const clearScheduledTransition = useCallback(() => {
+    if (timerRef.current !== undefined) {
+      clearTimeout(timerRef.current)
+      timerRef.current = undefined
+    }
+  }, [])
+
+  /**
+   * Recompute embargo/art/camps/pois/unplaced from the cached pre-embargo
+   * dataset and arm a timer for whichever configured release boundary (camp
+   * release, then gates-open) hasn't happened yet — nothing is scheduled once
+   * both are released. Called once after a successful fetch and again,
+   * recursively, from the fired timer itself, so a session left open across
+   * both boundaries picks each one up without a reload. `cancelled` is the
+   * same guard `load()` uses for its own fetch, so a superseding load or an
+   * unmount stops this chain too.
+   */
+  const scheduleEmbargoTransition = useCallback(
+    (cancelled: { current: boolean }) => {
+      clearScheduledTransition()
+      const raw = rawRef.current
+      if (!raw) return
+      const embargoWindow = embargoWindowForYear(DATA_YEAR)
+      const current = embargoState(embargoWindow)
+      const nextBoundary = !current.campsReleased
+        ? embargoWindow.campRelease
+        : !current.artReleased
+          ? embargoWindow.gatesOpen
+          : undefined
+      if (!nextBoundary) return
+
+      const fire = () => {
+        if (cancelled.current) return
+        // A fake/host-clamped timer can fire a tick early; recheck the wall
+        // clock rather than trust the callback, and reschedule the remainder
+        // instead of ever revealing data ahead of the configured instant.
+        if (Date.now() < nextBoundary.getTime()) {
+          scheduleEmbargoTransition(cancelled)
+          return
+        }
+        const embargo = embargoState(embargoWindow)
+        const art = applyEmbargo(raw.art, embargo.artReleased)
+        const camps = applyEmbargo(raw.camps, embargo.campsReleased)
+        const listed = toPois(raw.layout, art, camps, embargo)
+        setData((prev) =>
+          prev && {
+            ...prev,
+            art,
+            camps,
+            pois: [...listed.pois, ...raw.civic],
+            unplaced: listed.unplaced,
+            embargo,
+          },
+        )
+        scheduleEmbargoTransition(cancelled)
+      }
+      timerRef.current = setTimeout(fire, Math.max(0, nextBoundary.getTime() - Date.now()))
+    },
+    [clearScheduledTransition],
+  )
+
+  /**
+   * Shared by the initial/retry load and the silent background refresh
+   * below. `clear` decides whether to blank the screen back to the loading
+   * spinner first — appropriate for an explicit retry after a failure, wrong
+   * for a background refresh, which should keep showing the still-good data
+   * already on screen until (and unless) the new fetch actually succeeds.
+   */
+  const load = useCallback((clear: boolean) => {
+    const cancelled = { current: false }
+    // A new load — retry or background refresh — makes whatever boundary
+    // was pending from the previous load's dataset moot; it'll be re-armed
+    // below once this load's fetch succeeds.
+    clearScheduledTransition()
+    if (clear) {
+      setError(undefined)
+      setData(undefined)
+    }
     const base = assetUrl(`data/${DATA_YEAR}`)
+    // Populated by `optional()` below as each safety/schedule-relevant fetch
+    // settles; read once every promise in the Promise.all has resolved.
+    const partialDataWarnings: PartialDataWarning[] = []
+    const optional = <T,>(warning: PartialDataWarning, promise: Promise<T>, fallback: T): Promise<T> =>
+      promise.catch((cause) => {
+        console.error(`${warning} data failed to load; continuing without it.`, cause)
+        partialDataWarnings.push(warning)
+        return fallback
+      })
 
     Promise.all([
       loadJson<CityLayout>(`${base}/layout.json`),
       loadJson<ArtItem[]>(`${base}/art.json`),
       loadJson<CampItem[]>(`${base}/camp.json`),
       loadJson<EventItem[]>(`${base}/event.json`),
-      loadJson<GeoJSON.FeatureCollection>(`${base}/cpns.geojson`).catch(() => empty()),
-      loadJson<GeoJSON.FeatureCollection>(`${base}/toilets.geojson`).catch(() => empty()),
-      loadJson<{ rangeInfo?: EventRange }>(`${base}/dates_info.json`).catch<{
-        rangeInfo?: EventRange
-      }>(() => ({})),
+      optional('services', loadJson<GeoJSON.FeatureCollection>(`${base}/cpns.geojson`), empty()),
+      optional('toilets', loadJson<GeoJSON.FeatureCollection>(`${base}/toilets.geojson`), empty()),
+      optional(
+        'dates',
+        loadJson<{ rangeInfo?: EventRange }>(`${base}/dates_info.json`),
+        {} as { rangeInfo?: EventRange },
+      ),
+      // Cosmetic geometry only — no warning tracked for this one.
       loadJson<GeoJSON.FeatureCollection>(`${base}/city_blocks.geojson`).catch(() => empty()),
     ])
       .then(([layout, rawArt, rawCamps, events, serviceSpecs, rawToilets, dates, outlines]) => {
-        if (cancelled) return
+        if (cancelled.current) return
         const embargo = embargoState(embargoWindowForYear(DATA_YEAR))
         const art = applyEmbargo(rawArt, embargo.artReleased)
         const camps = applyEmbargo(rawCamps, embargo.campsReleased)
@@ -72,31 +183,55 @@ export function usePlayaData() {
         const listed = toPois(layout, art, camps, embargo)
         const services = buildServices(serviceSpecs)
         const toilets = toiletPoints(rawToilets)
+        // The survey's places share the index with the listings so that a tap
+        // on a ranger station resolves the same way a tap on a camp does.
+        // They are not embargoed: the city's own infrastructure is published
+        // with the survey, and only participants' locations are held back.
+        const civic = civicPois(layout, services, toilets, city.landmarks)
+        rawRef.current = { layout, art: rawArt, camps: rawCamps, civic }
         setData({
           layout,
           city,
           art,
           camps,
           events,
-          // The survey's places share the index with the listings so that a tap
-          // on a ranger station resolves the same way a tap on a camp does.
-          // They are not embargoed: the city's own infrastructure is published
-          // with the survey, and only participants' locations are held back.
-          pois: [...listed.pois, ...civicPois(layout, services, toilets, city.landmarks)],
+          pois: [...listed.pois, ...civic],
           unplaced: listed.unplaced,
           range: dates.rangeInfo,
           services,
           toilets,
           campOutlines: outlines,
           embargo,
+          partialDataWarnings,
         })
+        setError(undefined)
+        scheduleEmbargoTransition(cancelled)
       })
-      .catch((cause) => !cancelled && setError(cause as Error))
+      .catch((cause) => !cancelled.current && setError(cause as Error))
 
     return () => {
-      cancelled = true
+      cancelled.current = true
+      clearScheduledTransition()
     }
-  }, [attempt])
+  }, [clearScheduledTransition, scheduleEmbargoTransition])
+
+  useEffect(() => load(true), [attempt, load])
+
+  // The service worker refreshes camp/event/listing data in the background
+  // and, once a complete revision has fetched cleanly, tells every open tab
+  // about it — otherwise a scheduled data update stayed invisible for the
+  // rest of whatever session was already open, even though the cache behind
+  // it had already moved on. Re-running the fetch now picks it up, since it
+  // is served from the (now-updated) cache rather than the network — without
+  // blanking the screen back to the loading state in the meantime.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    const onMessage = (event: MessageEvent) => {
+      if ((event.data as { type?: string } | null)?.type === 'DATA_REFRESHED') load(false)
+    }
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage)
+  }, [load])
 
   return { data, error, retry }
 }

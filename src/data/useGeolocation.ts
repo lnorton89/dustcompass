@@ -40,6 +40,14 @@ export function useGeolocation(): Geolocation {
       setStatus('unavailable')
       return
     }
+    // A fix from a previous session — possibly minutes old and from
+    // somewhere else on the playa — must not be presented as the current
+    // position while a fresh one is still being acquired. Clear it so
+    // `position` stays undefined (and callers relying on `Boolean(position)`
+    // correctly read "not located yet") until the new watch actually reports.
+    setPosition(undefined)
+    setAccuracy(undefined)
+    setLastFixAt(undefined)
     setStatus('locating')
     watchId.current = navigator.geolocation.watchPosition(
       (fix) => {
@@ -49,8 +57,15 @@ export function useGeolocation(): Geolocation {
         setStatus('tracking')
       },
       (error) => {
+        // Clear the watch explicitly rather than only dropping the ref to
+        // it — otherwise a retry after a transient (non-permission) error
+        // starts a second watch while the browser still owns the first,
+        // and lifecycle ownership of it is lost.
+        if (watchId.current !== undefined) {
+          navigator.geolocation.clearWatch(watchId.current)
+          watchId.current = undefined
+        }
         setStatus(error.code === error.PERMISSION_DENIED ? 'denied' : 'unavailable')
-        watchId.current = undefined
       },
       { enableHighAccuracy: true, maximumAge: 5_000, timeout: 20_000 },
     )

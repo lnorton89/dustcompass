@@ -23,7 +23,15 @@ const BASE_FONT_SIZE = { normal: 14, large: 16 } as const
 export function playaTheme(mode: ThemeMode, reading: ReadingSize = 'normal'): Theme {
   const night = mode === 'night'
   return createTheme({
-    cssVariables: true,
+    // Not CSS variables: this app has no SSR flash to prevent — `mode` is
+    // pure client runtime state — and MUI's CSS-vars ThemeProvider only
+    // applies a theme's `palette.mode` once, at mount, via `defaultMode`.
+    // Every later mode change here creates a brand new theme object, which
+    // classic runtime theming re-applies to every styled component on the
+    // next render; the CSS-vars path silently kept rendering whatever scope
+    // was active at mount, freezing the AppBar/disclaimer/bottom bar at the
+    // very first theme while `paletteFor(mode)` (plain JS, no MUI) — which
+    // is what draws the map's own chrome — kept tracking it correctly.
     palette: {
       mode: mode === 'light' ? 'light' : 'dark',
       primary: { main: night ? '#ff6b6b' : mode === 'dark' ? '#ff8a4c' : '#c2410c' },
@@ -165,11 +173,29 @@ export function playaTheme(mode: ThemeMode, reading: ReadingSize = 'normal'): Th
       },
       // Only the ones that do something when pressed. A chip used as a readout
       // is text, and text does not need a thumb.
+      //
+      // `root` and `clickable` are two keys of the same `styleOverrides`
+      // object, not two separate `MuiChip` component entries — a second
+      // `MuiChip` entry below (for night mode's default-chip colour) would
+      // replace this one outright rather than merge with it, silently
+      // dropping the touch-target floor in the one mode most likely to be
+      // used one-handed and in the dark.
       MuiChip: {
         styleOverrides: {
           clickable: ({ theme }) => ({
             [theme.breakpoints.down('md')]: { minHeight: TOUCH },
           }),
+          // MUI's default filled chip is neutral grey, which in night mode is
+          // both a contrast failure against the red text and a hole in the
+          // palette — one grey control in an otherwise entirely red interface.
+          root: night
+            ? {
+                '&.MuiChip-colorDefault.MuiChip-filled': {
+                  backgroundColor: '#3d0d0d',
+                  color: '#ffb3b3',
+                },
+              }
+            : undefined,
         },
       },
       // Event rows and saved spots: long lists where a mis-tap costs a flight
@@ -267,23 +293,6 @@ export function playaTheme(mode: ThemeMode, reading: ReadingSize = 'normal'): Th
           }),
         },
       },
-      // MUI's default filled chip is neutral grey, which in night mode is both
-      // a contrast failure against the red text and a hole in the palette —
-      // one grey control in an otherwise entirely red interface.
-      ...(night
-        ? {
-            MuiChip: {
-              styleOverrides: {
-                root: {
-                  '&.MuiChip-colorDefault.MuiChip-filled': {
-                    backgroundColor: '#3d0d0d',
-                    color: '#ffb3b3',
-                  },
-                },
-              },
-            },
-          }
-        : {}),
     },
   })
 }

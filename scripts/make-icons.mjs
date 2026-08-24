@@ -14,6 +14,13 @@ import { chromium } from 'playwright'
 
 const SIZES = [32, 180, 192, 512]
 const ICO_SIZES = [16, 32, 48]
+// Mirrors BRAND.colors.ink (src/brand.ts) — also the fill of the rounded rect
+// in favicon.svg itself, so the maskable canvas below is seamless with the
+// mark's own background rather than a second colour butted up against it.
+// It is also already `background_color`/`theme_color` in the manifest, so an
+// OS mask cropping to a circle blends into the same colour the splash screen
+// and browser chrome already use.
+const MASKABLE_BG = '#12100e'
 // CHROME_PATH points at a pinned build in some sandboxes; elsewhere (CI,
 // a normal checkout) Playwright resolves its own download.
 const CHROME = process.env.CHROME_PATH || undefined
@@ -37,6 +44,27 @@ for (const size of SIZES) {
   await page.screenshot({ path: `public/${name}`, omitBackground: true })
   console.log(`public/${name}`)
 }
+
+/*
+ * A maskable icon needs an opaque square with no transparent corners, because
+ * an OS applies its own circle/squircle crop and anything left transparent
+ * outside that crop shows through as a hole rather than as background. The
+ * SVG's own rounded rect already covers the centre in MASKABLE_BG; painting
+ * the page the same colour (instead of omitting the background, as above)
+ * fills in just the four corner triangles the rounded corners leave bare, so
+ * the seam between "drawn by the SVG" and "filled by the page" is invisible.
+ *
+ * The compass geometry (ticks, needle, arc, dot) spans the centre 40 of 64
+ * viewBox units — 62.5% of the icon, comfortably inside the ~80% safe zone
+ * the W3C maskable-icon spec asks for — so no rescaling is needed here, only
+ * the opaque background.
+ */
+await page.setViewportSize({ width: 512, height: 512 })
+await page.setContent(
+  `<body style="margin:0;background:${MASKABLE_BG}">${svg.replace('<svg', '<svg width="512" height="512"')}</body>`,
+)
+await page.screenshot({ path: 'public/icon-512-maskable.png' })
+console.log('public/icon-512-maskable.png')
 
 const icoImages = []
 for (const size of ICO_SIZES) {

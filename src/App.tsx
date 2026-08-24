@@ -50,6 +50,7 @@ import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
 import { useGeolocation } from './data/useGeolocation'
 import { useSavedPlaces } from './data/useSavedPlaces'
+import { useSavedEvents } from './data/useSavedEvents'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
 import { travelBetween } from './brc/travel'
@@ -189,6 +190,12 @@ export default function App() {
   const { data, error, retry } = usePlayaData()
   const { favorites, toggle: toggleFavorite } = useFavorites()
   const { places, save: savePlace, remove: removePlace, restore: restorePlace } = useSavedPlaces()
+  const {
+    savedEvents,
+    isSaved: isEventSaved,
+    save: saveEvent,
+    remove: removeSavedEvent,
+  } = useSavedEvents()
   const [saving, setSaving] = useState<{ position: Position; address: string }>()
   // Night mode is a functional night-vision feature, not decoration, so
   // reloading — or a crash recovering — back to a bright default would be a
@@ -1396,6 +1403,12 @@ export default function App() {
           onSelectEvent={setSelectedEvent}
           onClose={() => setEventsOpen(false)}
           compact={compact}
+          savedEvents={savedEvents}
+          isEventSaved={isEventSaved}
+          onToggleSaveEvent={(event) =>
+            isEventSaved(event.uid) ? removeSavedEvent(event.uid) : saveEvent(event)
+          }
+          onRemoveSavedEvent={removeSavedEvent}
         />
       )}
 
@@ -1408,6 +1421,12 @@ export default function App() {
           layout={data.layout}
           origin={origin}
           now={clock.now}
+          isSaved={Boolean(selectedEvent && isEventSaved(selectedEvent.uid))}
+          onToggleSave={() => {
+            if (!selectedEvent) return
+            if (isEventSaved(selectedEvent.uid)) removeSavedEvent(selectedEvent.uid)
+            else saveEvent(selectedEvent)
+          }}
           onClose={() => setSelectedEvent(undefined)}
           onNavigate={(target) => {
             setEventsOpen(false)

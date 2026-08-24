@@ -52,7 +52,15 @@ if (existsSync(layoutPath)) {
   describe('EventDetail', () => {
     it('is closed when there is no event', () => {
       render(
-        <EventDetail event={undefined} layout={layout} now={new Date()} onClose={vi.fn()} onNavigate={vi.fn()} />,
+        <EventDetail
+          event={undefined}
+          layout={layout}
+          now={new Date()}
+          isSaved={false}
+          onToggleSave={vi.fn()}
+          onClose={vi.fn()}
+          onNavigate={vi.fn()}
+        />,
       )
       expect(screen.queryByRole('dialog')).toBeNull()
     })
@@ -65,6 +73,8 @@ if (existsSync(layoutPath)) {
           host={host}
           layout={layout}
           now={new Date('2026-09-02T06:30:00-07:00')}
+          isSaved={false}
+          onToggleSave={vi.fn()}
           onClose={vi.fn()}
           onNavigate={onNavigate}
         />,
@@ -81,7 +91,15 @@ if (existsSync(layoutPath)) {
     it('falls back to print_description when description is missing', () => {
       const event = { ...baseEvent, description: undefined, print_description: 'Printed blurb.' }
       render(
-        <EventDetail event={event} layout={layout} now={new Date()} onClose={vi.fn()} onNavigate={vi.fn()} />,
+        <EventDetail
+          event={event}
+          layout={layout}
+          now={new Date()}
+          isSaved={false}
+          onToggleSave={vi.fn()}
+          onClose={vi.fn()}
+          onNavigate={vi.fn()}
+        />,
       )
       expect(screen.getByText('Printed blurb.')).toBeDefined()
     })
@@ -89,14 +107,30 @@ if (existsSync(layoutPath)) {
     it('says nothing was published rather than leaving the description blank', () => {
       const event = { ...baseEvent, description: undefined, print_description: undefined }
       render(
-        <EventDetail event={event} layout={layout} now={new Date()} onClose={vi.fn()} onNavigate={vi.fn()} />,
+        <EventDetail
+          event={event}
+          layout={layout}
+          now={new Date()}
+          isSaved={false}
+          onToggleSave={vi.fn()}
+          onClose={vi.fn()}
+          onNavigate={vi.fn()}
+        />,
       )
       expect(screen.getByText(/no description published/i)).toBeDefined()
     })
 
     it('with no host and no other_location, says the location is not listed and offers no navigation', () => {
       render(
-        <EventDetail event={baseEvent} layout={layout} now={new Date()} onClose={vi.fn()} onNavigate={vi.fn()} />,
+        <EventDetail
+          event={baseEvent}
+          layout={layout}
+          now={new Date()}
+          isSaved={false}
+          onToggleSave={vi.fn()}
+          onClose={vi.fn()}
+          onNavigate={vi.fn()}
+        />,
       )
       expect(screen.getByText('Location not listed.')).toBeDefined()
       expect(screen.queryByRole('button', { name: /take me there/i })).toBeNull()
@@ -105,7 +139,15 @@ if (existsSync(layoutPath)) {
     it('shows free-form other_location text as unmapped rather than "not listed", with no navigation', () => {
       const event = { ...baseEvent, other_location: 'ask around at the tiki bar' }
       render(
-        <EventDetail event={event} layout={layout} now={new Date()} onClose={vi.fn()} onNavigate={vi.fn()} />,
+        <EventDetail
+          event={event}
+          layout={layout}
+          now={new Date()}
+          isSaved={false}
+          onToggleSave={vi.fn()}
+          onClose={vi.fn()}
+          onNavigate={vi.fn()}
+        />,
       )
       expect(screen.getByText(/ask around at the tiki bar/)).toBeDefined()
       expect(screen.getByText(/not mapped/i)).toBeDefined()
@@ -117,7 +159,15 @@ if (existsSync(layoutPath)) {
       const onNavigate = vi.fn()
       const event = { ...baseEvent, other_location: 'D & 3:15' }
       render(
-        <EventDetail event={event} layout={layout} now={new Date()} onClose={vi.fn()} onNavigate={onNavigate} />,
+        <EventDetail
+          event={event}
+          layout={layout}
+          now={new Date()}
+          isSaved={false}
+          onToggleSave={vi.fn()}
+          onClose={vi.fn()}
+          onNavigate={onNavigate}
+        />,
       )
       expect(screen.getByText(/D & 3:15/)).toBeDefined()
 
@@ -132,10 +182,51 @@ if (existsSync(layoutPath)) {
     it('closes when the close button is pressed', () => {
       const onClose = vi.fn()
       render(
-        <EventDetail event={baseEvent} layout={layout} now={new Date()} onClose={onClose} onNavigate={vi.fn()} />,
+        <EventDetail
+          event={baseEvent}
+          layout={layout}
+          now={new Date()}
+          isSaved={false}
+          onToggleSave={vi.fn()}
+          onClose={onClose}
+          onNavigate={vi.fn()}
+        />,
       )
       fireEvent.click(screen.getByRole('button', { name: /close event details/i }))
       expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('offers a bookmark toggle whose label and icon reflect saved state', () => {
+      const onToggleSave = vi.fn()
+      render(
+        <EventDetail
+          event={baseEvent}
+          layout={layout}
+          now={new Date()}
+          isSaved={false}
+          onToggleSave={onToggleSave}
+          onClose={vi.fn()}
+          onNavigate={vi.fn()}
+        />,
+      )
+      const save = screen.getByRole('button', { name: /save this event/i })
+      fireEvent.click(save)
+      expect(onToggleSave).toHaveBeenCalledTimes(1)
+    })
+
+    it('labels the toggle as remove when the event is already saved', () => {
+      render(
+        <EventDetail
+          event={baseEvent}
+          layout={layout}
+          now={new Date()}
+          isSaved={true}
+          onToggleSave={vi.fn()}
+          onClose={vi.fn()}
+          onNavigate={vi.fn()}
+        />,
+      )
+      expect(screen.getByRole('button', { name: /remove from saved events/i })).toBeDefined()
     })
   })
 } else {

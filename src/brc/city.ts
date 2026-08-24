@@ -1,6 +1,6 @@
 import type { CityLayout, Feet, RadiusRef } from './layout'
 import { resolveRadius } from './layout'
-import { arc, clockToMinutes, destination, feetToMeters, polarToPosition, type Position } from './geo'
+import { arc, clockToMinutes, feetToMeters, polarToPosition, type Position } from './geo'
 
 /**
  * The Man and the portals are generated here rather than fetched, so they need
@@ -130,30 +130,19 @@ function dmz(layout: CityLayout): GeoJSON.Feature<GeoJSON.Polygon>[] {
   })
 }
 
-/** How far either side of the gate road's marked point to draw its line. */
-const ENTRANCE_ROAD_HALF_LENGTH: Feet = 300
-
 /**
- * The gate road's crossing point: the survey gives it as a compass bearing
- * and radius from the Man, not a clock position, so it's placed with
- * `destination()` directly rather than `polarToPosition()`'s clock lookup.
- * Only some years' surveys draw one — do not invent one when absent.
+ * The gate road, straight from the survey: each `gate_road.geojson`
+ * LineString is carried through in the layout verbatim (raw lon/lat), so
+ * this just wraps that geometry as GeoJSON features — no polar math, no
+ * synthesized bearing or length. Only some years' surveys draw one; do not
+ * invent one when absent.
  */
 function entranceRoad(layout: CityLayout): GeoJSON.Feature<GeoJSON.LineString>[] {
   const spec = layout.entrance_road
   if (!spec) return []
-  const center = layout.center.geometry.coordinates as Position
-  const from = destination(
-    center,
-    feetToMeters(spec.distance - ENTRANCE_ROAD_HALF_LENGTH),
-    spec.angle,
+  return spec.lines.map((coordinates, i) =>
+    line(coordinates as Position[], { kind: 'entrance-road', name: 'Entrance Road', id: `entrance-road-${i}` }),
   )
-  const to = destination(
-    center,
-    feetToMeters(spec.distance + ENTRANCE_ROAD_HALF_LENGTH),
-    spec.angle,
-  )
-  return [line([from, to], { kind: 'entrance-road', name: 'Entrance Road' })]
 }
 
 function landmarks(layout: CityLayout): GeoJSON.Feature<GeoJSON.Point>[] {

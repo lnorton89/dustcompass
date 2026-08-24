@@ -347,12 +347,16 @@ async function main() {
     }
   }
 
+  // The gate road survey is carried through as-published rather than reduced
+  // to a distance/angle: it curves and runs as parallel edges, none of which
+  // a single polar approximation can represent. Raw lon/lat needs no
+  // conversion on the way in or the way out — city.ts turns it straight into
+  // a GeoJSON LineString.
   let entrance_road
   if (data.gate_road.features.length > 0) {
-    const radii = data.gate_road.features
-      .flatMap((f) => f.geometry.coordinates.map(toXY))
-      .map(([x, y]) => Math.hypot(x - cx, y - cy))
-    entrance_road = { distance: Math.round(Math.min(...radii)), angle: 108 }
+    entrance_road = {
+      lines: data.gate_road.features.map((f) => f.geometry.coordinates),
+    }
   }
 
   const layout = {

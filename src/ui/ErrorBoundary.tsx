@@ -14,6 +14,13 @@ interface State {
  * something up on and no connection to reload from. If a render throws, say so
  * plainly and offer the two things that actually recover it — reload, and
  * failing that, clear the stored state that might be causing it.
+ *
+ * The fallback below reads MUI theme tokens (`background.default`,
+ * `text.primary`) but sets up no `ThemeProvider` of its own — a crash is what
+ * unmounts App's, tokens and all, so re-declaring one here would only lose
+ * again the next time something throws above it. It relies on the only
+ * caller, `ClientApp`, to always wrap it in a stable outer theme; this is not
+ * safe to render standalone.
  */
 export class ErrorBoundary extends Component<Props, State> {
   state: State = {}
@@ -36,6 +43,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
     return (
       <Box
+        data-testid="crash-fallback"
         sx={{
           position: 'fixed',
           inset: 0,

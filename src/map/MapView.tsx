@@ -215,7 +215,15 @@ export function MapView({
         }
       }}
       maxPitch={60}
-      attributionControl={{ compact: true, customAttribution: 'City survey &amp; listings: Burning Man Project' }}
+      /*
+       * The credit is not gone, it has moved: it reads in the footnote at the
+       * corner of the map, alongside the non-affiliation line it belongs next
+       * to. MapLibre's own control put a second white pill in the middle of a
+       * phone screen saying almost the same thing, and there is no basemap
+       * here to attribute — the city is drawn from Burning Man's survey, which
+       * is exactly what the footnote now credits.
+       */
+      attributionControl={false}
       style={{ position: 'absolute', inset: 0 }}
     >
       <NavigationControl position="bottom-right" visualizePitch showCompass />

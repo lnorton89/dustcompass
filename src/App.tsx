@@ -734,7 +734,12 @@ export default function App() {
                 }}
               >
                 <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.25 }}>
-                  {BRAND.disclaimer}
+                  {/*
+                    * The data credit lives here too, rather than in a second
+                    * floating pill of its own. It is the same sentence's worth
+                    * of small print and it belongs in the same place.
+                    */}
+                  City survey &amp; listings: Burning Man Project. {BRAND.disclaimer}
                 </Typography>
               </Box>
               {heading && navigation && (

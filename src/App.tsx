@@ -33,6 +33,7 @@ import type { MapRef } from '@vis.gl/react-maplibre'
 import { MapView } from './map/MapView'
 import { SearchPanel } from './ui/SearchPanel'
 import { DetailDrawer } from './ui/DetailDrawer'
+import { UnplacedSheet } from './ui/UnplacedSheet'
 import { EventsPanel } from './ui/EventsPanel'
 import { FilterSheet } from './ui/FilterSheet'
 import { NavBar } from './ui/NavBar'
@@ -47,7 +48,7 @@ import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from 
 import { travelBetween } from './brc/travel'
 import { bearingToClock, bearingBetween } from './brc/geo'
 import { shareLink } from './ui/share'
-import type { Poi, PoiKind } from './data/types'
+import type { Poi, PoiKind, UnplacedListing } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
 import { paletteFor, type PlayaPalette, type ThemeMode } from './map/style'
@@ -102,6 +103,8 @@ export default function App() {
     () => new Set<Filter>(['art', 'camp', 'toilets', 'services']),
   )
   const [selected, setSelected] = useState<Poi>()
+  // A listing with no location to open on — before Gates, all of the art.
+  const [unplaced, setUnplaced] = useState<UnplacedListing>()
   const [probe, setProbe] = useState<string>()
   const [deletedPlace, setDeletedPlace] = useState<(typeof places)[number]>()
   // The map's own locate button and the "take me there" flow feed the same
@@ -194,6 +197,13 @@ export default function App() {
     }
     setRestoredLink(linkKey)
   }
+  // A shared link to something with no location still has to land on it. There
+  // is no camera move to make, so this sits outside the block above, which
+  // exists to aim one.
+  if (data && !initialTarget && deepLink.poi && restoredLink !== linkKey) {
+    setUnplaced(data.unplaced.find((listing) => listing.uid === deepLink.poi))
+    setRestoredLink(linkKey)
+  }
 
   // Keep the address bar in step with what is on screen, so the link in the
   // browser is always the one worth sharing.
@@ -204,9 +214,10 @@ export default function App() {
     // take over.
     if (linkKey && restoredLink !== linkKey) return
     if (selected) publish({ poi: selected.uid })
+    else if (unplaced) publish({ poi: unplaced.uid })
     else if (pin) publish({ at: pin.address })
     else publish({})
-  }, [data, selected, pin, publish, linkKey, restoredLink])
+  }, [data, selected, unplaced, pin, publish, linkKey, restoredLink])
 
   const visiblePois = useMemo(() => {
     if (!data) return []
@@ -282,6 +293,7 @@ export default function App() {
         padding: poi ? focusPadding() : { top: 0, right: 0, bottom: 0, left: 0 },
       })
       setSelected(poi)
+      setUnplaced(undefined)
       if (!poi && data) setPin({ position, address: addressFor(position, data.layout) })
     },
     [data, focusPadding],
@@ -365,8 +377,13 @@ export default function App() {
                 <SearchPanel
                   layout={data.layout}
                   pois={data.pois}
+                  unplaced={data.unplaced}
                   places={places}
                   onGo={flyTo}
+                  onOpenUnplaced={(listing) => {
+                    setSelected(undefined)
+                    setUnplaced(listing)
+                  }}
                   compact={compact}
                 />
               ) : (
@@ -668,6 +685,12 @@ export default function App() {
         onShare={(poi) => void share({ poi: poi.uid }, poi.name, !isCivic(poi))}
         onNavigate={navigateTo}
         onClose={() => setSelected(undefined)}
+        compact={compact}
+      />
+      <UnplacedSheet
+        listing={unplaced}
+        onShare={(listing) => void share({ poi: listing.uid }, listing.name)}
+        onClose={() => setUnplaced(undefined)}
         compact={compact}
       />
 

@@ -16,15 +16,25 @@ import StarIcon from '@mui/icons-material/Star'
 import LocalHospitalIcon from '@mui/icons-material/LocalHospital'
 import type { CityLayout } from '../brc/layout'
 import { geocode } from '../brc/geocode'
-import type { Poi } from '../data/types'
+import type { Poi, UnplacedListing } from '../data/types'
+
+/** Why a result cannot be gone to, said in the width of a result row. */
+const LOCATION_PENDING: Record<UnplacedListing['reason'], string> = {
+  embargoed: 'location not out yet',
+  unpublished: 'no location published',
+}
 import type { SavedPlace } from '../data/useSavedPlaces'
 import type { Position } from '../brc/geo'
 
 interface Props {
   layout: CityLayout
   pois: Poi[]
+  /** Listings with no location — findable by name, but nowhere to go. */
+  unplaced: UnplacedListing[]
   places: SavedPlace[]
   onGo: (position: Position, poi?: Poi) => void
+  /** Opens a listing that has no position, so `onGo` has nothing to move to. */
+  onOpenUnplaced: (listing: UnplacedListing) => void
   compact?: boolean
 }
 
@@ -32,8 +42,10 @@ interface Option {
   label: string
   detail: string
   kind: 'address' | 'art' | 'camp' | 'service' | 'landmark' | 'saved'
-  position: Position
+  /** Absent for a listing that has no location to go to. */
+  position?: Position
   poi?: Poi
+  unplaced?: UnplacedListing
   score: number
 }
 
@@ -42,7 +54,15 @@ interface Option {
  * search term as often as the name is, so splitting them into two fields would
  * be wrong.
  */
-export function SearchPanel({ layout, pois, places, onGo, compact = false }: Props) {
+export function SearchPanel({
+  layout,
+  pois,
+  unplaced,
+  places,
+  onGo,
+  onOpenUnplaced,
+  compact = false,
+}: Props) {
   const [query, setQuery] = useState('')
 
   const options = useMemo<Option[]>(() => {
@@ -93,8 +113,24 @@ export function SearchPanel({ layout, pois, places, onGo, compact = false }: Pro
         })
       }
     }
+    // Below the placed results on purpose: something you can walk to beats
+    // something you can only read about. `- 15` keeps a strong name match on
+    // an embargoed piece ahead of a weak address match on a camp.
+    for (const listing of unplaced) {
+      const score = matchScore(listing.name, term)
+      if (score > 0) {
+        results.push({
+          label: listing.name,
+          detail: [listing.subtitle, LOCATION_PENDING[listing.reason]].filter(Boolean).join(' · '),
+          kind: listing.kind,
+          unplaced: listing,
+          score: score - 15,
+        })
+      }
+    }
+
     return results.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label)).slice(0, 40)
-  }, [query, layout, pois, places])
+  }, [query, layout, pois, places, unplaced])
 
   return (
     <Autocomplete
@@ -104,7 +140,9 @@ export function SearchPanel({ layout, pois, places, onGo, compact = false }: Pro
       inputValue={query}
       onInputChange={(_, value) => setQuery(value)}
       onChange={(_, value) => {
-        if (value && typeof value !== 'string') onGo(value.position, value.poi)
+        if (!value || typeof value === 'string') return
+        if (value.unplaced) onOpenUnplaced(value.unplaced)
+        else if (value.position) onGo(value.position, value.poi)
       }}
       getOptionLabel={(option) => (typeof option === 'string' ? option : option.label)}
       renderOption={(props, option) => {

@@ -4,7 +4,7 @@ import { buildCity, type CityGeometry } from '../brc/city'
 import { buildServices, toiletPoints } from '../brc/services'
 import { civicPois } from './civic'
 import { frontagePosition } from '../brc/frontage'
-import type { ArtItem, CampItem, EventItem, Poi } from './types'
+import type { ArtItem, CampItem, EventItem, Poi, UnplacedListing } from './types'
 import { applyEmbargo, embargoState, embargoWindowForYear, type EmbargoState } from './embargo'
 import type { EventRange } from './events'
 import { DATA_YEAR, assetUrl } from '../config'
@@ -16,6 +16,8 @@ export interface PlayaData {
   camps: CampItem[]
   events: EventItem[]
   pois: Poi[]
+  /** Listings with no location to show — see `UnplacedListing`. */
+  unplaced: UnplacedListing[]
   /** The event week these listings describe, used to anchor "what's on now". */
   range?: EventRange
   services: GeoJSON.FeatureCollection<GeoJSON.Point>
@@ -67,6 +69,7 @@ export function usePlayaData() {
         const art = applyEmbargo(rawArt, embargo.artReleased)
         const camps = applyEmbargo(rawCamps, embargo.campsReleased)
         const city = buildCity(layout)
+        const listed = toPois(layout, art, camps, embargo)
         const services = buildServices(serviceSpecs)
         const toilets = toiletPoints(rawToilets)
         setData({
@@ -79,10 +82,8 @@ export function usePlayaData() {
           // on a ranger station resolves the same way a tap on a camp does.
           // They are not embargoed: the city's own infrastructure is published
           // with the survey, and only participants' locations are held back.
-          pois: [
-            ...toPois(layout, art, camps),
-            ...civicPois(layout, services, toilets, city.landmarks),
-          ],
+          pois: [...listed.pois, ...civicPois(layout, services, toilets, city.landmarks)],
+          unplaced: listed.unplaced,
           range: dates.rangeInfo,
           services,
           toilets,
@@ -105,44 +106,56 @@ export function usePlayaData() {
  * without it falls back to geocoding its address string, which is how records
  * behave before the survey team publishes coordinates.
  */
-function toPois(layout: CityLayout, art: ArtItem[], camps: CampItem[]): Poi[] {
-  const out: Poi[] = []
+/** Exported for the tests: this is where the embargo decides what is reachable. */
+export function toPois(
+  layout: CityLayout,
+  art: ArtItem[],
+  camps: CampItem[],
+  embargo: EmbargoState,
+): { pois: Poi[]; unplaced: UnplacedListing[] } {
+  const pois: Poi[] = []
+  const unplaced: UnplacedListing[] = []
 
-  for (const item of art) {
+  const sort = (
+    item: ArtItem | CampItem,
+    kind: 'art' | 'camp',
+    subtitle: string | undefined,
+    released: boolean,
+  ) => {
     const position = resolve(layout, item.location, item.location_string)
     if (position) {
-      out.push({
+      pois.push({
         uid: item.uid,
-        kind: 'art',
+        kind,
         name: item.name,
-        subtitle: item.artist,
+        subtitle,
         description: item.description,
         address: item.location_string,
         position,
         positionSource: hasGps(item.location) ? 'gps' : 'address',
         thumbnail: item.images?.[0]?.thumbnail_url,
       })
+      return
     }
+    // Everything that cannot be placed used to be dropped here, silently, and
+    // with it went every art piece in the catalogue for the week before Gates.
+    // The listing is not the embargoed part; the location is, and there is
+    // none of it on this record to leak.
+    unplaced.push({
+      uid: item.uid,
+      kind,
+      name: item.name,
+      subtitle,
+      description: item.description,
+      thumbnail: item.images?.[0]?.thumbnail_url,
+      reason: released ? 'unpublished' : 'embargoed',
+    })
   }
 
-  for (const item of camps) {
-    const position = resolve(layout, item.location, item.location_string)
-    if (position) {
-      out.push({
-        uid: item.uid,
-        kind: 'camp',
-        name: item.name,
-        subtitle: item.hometown,
-        description: item.description,
-        address: item.location_string,
-        position,
-        positionSource: hasGps(item.location) ? 'gps' : 'address',
-        thumbnail: item.images?.[0]?.thumbnail_url,
-      })
-    }
-  }
+  for (const item of art) sort(item, 'art', item.artist, embargo.artReleased)
+  for (const item of camps) sort(item, 'camp', item.hometown, embargo.campsReleased)
 
-  return out
+  return { pois, unplaced }
 }
 
 function hasGps(location: { gps_latitude?: number; gps_longitude?: number } | undefined) {

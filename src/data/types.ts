@@ -75,6 +75,26 @@ export interface EventItem {
  */
 export type PoiKind = 'art' | 'camp' | 'event' | 'service' | 'landmark'
 
+/**
+ * A listing the app knows about but cannot put on the map.
+ *
+ * Before Gates every art location is withheld, so all of it lands here — the
+ * names, the artists and the descriptions are not embargoed and are exactly
+ * what someone planning a week is looking for. A handful of camps land here
+ * too, having published no location at all. Deliberately not a `Poi`: it has
+ * no position, and the map should not be able to reach for one.
+ */
+export interface UnplacedListing {
+  uid: string
+  kind: 'art' | 'camp'
+  name: string
+  subtitle?: string
+  description?: string
+  thumbnail?: string
+  /** Withheld under the licence, or simply never filed. They read differently. */
+  reason: 'embargoed' | 'unpublished'
+}
+
 /** A camp, art piece or surveyed civic place resolved to a map position. */
 export interface Poi {
   uid: string

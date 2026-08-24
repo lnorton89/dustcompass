@@ -1,3 +1,11 @@
+/**
+ * Survey places carry no id of their own, so one is minted from the name. The
+ * prefixes keep them clear of the listing uids they share an index with, and
+ * mark the links that have no share page behind them.
+ */
+export const SERVICE_UID = 'service:'
+export const TOILET_UID = 'toilet:'
+
 /** A named place as Burning Man's survey publishes it in `cpns.geojson`. */
 export interface SurveyedPlace {
   properties: { NAME?: string; TYPE?: string }
@@ -17,6 +25,15 @@ export type ServiceCategory = 'medical' | 'ranger' | 'toilet' | 'ice' | 'civic'
  */
 const NOT_A_SERVICE = /(plaza|portal|promenade)$|^point \d|^the man$/i
 
+/** What the drawer calls a service when it has nothing else to say about it. */
+export const CATEGORY_LABEL: Record<ServiceCategory, string> = {
+  medical: 'Medical',
+  ranger: 'Rangers',
+  toilet: 'Toilets',
+  ice: 'Ice',
+  civic: 'Civic',
+}
+
 export function categorise(name: string): ServiceCategory {
   const label = name.toLowerCase()
   // ESD is Burning Man's Emergency Services Department; Rampart is the field
@@ -35,6 +52,9 @@ export function buildServices(
   places: GeoJSON.FeatureCollection | { features: SurveyedPlace[] },
 ): GeoJSON.FeatureCollection<GeoJSON.Point> {
   const features = (places.features ?? []) as SurveyedPlace[]
+  // Two stations can carry the same name in a survey, and a uid that collides
+  // sends the second one's detail drawer to the first one's dot.
+  const seen = new Map<string, number>()
   return {
     type: 'FeatureCollection',
     features: features
@@ -42,18 +62,26 @@ export function buildServices(
       .filter((place) => place.geometry?.type === 'Point')
       .map((place) => {
         const name = place.properties.NAME as string
+        const ref = slug(name)
+        const taken = seen.get(ref) ?? 0
+        seen.set(ref, taken + 1)
         return {
           type: 'Feature' as const,
           properties: {
             kind: 'service',
+            uid: taken ? `${SERVICE_UID}${ref}-${taken + 1}` : `${SERVICE_UID}${ref}`,
             name,
-            ref: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+            ref,
             category: categorise(name),
           },
           geometry: { type: 'Point' as const, coordinates: place.geometry.coordinates },
         }
       }),
   }
+}
+
+function slug(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
 /** Toilet banks, normalised to points so they can share one symbol layer. */
@@ -63,7 +91,7 @@ export function toiletPoints(
   return {
     type: 'FeatureCollection',
     features: toilets.features
-      .map((feature): GeoJSON.Feature<GeoJSON.Point> | undefined => {
+      .map((feature, index): GeoJSON.Feature<GeoJSON.Point> | undefined => {
         let coordinates: GeoJSON.Position | undefined
         if (feature.geometry?.type === 'Point') {
           coordinates = feature.geometry.coordinates
@@ -75,7 +103,12 @@ export function toiletPoints(
         if (!coordinates) return undefined
         return {
           type: 'Feature',
-          properties: { kind: 'service', category: 'toilet' as const, name: 'Toilets' },
+          properties: {
+            kind: 'service',
+            uid: `${TOILET_UID}${feature.properties?.OBJECTID ?? index}`,
+            category: 'toilet' as const,
+            name: 'Toilets',
+          },
           geometry: { type: 'Point', coordinates },
         }
       })

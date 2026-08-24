@@ -115,7 +115,7 @@ export function DetailDrawer({
             <Chip
               size="small"
               label={poi.kind}
-              color={poi.kind === 'art' ? 'primary' : 'secondary'}
+              color={poi.kind === 'art' ? 'primary' : poi.kind === 'camp' ? 'secondary' : 'default'}
             />
             {poi.address && <Chip size="small" variant="outlined" label={poi.address} />}
           </Stack>

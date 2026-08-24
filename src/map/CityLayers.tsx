@@ -9,6 +9,9 @@ interface Props {
   palette: PlayaPalette
 }
 
+/** The Man and the portals: labelled dots, and a tap lands on the dot. */
+export const LANDMARK_LAYER_ID = 'landmark-dot'
+
 /**
  * The city itself: fence, plazas, streets, landmarks. All of it comes from
  * client-generated GeoJSON, so there is nothing to fetch and nothing to cache.
@@ -104,7 +107,7 @@ export function CityLayers({ city, campOutlines, palette }: Props) {
           }}
         />
         <Layer
-          id="landmark-dot"
+          id={LANDMARK_LAYER_ID}
           type="circle"
           paint={{
             'circle-radius': 4,

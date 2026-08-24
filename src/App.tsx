@@ -43,7 +43,7 @@ import { useFavorites } from './data/useFavorites'
 import { useGeolocation } from './data/useGeolocation'
 import { useSavedPlaces } from './data/useSavedPlaces'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
-import { addressFor, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
+import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
 import { travelBetween } from './brc/travel'
 import { bearingToClock, bearingBetween } from './brc/geo'
 import { shareLink } from './ui/share'
@@ -56,6 +56,9 @@ import { BrandMark } from './ui/BrandMark'
 import { PwaStatus } from './ui/PwaStatus'
 
 type Filter = PoiKind | 'toilets' | 'services' | 'favorites'
+
+/** Surveyed rather than listed: the city's own places, not participants'. */
+const isCivic = (poi: Poi) => poi.kind === 'service' || poi.kind === 'landmark'
 
 /**
  * Dark → light → night red. Red is last because it is the deliberate choice,
@@ -176,7 +179,11 @@ export default function App() {
 
   const visiblePois = useMemo(() => {
     if (!data) return []
-    return active.has('favorites') ? data.pois.filter((poi) => favorites.has(poi.uid)) : data.pois
+    if (!active.has('favorites')) return data.pois
+    // "Saved" narrows the listings, not the city. Rangers and toilets have
+    // their own switches, and a filter meant to cut the clutter should not
+    // quietly take the map's infrastructure — or a tap on it — away with it.
+    return data.pois.filter((poi) => favorites.has(poi.uid) || isCivic(poi))
   }, [data, active, favorites])
 
   const hostsByUid = useMemo(
@@ -249,11 +256,17 @@ export default function App() {
     [data, focusPadding],
   )
 
-  const share = useCallback(async (link: { poi?: string; at?: string }, title: string) => {
-    const result = await shareLink(shareUrl(link), title)
-    if (result === 'copied') setProbe('Link copied')
-    else if (result === 'unavailable') setProbe('Could not copy the link')
-  }, [])
+  const share = useCallback(
+    async (link: { poi?: string; at?: string }, title: string, unfurls = true) => {
+      // Only listings have a page of their own to unfurl. The survey's places
+      // are not in the API's export, so a link to one has to be the app's own
+      // URL — a `/p/` link would 404 rather than open anything.
+      const result = await shareLink(unfurls ? shareUrl(link) : deepLinkUrl(link), title)
+      if (result === 'copied') setProbe('Link copied')
+      else if (result === 'unavailable') setProbe('Could not copy the link')
+    },
+    [],
+  )
 
   const toggleFilter = useCallback((key: Filter) => {
     setActive((current) => {
@@ -566,7 +579,7 @@ export default function App() {
         originLabel={originLabel}
         isFavorite={selected ? favorites.has(selected.uid) : false}
         onToggleFavorite={toggleFavorite}
-        onShare={(poi) => void share({ poi: poi.uid }, poi.name)}
+        onShare={(poi) => void share({ poi: poi.uid }, poi.name, !isCivic(poi))}
         onNavigate={navigateTo}
         onClose={() => setSelected(undefined)}
         compact={compact}

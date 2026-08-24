@@ -2,6 +2,12 @@ import type { CityLayout, Feet, RadiusRef } from './layout'
 import { resolveRadius } from './layout'
 import { arc, clockToMinutes, feetToMeters, polarToPosition, type Position } from './geo'
 
+/**
+ * The Man and the portals are generated here rather than fetched, so they need
+ * an id minted the same way the survey's places do — see `SERVICE_UID`.
+ */
+export const LANDMARK_UID = 'landmark:'
+
 export interface CityGeometry {
   streets: GeoJSON.FeatureCollection<GeoJSON.LineString>
   plazas: GeoJSON.FeatureCollection<GeoJSON.Polygon>
@@ -99,14 +105,19 @@ function landmarks(layout: CityLayout): GeoJSON.Feature<GeoJSON.Point>[] {
   const out: GeoJSON.Feature<GeoJSON.Point>[] = [
     {
       type: 'Feature',
-      properties: { kind: 'landmark', name: 'The Man', ref: 'man' },
+      properties: { kind: 'landmark', uid: `${LANDMARK_UID}man`, name: 'The Man', ref: 'man' },
       geometry: { type: 'Point', coordinates: layout.center.geometry.coordinates },
     },
   ]
   for (const portal of layout.portals) {
     out.push({
       type: 'Feature',
-      properties: { kind: 'portal', name: portal.name, ref: portal.ref },
+      properties: {
+        kind: 'portal',
+        uid: `${LANDMARK_UID}${portal.ref}`,
+        name: portal.name,
+        ref: portal.ref,
+      },
       geometry: {
         type: 'Point',
         coordinates: polarToPosition(layout, portal.time, resolveRadius(layout, portal.distance)),

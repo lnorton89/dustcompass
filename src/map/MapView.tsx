@@ -15,14 +15,17 @@ import type { SavedPlace } from '../data/useSavedPlaces'
 import { reverseGeocode } from '../brc/geocode'
 import type { Position } from '../brc/geo'
 import { cityOutlinePoints, frameFor } from '../brc/frame'
-import { CityLayers } from './CityLayers'
+import { CityLayers, LANDMARK_LAYER_ID } from './CityLayers'
 import { POI_CLUSTER_LAYER_ID, POI_LABEL_LAYER_ID, POI_LAYER_ID, PoiLayers } from './PoiLayers'
 
 /** How far from the tap to look for the label that names what was tapped. */
 const LABEL_HIT_RADIUS = 18
+/** The same allowance for the survey's dots, which carry no label to aim at. */
+const DOT_HIT_RADIUS = 12
 import { RouteLayer } from './RouteLayer'
 import { SAVED_LAYER_ID, SavedPlacesLayer } from './SavedPlacesLayer'
-import { ServiceLayers } from './ServiceLayers'
+import { SERVICE_LAYER_ID, ServiceLayers, TOILET_LAYER_ID } from './ServiceLayers'
+import { nearestFeature } from './pick'
 import { baseStyle, paletteFor, type ThemeMode } from './style'
 import { FocusMarker } from './FocusMarker'
 import { PlayaScene } from './PlayaScene'
@@ -60,6 +63,21 @@ interface Props {
 }
 
 const GLYPHS = assetUrl('fonts/{fontstack}/{range}.pbf')
+
+/**
+ * Ranger stations, medical, ice, toilets, the Man and the portals. They come
+ * from the survey rather than the listings API, but a tap on one asks the same
+ * question a tap on a camp does, and gets the same answer.
+ */
+const CIVIC_LAYER_IDS = [SERVICE_LAYER_ID, TOILET_LAYER_ID, LANDMARK_LAYER_ID]
+
+/** Everything a tap can land on, so the cursor knows where it is worth one. */
+const INTERACTIVE_LAYER_IDS = [
+  POI_CLUSTER_LAYER_ID,
+  POI_LAYER_ID,
+  SAVED_LAYER_ID,
+  ...CIVIC_LAYER_IDS,
+]
 
 export function MapView({
   data,
@@ -107,6 +125,32 @@ export function MapView({
         })
         return
       }
+      const { x, y } = event.point
+      const nearestIn = (layers: string[], radius: number) =>
+        nearestFeature(
+          event.target.queryRenderedFeatures(
+            [
+              [x - radius, y - radius],
+              [x + radius, y + radius],
+            ],
+            { layers },
+          ),
+          event.point,
+          (position) => event.target.project(position),
+        )
+      const listed = (feature: ReturnType<typeof nearestIn>) =>
+        feature && poiIndex.get(String(feature.properties.uid))
+
+      // The city's own places first. Each is one dot standing alone, so the
+      // nearest one to the tap is unambiguously the one meant — unlike the
+      // camps below, which pile up on a shared intersection. Their own dots
+      // are small, and a thumb is not, so they are given a little room.
+      const civic = listed(nearestIn(CIVIC_LAYER_IDS, DOT_HIT_RADIUS))
+      if (civic) {
+        onSelect(civic)
+        return
+      }
+
       // A playa address names an intersection, so several camps genuinely sit
       // on one point. Only one of them wins the label, and that is the name the
       // person just tapped — take theirs rather than whichever the renderer
@@ -114,21 +158,7 @@ export function MapView({
       // The label is drawn below its dot, so the exact click pixel is never
       // inside it. Look in a small box instead, and among whatever is labelled
       // there take the one anchored nearest the tap.
-      const { x, y } = event.point
-      const labelled = event.target
-        .queryRenderedFeatures(
-          [
-            [x - LABEL_HIT_RADIUS, y - LABEL_HIT_RADIUS],
-            [x + LABEL_HIT_RADIUS, y + LABEL_HIT_RADIUS],
-          ],
-          { layers: [POI_LABEL_LAYER_ID] },
-        )
-        .filter((feature) => feature.properties?.uid && feature.geometry.type === 'Point')
-        .sort((a, b) => {
-          const at = event.target.project((a.geometry as GeoJSON.Point).coordinates as [number, number])
-          const bt = event.target.project((b.geometry as GeoJSON.Point).coordinates as [number, number])
-          return Math.hypot(at.x - x, at.y - y) - Math.hypot(bt.x - x, bt.y - y)
-        })[0]
+      const labelled = nearestIn([POI_LABEL_LAYER_ID], LABEL_HIT_RADIUS)
       const chosen = labelled ?? event.features?.find((feature) => feature.properties?.uid)
       if (chosen?.properties?.uid) {
         onSelect(poiIndex.get(String(chosen.properties.uid)))
@@ -155,7 +185,7 @@ export function MapView({
         bearing: cityUp ? data.layout.bearing : 0,
       }}
       mapStyle={style}
-      interactiveLayerIds={[POI_CLUSTER_LAYER_ID, POI_LAYER_ID, SAVED_LAYER_ID]}
+      interactiveLayerIds={INTERACTIVE_LAYER_IDS}
       onClick={handleClick}
       onError={(event) => console.error('Map rendering error:', event.error)}
       onMouseMove={(event) => setCursor(event.features?.length ? 'pointer' : undefined)}

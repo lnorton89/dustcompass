@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CityLayout } from '../brc/layout'
 import { buildCity, type CityGeometry } from '../brc/city'
 import { buildServices, toiletPoints } from '../brc/services'
+import { civicPois } from './civic'
 import { frontagePosition } from '../brc/frontage'
 import type { ArtItem, CampItem, EventItem, Poi } from './types'
 import { applyEmbargo, embargoState, embargoWindowForYear, type EmbargoState } from './embargo'
@@ -65,16 +66,26 @@ export function usePlayaData() {
         const embargo = embargoState(embargoWindowForYear(DATA_YEAR))
         const art = applyEmbargo(rawArt, embargo.artReleased)
         const camps = applyEmbargo(rawCamps, embargo.campsReleased)
+        const city = buildCity(layout)
+        const services = buildServices(serviceSpecs)
+        const toilets = toiletPoints(rawToilets)
         setData({
           layout,
-          city: buildCity(layout),
+          city,
           art,
           camps,
           events,
-          pois: toPois(layout, art, camps),
+          // The survey's places share the index with the listings so that a tap
+          // on a ranger station resolves the same way a tap on a camp does.
+          // They are not embargoed: the city's own infrastructure is published
+          // with the survey, and only participants' locations are held back.
+          pois: [
+            ...toPois(layout, art, camps),
+            ...civicPois(layout, services, toilets, city.landmarks),
+          ],
           range: dates.rangeInfo,
-          services: buildServices(serviceSpecs),
-          toilets: toiletPoints(rawToilets),
+          services,
+          toilets,
           campOutlines: outlines,
           embargo,
         })

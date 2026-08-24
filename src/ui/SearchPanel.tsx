@@ -13,6 +13,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import GroupsIcon from '@mui/icons-material/Groups'
 import PlaceIcon from '@mui/icons-material/Place'
 import StarIcon from '@mui/icons-material/Star'
+import LocalHospitalIcon from '@mui/icons-material/LocalHospital'
 import type { CityLayout } from '../brc/layout'
 import { geocode } from '../brc/geocode'
 import type { Poi } from '../data/types'
@@ -30,7 +31,7 @@ interface Props {
 interface Option {
   label: string
   detail: string
-  kind: 'address' | 'art' | 'camp' | 'saved'
+  kind: 'address' | 'art' | 'camp' | 'service' | 'landmark' | 'saved'
   position: Position
   poi?: Poi
   score: number
@@ -76,12 +77,16 @@ export function SearchPanel({ layout, pois, places, onGo, compact = false }: Pro
     }
 
     for (const poi of pois) {
+      // Forty banks of toilets all answer to "Toilets", so as search results
+      // they are forty ways of saying nothing. The map has a switch for them,
+      // and out there you want the nearest one, not a list.
+      if (poi.category === 'toilet') continue
       const score = Math.max(matchScore(poi.name, term), matchScore(poi.address ?? '', term) - 20)
       if (score > 0) {
         results.push({
           label: poi.name,
-          detail: poi.address ?? '',
-          kind: poi.kind === 'art' ? 'art' : 'camp',
+          detail: poi.subtitle ? [poi.subtitle, poi.address].filter(Boolean).join(' · ') : (poi.address ?? ''),
+          kind: optionKind(poi.kind),
           position: poi.position,
           poi,
           score,
@@ -162,9 +167,15 @@ function matchScore(value: string, term: string) {
   return 0
 }
 
+function optionKind(kind: Poi['kind']): Option['kind'] {
+  if (kind === 'art' || kind === 'service' || kind === 'landmark') return kind
+  return 'camp'
+}
+
 function optionIcon(kind: Option['kind']) {
   if (kind === 'art') return <AutoAwesomeIcon fontSize="small" />
   if (kind === 'camp') return <GroupsIcon fontSize="small" />
   if (kind === 'saved') return <StarIcon fontSize="small" />
+  if (kind === 'service') return <LocalHospitalIcon fontSize="small" />
   return <PlaceIcon fontSize="small" />
 }

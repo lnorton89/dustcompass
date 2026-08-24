@@ -11,6 +11,10 @@ interface Props {
 
 const EMPTY: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: 'FeatureCollection', features: [] }
 
+/** The dots a tap can land on. Their labels sit clear of the point they name. */
+export const SERVICE_LAYER_ID = 'service-dot'
+export const TOILET_LAYER_ID = 'toilet-dot'
+
 /**
  * Toilets, medical, rangers and civic landmarks. These stay visible when camps
  * and art are switched off — at 3am they are the only layer that matters, and
@@ -21,7 +25,7 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
     <>
       <Source id="toilets" type="geojson" data={showToilets ? toilets : EMPTY}>
         <Layer
-          id="toilet-dot"
+          id={TOILET_LAYER_ID}
           type="circle"
           paint={{
             'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 2.5, 17, 6],
@@ -54,21 +58,11 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
             'text-halo-width': 1.2,
           }}
         />
-        <Layer
-          id="service-icon"
-          type="symbol"
-          layout={{
-            'text-field': ['match', ['get', 'category'], 'medical', '+', 'ranger', 'R', 'i'],
-            'text-font': ['Open Sans Regular'],
-            'text-size': 11,
-          }}
-          paint={{ 'text-color': palette.playa }}
-        />
       </Source>
 
       <Source id="services" type="geojson" data={showServices ? services : EMPTY}>
         <Layer
-          id="service-dot"
+          id={SERVICE_LAYER_ID}
           type="circle"
           paint={{
             'circle-radius': 5,
@@ -84,6 +78,16 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
             'circle-stroke-color': palette.playa,
             'circle-stroke-width': 1.5,
           }}
+        />
+        <Layer
+          id="service-icon"
+          type="symbol"
+          layout={{
+            'text-field': ['match', ['get', 'category'], 'medical', '+', 'ranger', 'R', 'i'],
+            'text-font': ['Open Sans Regular'],
+            'text-size': 11,
+          }}
+          paint={{ 'text-color': palette.playa }}
         />
         <Layer
           id="service-label"

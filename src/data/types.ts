@@ -1,3 +1,5 @@
+import type { ServiceCategory } from '../brc/services'
+
 export interface PlayaImage {
   thumbnail_url?: string
   gallery_ref?: string
@@ -65,9 +67,15 @@ export interface EventItem {
   occurrence_set: Occurrence[]
 }
 
-export type PoiKind = 'art' | 'camp' | 'event'
+/**
+ * `service` and `landmark` come from the survey rather than the listings API:
+ * ranger stations, medical, ice, toilets, the Man, the portals. They are drawn
+ * by their own layers, but they are places a person taps and asks about, so
+ * they are the same kind of thing as a camp everywhere downstream of the map.
+ */
+export type PoiKind = 'art' | 'camp' | 'event' | 'service' | 'landmark'
 
-/** A camp or art piece resolved to a map position. */
+/** A camp, art piece or surveyed civic place resolved to a map position. */
 export interface Poi {
   uid: string
   kind: PoiKind
@@ -79,4 +87,6 @@ export interface Poi {
   /** GPS is a surveyed point; address means the pin is the shared street intersection. */
   positionSource: 'gps' | 'address'
   thumbnail?: string
+  /** Services only: which coarse kind, so search and icons can tell them apart. */
+  category?: ServiceCategory
 }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Chip,
@@ -98,12 +98,33 @@ export function DetailDrawer({
   // Measured off the paper itself rather than guessed at a fraction of the
   // window: what is in here decides how tall it is, and a listing with a photo
   // and forty events is not the same sheet as one with an address.
-  const measure = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (node && onMeasure) onMeasure(node.getBoundingClientRect().height)
-    },
-    [onMeasure],
-  )
+  //
+  // A plain ref callback only fires when the node itself is created or
+  // destroyed. Two things break on that alone: switching from one open
+  // listing straight to another (rather than closing first) keeps the same
+  // Paper mounted the whole time, so the new content's height is never
+  // reported; and MUI's Drawer mounts that Paper behind an internal
+  // transition, so on the very first open the node may not exist yet when a
+  // plain effect keyed on props would have looked for it, with no second
+  // chance once it does. Routing the node through state instead — so its own
+  // arrival drives the effect below — fixes the second problem, and a
+  // `ResizeObserver` on that persistent node (re-armed on `poi?.uid` too, for
+  // the first) fixes both: it fires on a new listing's content, a
+  // lazy-loaded photo finishing late, or anything else that changes the
+  // sheet's actual height.
+  const [paperNode, setPaperNode] = useState<HTMLDivElement | null>(null)
+  const paperRef = useCallback((node: HTMLDivElement | null) => setPaperNode(node), [])
+
+  useEffect(() => {
+    if (!paperNode || !onMeasure) return
+    onMeasure(paperNode.getBoundingClientRect().height)
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) onMeasure(entry.contentRect.height)
+    })
+    observer.observe(paperNode)
+    return () => observer.disconnect()
+  }, [paperNode, onMeasure, poi?.uid])
 
   const body = poi && (
     <>
@@ -318,7 +339,7 @@ export function DetailDrawer({
       onClose={onClose}
       slotProps={{
         paper: {
-          ref: measure,
+          ref: paperRef,
           sx: {
             maxHeight: 'min(82dvh, calc(100dvh - var(--safe-top) - 16px))',
             borderTopLeftRadius: 16,

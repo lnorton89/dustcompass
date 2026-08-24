@@ -597,6 +597,12 @@ export default function App() {
 
   const flyTo = useCallback(
     (position: Position, poi?: Poi) => {
+      // A previous listing's measured height is unrelated to this one — reset
+      // to the fallback estimate rather than framing this sheet, sight
+      // unseen, off however tall the last one happened to be. The real
+      // height, once `onMeasure` reports it below, triggers one bounded
+      // correction to the same target rather than a second guess.
+      if (poi) detailHeight.current = 0
       mapRef.current?.flyTo({
         center: position,
         zoom: 16.5,
@@ -612,6 +618,27 @@ export default function App() {
       else if (data) setPin({ position, address: addressFor(position, data.layout) })
     },
     [data, focusPadding],
+  )
+
+  /**
+   * Re-frames the currently selected sheet once its real measured height is
+   * known — a bounded correction after the initial fallback-estimated move,
+   * so the map ends up keeping the selected place in the visible area
+   * whatever this particular sheet's actual height turns out to be, instead
+   * of trusting a guess or a previous listing's height for good.
+   */
+  const reframeSelected = useCallback(() => {
+    if (!selected) return
+    mapRef.current?.easeTo({ center: selected.position, padding: focusPadding(), duration: 300 })
+  }, [selected, focusPadding])
+
+  const onDetailMeasure = useCallback(
+    (height: number) => {
+      if (detailHeight.current === height) return
+      detailHeight.current = height
+      reframeSelected()
+    },
+    [reframeSelected],
   )
 
   const share = useCallback(
@@ -1155,9 +1182,7 @@ export default function App() {
             onShare={(poi) => void share({ poi: poi.uid }, poi.name, !isCivic(poi))}
             onNavigate={navigateTo}
             onClose={() => setSelected(undefined)}
-            onMeasure={(height) => {
-              detailHeight.current = height
-            }}
+            onMeasure={onDetailMeasure}
             compact={compact}
           />
           <UnplacedSheet

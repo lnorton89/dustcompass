@@ -759,6 +759,64 @@ await shared.close()
   await stale.close()
 }
 
+// #19: flyTo() used to frame the camera off whichever listing's sheet
+// height had been measured *first* — reused for every later selection
+// regardless of how tall that particular sheet actually was — because the
+// old ref-callback measurement never fired again for a listing switched to
+// directly. The bounded correction after a real measurement should leave
+// noticeably more bottom padding reserved for a tall sheet (many hosted
+// events) than a short one (bare address, no events), rather than the same
+// number either way.
+{
+  const detail = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  const page = await detail.newPage()
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('dust-compass:first-run:1', 'seen')
+    } catch {
+      /* private-mode storage throws; the dialog is harmless if it appears */
+    }
+  })
+
+  const [camps, events] = await Promise.all([
+    (await detail.request.get(new URL(`data/${DATA_YEAR}/camp.json`, url).href)).json(),
+    (await detail.request.get(new URL(`data/${DATA_YEAR}/event.json`, url).href)).json(),
+  ])
+  const hostedEventCount = new Map()
+  for (const event of events) {
+    if (!event.hosted_by_camp) continue
+    hostedEventCount.set(event.hosted_by_camp, (hostedEventCount.get(event.hosted_by_camp) ?? 0) + 1)
+  }
+  const placed = camps.filter((c) => c.location_string && c.uid && c.name)
+  const short = placed.find((c) => !hostedEventCount.get(c.uid) && !c.images?.length)
+  const tall = [...placed].sort(
+    (a, b) => (hostedEventCount.get(b.uid) ?? 0) - (hostedEventCount.get(a.uid) ?? 0),
+  )[0]
+
+  if (!short || !tall || short.uid === tall.uid) {
+    assert(false, 'skipped #19 sheet-height test — could not find two sufficiently different camps in this dataset')
+  } else {
+    const bottomPaddingFor = async (uid) => {
+      await page.goto(new URL(`?poi=${uid}`, url).href, { waitUntil: 'load' })
+      await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+      // Long enough for both the initial fallback-estimated flyTo (900ms) and
+      // the bounded correction that follows the real measurement (300ms) to
+      // finish settling.
+      await page.waitForTimeout(2500)
+      return page.evaluate(() => window.__map.getPadding().bottom)
+    }
+
+    const shortPadding = await bottomPaddingFor(short.uid)
+    const tallPadding = await bottomPaddingFor(tall.uid)
+    assert(
+      tallPadding > shortPadding,
+      `a taller detail sheet (${tall.name}, ${hostedEventCount.get(tall.uid) ?? 0} events) reserves more bottom padding (${tallPadding}) than a shorter one (${short.name}, ${shortPadding}) (#19)`,
+    )
+  }
+
+  await detail.close()
+}
+
 console.log(problems.length ? `\n${problems.length} problem(s):\n` + problems.join('\n') : '\nno console or network errors')
 await browser.close()
 process.exit(problems.length || process.exitCode ? 1 : 0)

@@ -16,6 +16,7 @@ import StarIcon from '@mui/icons-material/Star'
 import LocalHospitalIcon from '@mui/icons-material/LocalHospital'
 import type { CityLayout } from '../brc/layout'
 import { geocode } from '../brc/geocode'
+import type { ServiceCategory } from '../brc/services'
 import type { Poi, UnplacedListing } from '../data/types'
 
 /** Why a result cannot be gone to, said in the width of a result row. */
@@ -44,6 +45,8 @@ interface Option {
   label: string
   detail: string
   kind: 'address' | 'art' | 'camp' | 'service' | 'landmark' | 'saved'
+  /** Only set for `kind: 'service'` results — which icon it earns. See optionIcon. */
+  category?: ServiceCategory
   /** Absent for a listing that has no location to go to. */
   position?: Position
   poi?: Poi
@@ -110,6 +113,7 @@ export function SearchPanel({
           label: poi.name,
           detail: poi.subtitle ? [poi.subtitle, poi.address].filter(Boolean).join(' · ') : (poi.address ?? ''),
           kind: optionKind(poi.kind),
+          category: poi.category,
           position: poi.position,
           poi,
           score,
@@ -163,7 +167,7 @@ export function SearchPanel({
         return (
           <ListItem key={key} {...rest} dense>
             <ListItemIcon sx={{ minWidth: 36, color: option.kind === 'art' ? 'primary.main' : option.kind === 'camp' ? 'secondary.main' : 'text.secondary' }}>
-              {optionIcon(option.kind)}
+              {optionIcon(option)}
             </ListItemIcon>
             <ListItemText primary={option.label} secondary={option.detail} />
             <Chip
@@ -227,10 +231,21 @@ function optionKind(kind: Poi['kind']): Option['kind'] {
   return 'camp'
 }
 
-function optionIcon(kind: Option['kind']) {
+/**
+ * A `service` result covers everything from Rampart to The Temple to the
+ * airport — see `categorise()` in `brc/services.ts`. Only medical and ranger
+ * stations are actually emergency infrastructure; showing the same hospital
+ * cross on "The Temple" or "Box Office" was issue #43.
+ */
+// Exported for a focused unit test of the icon-selection logic (issue #43) —
+// exercising it through the full Autocomplete would mean driving MUI's open
+// state for no more signal than this gives directly.
+export function optionIcon({ kind, category }: Pick<Option, 'kind' | 'category'>) {
   if (kind === 'art') return <AutoAwesomeIcon fontSize="small" />
   if (kind === 'camp') return <GroupsIcon fontSize="small" />
   if (kind === 'saved') return <StarIcon fontSize="small" />
-  if (kind === 'service') return <LocalHospitalIcon fontSize="small" />
+  if (kind === 'service' && (category === 'medical' || category === 'ranger')) {
+    return <LocalHospitalIcon fontSize="small" />
+  }
   return <PlaceIcon fontSize="small" />
 }

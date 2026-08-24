@@ -16,9 +16,23 @@ export interface SurveyedPlace {
 
 /**
  * Icons are deliberately coarse. At 3am the only questions that matter are
- * "where is a toilet", "where is medical" and "where is a ranger".
+ * "where is a toilet", "where is medical" and "where is a ranger" — but the
+ * CPNS survey also names plenty of places that are not infrastructure to seek
+ * out in an emergency at all (The Temple, the airport, Box Office), and lumping
+ * those into a `civic` catch-all is what made them read as medical/ranger
+ * stations downstream (issue #43). `landmark`, `arrival` and `info` pull the
+ * known cases out of `civic`; `civic` remains the honest "we don't know" bucket
+ * for anything the patterns below don't recognise.
  */
-export type ServiceCategory = 'medical' | 'ranger' | 'toilet' | 'ice' | 'civic'
+export type ServiceCategory =
+  | 'medical'
+  | 'ranger'
+  | 'toilet'
+  | 'ice'
+  | 'landmark'
+  | 'arrival'
+  | 'info'
+  | 'civic'
 
 /**
  * Plazas, portals and promenades are already drawn from the layout, the Man is
@@ -33,6 +47,9 @@ export const CATEGORY_LABEL: Record<ServiceCategory, string> = {
   ranger: 'Rangers',
   toilet: 'Toilets',
   ice: 'Ice',
+  landmark: 'Landmark',
+  arrival: 'Arrival',
+  info: 'Info',
   civic: 'Civic',
 }
 
@@ -44,8 +61,9 @@ export const CATEGORY_LABEL: Record<ServiceCategory, string> = {
  * panel under it. Kept to what is plainly true of the category: a station's
  * own name already says which one it is.
  *
- * Nothing here for `civic`. "Playa Info", "Box Office" and "Airport" explain
- * themselves, and a line restating the name is worse than none.
+ * Nothing here for `civic`, `landmark`, `arrival` or `info`. "The Temple",
+ * "Box Office" and "Airport" explain themselves, and a line restating the
+ * name is worse than none.
  */
 export const CATEGORY_NOTE: Partial<Record<ServiceCategory, string>> = {
   ranger: 'Black Rock Rangers — non-confrontational help. Mediation, welfare checks, and where to report someone missing.',
@@ -61,6 +79,20 @@ export function categorise(name: string): ServiceCategory {
   if (/esd station|rampart|medical|clinic|first aid/.test(label)) return 'medical'
   if (/ranger/.test(label)) return 'ranger'
   if (/arctica|\bice\b/.test(label)) return 'ice'
+  // The Temple and named deep-playa reference points (e.g. "DMZ2") are places
+  // to visit, not infrastructure to seek out in an emergency — grouping them
+  // with medical/ranger stations under a generic "service" was issue #43.
+  if (/\btemple\b|\bdmz/.test(label)) return 'landmark'
+  // Where you enter, leave, park or check in: gates, will-call and parking
+  // lots, the census checkpoint, the airport, the bus depot. "Gate" and
+  // "transport" are kept as one category — a visitor asking "how do I get in
+  // or out" doesn't care which of the two it is.
+  if (/\bgate\b|\blot\b|box office|checkpoint|airport|burner express|\bbus\b/.test(label)) {
+    return 'arrival'
+  }
+  // Participant-facing info and services (bike loans, vehicle rules, walk-in
+  // camping) that read as "ask a question here", not "emergency here".
+  if (/yellow bike|mutant vehicle|\bdmv\b|walk-in camp/.test(label)) return 'info'
   return 'civic'
 }
 

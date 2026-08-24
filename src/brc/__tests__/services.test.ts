@@ -1,6 +1,6 @@
 import * as turf from '@turf/turf'
 import { describe, expect, it } from 'vitest'
-import { buildServices, SERVICE_UID, TOILET_UID, toiletPoints, type SurveyedPlace } from '../services'
+import { buildServices, categorise, SERVICE_UID, TOILET_UID, toiletPoints, type SurveyedPlace } from '../services'
 
 /**
  * An L-shaped (concave) ring. Its vertices are unevenly spread — three of six
@@ -155,5 +155,64 @@ describe('buildServices', () => {
     expect(uidC).not.toBe(uidABefore)
     expect(uidC).not.toBe(uidBBefore)
     expect(new Set(after.features.map((f) => f.properties?.uid)).size).toBe(3)
+  })
+
+  // Issue #43: the CPNS survey names plenty of real places that are not
+  // generic "civic services" — a landmark, arrival infrastructure, and
+  // participant-facing info all used to fall into the same `civic` bucket as
+  // an actual ranger/medical station, which is what sent them to the same
+  // icon downstream. These pin the fix at the category level.
+  describe('categorise (issue #43)', () => {
+    it('classifies The Temple as a landmark, not a medical/ranger station', () => {
+      expect(categorise('The Temple')).toBe('landmark')
+    })
+
+    it('classifies a named deep-playa reference point as a landmark', () => {
+      expect(categorise('Deep-Playa Music Zone / DMZ2')).toBe('landmark')
+    })
+
+    it('classifies gate/arrival infrastructure as arrival, not civic', () => {
+      expect(categorise('Gate Actual')).toBe('arrival')
+      expect(categorise('Box Office')).toBe('arrival')
+      expect(categorise('Will Call Lot')).toBe('arrival')
+      expect(categorise('D Lot')).toBe('arrival')
+      expect(categorise('Census Checkpoint')).toBe('arrival')
+    })
+
+    it('classifies transport as arrival', () => {
+      expect(categorise('Airport')).toBe('arrival')
+      expect(categorise('Burner Express Bus Depot')).toBe('arrival')
+    })
+
+    it('classifies participant services/info as info, not medical', () => {
+      expect(categorise('Yellow Bike Project')).toBe('info')
+      expect(categorise('Department of Mutant Vehicles')).toBe('info')
+      expect(categorise('Walk-In Camp')).toBe('info')
+    })
+
+    it('still falls back to civic for an unrecognised name', () => {
+      expect(categorise('Some Future Playa Thing')).toBe('civic')
+    })
+  })
+
+  it('carries the new categories through into built service features', () => {
+    const fc = buildServices({
+      features: [
+        place('The Temple', [0, 0]),
+        place('Gate Actual', [1, 1]),
+        place('Yellow Bike Project', [2, 2]),
+        place('Some Future Playa Thing', [3, 3]),
+      ],
+    })
+    const categoryOf = (name: string) =>
+      fc.features.find((f) => f.properties?.name === name)?.properties?.category
+    expect(categoryOf('The Temple')).toBe('landmark')
+    expect(categoryOf('Gate Actual')).toBe('arrival')
+    expect(categoryOf('Yellow Bike Project')).toBe('info')
+    expect(categoryOf('Some Future Playa Thing')).toBe('civic')
+    // Kept as `service`: promoting to a new `kind` would ripple into filters
+    // and helpers (e.g. App.tsx's isCivic()) outside this fix's reach. The
+    // richer `category` is what downstream UI now keys off instead.
+    expect(fc.features.every((f) => f.properties?.kind === 'service')).toBe(true)
   })
 })

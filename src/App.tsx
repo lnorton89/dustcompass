@@ -6,12 +6,15 @@ import {
   AppBar,
   Box,
   Button,
+  Chip,
   CircularProgress,
   CssBaseline,
   Snackbar,
   Stack,
   ThemeProvider,
+  ToggleButton,
   Toolbar,
+  Tooltip,
   TextField,
   Typography,
 } from '@mui/material'
@@ -51,11 +54,10 @@ import { shareLink } from './ui/share'
 import type { Poi, PoiKind } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
-import { paletteFor, type PlayaPalette, type ThemeMode } from './map/style'
+import type { ThemeMode } from './map/style'
 import { BRAND } from './brand'
 import { BrandMark } from './ui/BrandMark'
 import { PwaStatus } from './ui/PwaStatus'
-import { ControlButton, ControlDivider, ControlGroup } from './ui/ControlGroup'
 
 type Filter = PoiKind | 'toilets' | 'services' | 'favorites'
 

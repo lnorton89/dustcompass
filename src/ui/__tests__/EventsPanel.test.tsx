@@ -67,16 +67,26 @@ describe('EventsPanel · browsing past the initial page (#54)', () => {
     expect(screen.getByRole('button', { name: /load 50 more/i })).toBeDefined()
   })
 
-  it('makes every record past index 300 reachable by loading more', () => {
-    render(<EventsPanel {...baseProps} events={manyEvents} origin={undefined} locationStatus="idle" />)
+  it(
+    'makes every record past index 300 reachable by loading more',
+    () => {
+      render(<EventsPanel {...baseProps} events={manyEvents} origin={undefined} locationStatus="idle" />)
 
-    fireEvent.click(screen.getByRole('button', { name: /load 50 more/i }))
+      fireEvent.click(screen.getByRole('button', { name: /load 50 more/i }))
 
-    expect(screen.getByText('Event 300')).toBeDefined()
-    expect(screen.getByText('Event 349')).toBeDefined()
-    expect(screen.getByText('350 showing')).toBeDefined()
-    expect(screen.queryByRole('button', { name: /load.*more/i })).toBeNull()
-  })
+      expect(screen.getByText('Event 300')).toBeDefined()
+      expect(screen.getByText('Event 349')).toBeDefined()
+      expect(screen.getByText('350 showing')).toBeDefined()
+      expect(screen.queryByRole('button', { name: /load.*more/i })).toBeNull()
+    },
+    // The initial 300-item mount plus the re-render this click triggers for
+    // all 350 is a genuinely heavy synchronous jsdom render — real MUI
+    // ListItem/Typography/Chip trees, not a mock — and vitest's 5s default
+    // has been observed to trip under CI/sandbox load even though nothing
+    // here is actually waiting on anything async. A longer ceiling costs
+    // nothing when the runner isn't under load and avoids exactly that flake.
+    15000,
+  )
 
   it('resets back to the first page when the search term changes', () => {
     render(<EventsPanel {...baseProps} events={manyEvents} origin={undefined} locationStatus="idle" />)

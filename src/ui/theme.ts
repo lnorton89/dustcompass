@@ -37,6 +37,20 @@ export function playaTheme(mode: ThemeMode): Theme {
     },
     components: {
       MuiPaper: { styleOverrides: { root: { backgroundImage: 'none' } } },
+      // MUI inverts a snackbar's background on purpose, which puts a near-white
+      // slab in the middle of a dark interface. Two things break on it: the
+      // accent colour its own action buttons use fails contrast at 1.9:1, and
+      // in red night mode a white panel is exactly the flashlight this app
+      // exists to avoid. It uses the same surface as everything else instead.
+      MuiSnackbarContent: {
+        styleOverrides: {
+          root: ({ theme }) => ({
+            backgroundColor: theme.palette.background.paper,
+            color: theme.palette.text.primary,
+            backgroundImage: 'none',
+          }),
+        },
+      },
       // MUI's default filled chip is neutral grey, which in night mode is both
       // a contrast failure against the red text and a hole in the palette —
       // one grey control in an otherwise entirely red interface.

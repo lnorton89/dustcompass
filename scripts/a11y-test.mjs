@@ -68,8 +68,21 @@ async function ready(page) {
   await page.getByLabel('Close events').click()
   await page.waitForTimeout(500)
 
+  // Take a camp from the year's own listings. Naming one keeps working right
+  // up until the placement changes, and then fails for a reason that has
+  // nothing to do with accessibility.
+  const campName = await page.evaluate(async (year) => {
+    const root = window.location.pathname.replace(/[/]$/, '')
+    const camps = await (await fetch(`${root}/data/${year}/camp.json`)).json()
+    const placed = camps.filter(
+      (camp) => camp.location_string?.includes('&') && /^[\w' -]{6,28}$/.test(camp.name ?? ''),
+    )
+    return placed[Math.floor(placed.length / 2)]?.name
+  }, process.env.NEXT_PUBLIC_DATA_YEAR ?? '2026')
+  if (!campName) throw new Error('No addressed camp in the published listings to audit with.')
+
   const search = page.getByPlaceholder(/Camp, art, or an address/)
-  await search.fill('Pink Fuzzy Monkey')
+  await search.fill(campName)
   await page.waitForTimeout(700)
   await audit(page, 'search suggestions')
   await page.keyboard.press('ArrowDown')

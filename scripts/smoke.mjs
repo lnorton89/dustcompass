@@ -38,6 +38,20 @@ page.on('console', (m) => {
   if (m.type() === 'error' && !external(url)) problems.push(`console: ${m.text()} ${url}`)
 })
 
+/*
+ * The first-run explainer shows once per browser profile and would sit in
+ * front of every assertion below. Marked as already seen before the app boots,
+ * rather than clicked away after: this run is about the forty flows behind it,
+ * and the dialog itself is covered by the accessibility pass.
+ */
+await page.addInitScript(() => {
+  try {
+    localStorage.setItem('dust-compass:first-run:1', 'seen')
+  } catch {
+    /* private-mode storage throws; the dialog is harmless if it appears */
+  }
+})
+
 await page.goto(url, { waitUntil: 'load' })
 await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
 await page.waitForTimeout(3500)
@@ -66,7 +80,11 @@ assert(await page.getByTestId('api-disclaimer').isVisible(), 'required API discl
 // every launch turns an explanation into something to swat away each time.
 const embargoNotice = page.getByText(/embargoed until Gates open/)
 if (await embargoNotice.count()) {
-  await page.locator('[class*=MuiAlert-root] button').first().click()
+  // Reached by its accessible name rather than by the class of whatever
+  // component happens to draw it. It used to be a MUI Alert and is now a plain
+  // themed surface, because `severity="info"` painted a saturated blue
+  // billboard across an app made of ember, teal and dust.
+  await page.getByRole('button', { name: 'Dismiss' }).click()
   await page.waitForTimeout(400)
   await page.reload({ waitUntil: 'load' })
   await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
@@ -201,7 +219,11 @@ const eventRows = await page.locator('.MuiDrawer-root .MuiListItemButton-root').
 assert(eventRows > 0, `events listed in the Now window (${eventRows})`)
 
 // With a fix available, events can be ordered by how far away they are.
+// Counting immediately after the panel opens is a race — the rows arrive before
+// the controls above them, and an absent button and an unrendered one look the
+// same to count().
 const closest = page.getByRole('button', { name: 'Closest' })
+await closest.waitFor({ timeout: 10000 }).catch(() => {})
 if (await closest.count()) {
   await closest.click()
   await page.waitForTimeout(700)
@@ -274,7 +296,10 @@ const stored = await page.evaluate(() => localStorage.getItem('playa-map.favorit
 assert(Boolean(stored) && stored !== '[]', `favourite persisted (${stored})`)
 
 // Walk and bike estimates should both be present in the drawer.
-const drawerText = await page.locator('.MuiDrawer-root').last().innerText()
+// By its own handle rather than by MUI's class: on a wide screen the listing
+// is a column beside the map, not a drawer over it, so there is no
+// `.MuiDrawer-root` to find.
+const drawerText = await page.getByTestId('detail-panel').innerText()
 assert(/\bmin\b|\bh\b/.test(drawerText), 'drawer shows travel time')
 
 // Close the listing so the map is clickable again.
@@ -384,7 +409,15 @@ if (contested) {
   // a canvas to hold still forever. It never will.
   await page.locator('canvas').click({ position: { x: contested.x, y: contested.y }, force: true })
   await page.waitForTimeout(900)
-  const opened = await page.locator('.MuiDrawer-root h6, .MuiDrawer-root h5').first().innerText().catch(() => '')
+  // Scoped to the panel's own handle: on a wide screen the listing is a column
+  // beside the map rather than a drawer over it, so `.MuiDrawer-root` misses it
+  // and every name read out of it came back empty.
+  const opened = await page
+    .getByTestId('detail-panel')
+    .locator('h5, h6')
+    .first()
+    .innerText()
+    .catch(() => '')
   assert(
     opened.trim() === contested.name,
     `tapping a shared pin opens the camp it is labelled with (read "${contested.name}", opened "${opened.trim()}")`,
@@ -588,7 +621,15 @@ await shared.close()
   )
   await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
   await page.waitForTimeout(3000)
-  const opened = await page.locator('.MuiDrawer-root h5, .MuiDrawer-root h6').first().innerText().catch(() => '')
+  // Scoped to the panel's own handle: on a wide screen the listing is a column
+  // beside the map rather than a drawer over it, so `.MuiDrawer-root` misses it
+  // and every name read out of it came back empty.
+  const opened = await page
+    .getByTestId('detail-panel')
+    .locator('h5, h6')
+    .first()
+    .innerText()
+    .catch(() => '')
   assert(
     opened.trim() === camp.name,
     `a shared listing link opens that listing (wanted "${camp.name}", got "${opened.trim()}")`,

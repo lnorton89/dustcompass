@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Box, Chip, Tooltip, Typography } from '@mui/material'
 import CloudDoneIcon from '@mui/icons-material/CloudDone'
 import CloudOffIcon from '@mui/icons-material/CloudOff'
@@ -7,27 +7,75 @@ import NewReleasesIcon from '@mui/icons-material/NewReleases'
 import SyncProblemIcon from '@mui/icons-material/SyncProblem'
 import { BASE_PATH, DATA_YEAR, assetUrl } from '../config'
 
-type Status = 'checking' | 'caching' | 'ready' | 'offline' | 'update' | 'incomplete' | 'unsupported'
+type Support = 'checking' | 'supported' | 'unsupported'
 type WorkerMessage =
   | { type: 'CACHE_PROGRESS'; completed: number; total: number }
   | { type: 'OFFLINE_READY'; total: number }
   | { type: 'CACHE_FAILED'; completed: number; total: number; url: string }
+  | { type: 'DATA_REFRESHED' }
+
+/**
+ * Connectivity, worker support, install progress and cache readiness used to
+ * live in one `status` string, with the online/offline listeners free to
+ * overwrite whichever value happened to be there. That produced several false
+ * readings: going offline during a failed install claimed a usable saved map
+ * existed; coming back online promoted an unsupported browser or an
+ * incomplete cache straight to "Ready offline". Tracked as separate
+ * dimensions, a network event can only ever change `online`.
+ */
+interface PwaState {
+  online: boolean
+  support: Support
+  /** True once *some* worker of the current version has fully installed. */
+  cacheReady: boolean
+  /** A precache attempt (first install or an update) is in progress. */
+  installing: boolean
+  /** The most recent precache attempt failed. Cleared by the next attempt or a success. */
+  installFailed: boolean
+  progress?: { completed: number; total: number }
+  waiting?: ServiceWorker
+}
+
+type Status = 'checking' | 'caching' | 'ready' | 'offline' | 'update' | 'incomplete' | 'updateFailed' | 'unsupported'
+
+/** What the chip/status line shows, derived from every dimension at once. */
+function deriveStatus(state: PwaState): Status {
+  if (state.support === 'checking') return 'checking'
+  if (state.support === 'unsupported') return 'unsupported'
+  if (state.waiting) return 'update'
+  if (state.installing) return 'caching'
+  // A failed attempt with no ready cache behind it is a real "nothing is
+  // saved" state. A failed *update* attempt with an already-ready cache
+  // means the existing offline map still works — that is worth saying
+  // differently from "Not saved", which would claim it does not.
+  if (state.installFailed) return state.cacheReady ? 'updateFailed' : 'incomplete'
+  if (!state.online) return state.cacheReady ? 'offline' : 'checking'
+  return state.cacheReady ? 'ready' : 'checking'
+}
 
 export function PwaStatus({ compact }: { compact: boolean }) {
-  const [status, setStatus] = useState<Status>(initialStatus)
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine))
+  const [support, setSupport] = useState<Support>(initialSupport)
+  const [cacheReady, setCacheReady] = useState(() => process.env.NODE_ENV !== 'production')
+  const [installing, setInstalling] = useState(false)
+  const [installFailed, setInstallFailed] = useState(false)
   const [progress, setProgress] = useState<{ completed: number; total: number }>()
   const [waiting, setWaiting] = useState<ServiceWorker>()
 
   useEffect(() => {
-    const online = () => setStatus((current) => (current === 'offline' ? 'ready' : current))
-    const offline = () => setStatus('offline')
-    window.addEventListener('online', online)
-    window.addEventListener('offline', offline)
+    // Network events change connectivity only. They must never manufacture
+    // or erase cache readiness — that is what silently turned an incomplete
+    // or unsupported install into "Ready offline" the moment a device came
+    // back online.
+    const goOnline = () => setOnline(true)
+    const goOffline = () => setOnline(false)
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
 
     if (process.env.NODE_ENV !== 'production' || !('serviceWorker' in navigator)) {
       return () => {
-        window.removeEventListener('online', online)
-        window.removeEventListener('offline', offline)
+        window.removeEventListener('online', goOnline)
+        window.removeEventListener('offline', goOffline)
       }
     }
 
@@ -42,58 +90,74 @@ export function PwaStatus({ compact }: { compact: boolean }) {
       if (!isWorkerMessage(event.data)) return
       if (event.data.type === 'CACHE_PROGRESS') {
         setProgress({ completed: event.data.completed, total: event.data.total })
-        setStatus('caching')
+        setInstalling(true)
+        setInstallFailed(false)
       }
       if (event.data.type === 'CACHE_FAILED') {
-        // The install aborted, so no worker will ever activate. Say so instead
-        // of leaving a progress count frozen at the number it died on.
+        // The install aborted, so no worker will ever activate from it. Say
+        // so instead of leaving a progress count frozen at the number it
+        // died on — but do not touch `cacheReady`: whatever cache an older,
+        // still-active worker already has is untouched by this failure.
         setProgress({ completed: event.data.completed, total: event.data.total })
-        setStatus('incomplete')
+        setInstalling(false)
+        setInstallFailed(true)
       }
-      if (event.data.type === 'OFFLINE_READY') setStatus(navigator.onLine ? 'ready' : 'offline')
+      if (event.data.type === 'OFFLINE_READY') {
+        setCacheReady(true)
+        setInstalling(false)
+        setInstallFailed(false)
+        setProgress(undefined)
+      }
     }
     navigator.serviceWorker.addEventListener('controllerchange', controllerChanged)
     navigator.serviceWorker.addEventListener('message', message)
 
-    void navigator.serviceWorker.register(assetUrl('sw.js'), { scope: `${BASE_PATH}/` }).then((registration) => {
-      const inspect = () => {
-        if (registration.waiting) {
-          setWaiting(registration.waiting)
-          setStatus('update')
+    setSupport('supported')
+    void navigator.serviceWorker
+      .register(assetUrl('sw.js'), { scope: `${BASE_PATH}/` })
+      .then((registration) => {
+        const inspect = () => {
+          if (registration.waiting) setWaiting(registration.waiting)
         }
-      }
-      inspect()
-      registration.addEventListener('updatefound', () => {
-        setStatus('caching')
-        registration.installing?.addEventListener('statechange', inspect)
+        inspect()
+        registration.addEventListener('updatefound', () => {
+          setInstalling(true)
+          registration.installing?.addEventListener('statechange', inspect)
+        })
+        return navigator.serviceWorker.ready
       })
-      return navigator.serviceWorker.ready
-    }).then(() => setStatus((current) =>
-      current === 'update' || current === 'incomplete'
-        ? current
-        : navigator.onLine
-          ? 'ready'
-          : 'offline',
-    ))
-      .catch(() => setStatus('unsupported'))
+      .then((registration) => {
+        // A returning session has no fresh OFFLINE_READY to listen for — that
+        // only ever broadcasts at the moment *this* worker activates, which
+        // for an already-installed worker already happened in an earlier
+        // page load. An active controller by the time registration settles
+        // is the only signal available that some past install succeeded.
+        if (registration.active) setCacheReady(true)
+      })
+      .catch(() => setSupport('unsupported'))
 
     return () => {
-      window.removeEventListener('online', online)
-      window.removeEventListener('offline', offline)
+      window.removeEventListener('online', goOnline)
+      window.removeEventListener('offline', goOffline)
       navigator.serviceWorker.removeEventListener('controllerchange', controllerChanged)
       navigator.serviceWorker.removeEventListener('message', message)
     }
   }, [])
 
+  const status = useMemo(
+    () => deriveStatus({ online, support, cacheReady, installing, installFailed, progress, waiting }),
+    [online, support, cacheReady, installing, installFailed, progress, waiting],
+  )
+
   const view = statusView(status, progress)
   const title = `${view.detail} · ${DATA_YEAR} map`
   const description = `${view.label}. ${view.detail}. ${DATA_YEAR} map data.`
 
-  // Only two of these states want anything from the user, and only those two
-  // are shaped like a button. Wearing the same pill for "everything is fine"
-  // put a permanent green control in the toolbar that did nothing when pressed
-  // and outshouted the filters beside it.
-  if (status === 'update' || status === 'incomplete') {
+  // Only these want anything from the user, and only those are shaped like a
+  // button. Wearing the same pill for "everything is fine" put a permanent
+  // green control in the toolbar that did nothing when pressed and
+  // outshouted the filters beside it.
+  if (status === 'update' || status === 'incomplete' || status === 'updateFailed') {
     return (
       <Tooltip title={title}>
         <Chip
@@ -154,10 +218,9 @@ export function PwaStatus({ compact }: { compact: boolean }) {
   )
 }
 
-function initialStatus(): Status {
+function initialSupport(): Support {
   if (typeof navigator === 'undefined') return 'checking'
-  if (!navigator.onLine) return 'offline'
-  if (process.env.NODE_ENV !== 'production') return 'ready'
+  if (process.env.NODE_ENV !== 'production') return 'supported'
   return 'serviceWorker' in navigator ? 'checking' : 'unsupported'
 }
 
@@ -165,6 +228,7 @@ function isWorkerMessage(value: unknown): value is WorkerMessage {
   if (typeof value !== 'object' || value === null || !('type' in value)) return false
   const candidate = value as Partial<WorkerMessage>
   if (candidate.type === 'OFFLINE_READY') return typeof candidate.total === 'number'
+  if (candidate.type === 'DATA_REFRESHED') return true
   if (candidate.type !== 'CACHE_PROGRESS' && candidate.type !== 'CACHE_FAILED') return false
   return typeof candidate.completed === 'number' && typeof candidate.total === 'number'
 }
@@ -198,6 +262,16 @@ function statusView(status: Status, progress?: { completed: number; total: numbe
           : 'The map is not saved for offline use. Tap to try again while you have signal',
         color: 'error' as const,
         tone: 'error.main',
+        icon: <SyncProblemIcon />,
+      }
+    case 'updateFailed':
+      return {
+        label: 'Update failed',
+        detail: progress
+          ? `Only ${progress.completed} of ${progress.total} pieces of the newest map saved — the version already on this device still works offline. Tap to try again`
+          : 'The newest map could not be saved — the version already on this device still works offline. Tap to try again',
+        color: 'warning' as const,
+        tone: 'warning.main',
         icon: <SyncProblemIcon />,
       }
     case 'unsupported':

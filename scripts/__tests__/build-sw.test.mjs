@@ -1,0 +1,274 @@
+/**
+ * `build-sw.mjs` writes its worker as a big generated string, so a bug in it
+ * only shows up once that string actually runs as a service worker — nothing
+ * about it is type-checked or unit-tested otherwise. These tests generate the
+ * real worker against a scratch build output, then execute it in a sandboxed
+ * `vm` context against a small in-memory Cache Storage double, so the install
+ * failure and live-data revalidation paths are exercised as real code rather
+ * than reasoned about from reading the template.
+ */
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import vm from 'node:vm'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
+
+/** Generates the real service worker once against a minimal `out/` tree. */
+function generateWorker() {
+  const dir = mkdtempSync(join(tmpdir(), 'dustcompass-sw-'))
+  mkdirSync(join(dir, 'out', 'data', '2025'), { recursive: true })
+  writeFileSync(join(dir, 'out', 'index.html'), '<html></html>')
+  writeFileSync(join(dir, 'out', 'data', '2025', 'layout.json'), '{}')
+  writeFileSync(join(dir, 'out', 'data', '2025', 'camp.json'), '[]')
+  execFileSync(process.execPath, [join(repoRoot, 'scripts', 'build-sw.mjs')], { cwd: dir })
+  const source = readFileSync(join(dir, 'out', 'sw.js'), 'utf8')
+  rmSync(dir, { recursive: true, force: true })
+  return source
+}
+
+let workerSource
+
+beforeAll(() => {
+  workerSource = generateWorker()
+})
+
+const ORIGIN = 'https://dustcompass.test'
+
+// The real Cache API resolves a plain string (or a Request with a relative
+// URL) against the worker's own origin before using it as a key — which is
+// exactly why a precache entry stored as the relative path "/" is found by a
+// fetch event whose request.url is absolute. This double keeps that
+// normalization so both sides of the real code path line up here too.
+const keyFor = (request) => {
+  const raw = typeof request === 'string' ? request : request.url
+  try {
+    return new URL(raw, ORIGIN).href
+  } catch {
+    return raw
+  }
+}
+
+class FakeCache {
+  constructor() {
+    this.store = new Map()
+  }
+  async match(request) {
+    return this.store.get(keyFor(request))
+  }
+  async put(request, response) {
+    this.store.set(keyFor(request), response)
+  }
+  async keys() {
+    return [...this.store.keys()]
+  }
+}
+
+class FakeCacheStorage {
+  constructor() {
+    this.byName = new Map()
+  }
+  async open(name) {
+    if (!this.byName.has(name)) this.byName.set(name, new FakeCache())
+    return this.byName.get(name)
+  }
+  async has(name) {
+    return this.byName.has(name)
+  }
+  async delete(name) {
+    return this.byName.delete(name)
+  }
+  async keys() {
+    return [...this.byName.keys()]
+  }
+}
+
+/**
+ * Real `Request`/`Response` objects insist on an absolute URL to construct,
+ * which the precache list deliberately is not (its entries are resolved
+ * against the worker's own origin, same as in a real browser). This stand-in
+ * only needs to carry `.url` through to the fetch mock and the fake cache.
+ */
+class FakeRequest {
+  constructor(url, init = {}) {
+    this.url = typeof url === 'string' ? url : url.url
+    this.method = init.method ?? 'GET'
+    this.mode = init.mode
+  }
+}
+
+/** Runs the generated worker source in a fresh sandboxed scope. */
+function loadWorker({ fetchImpl }) {
+  const handlers = {}
+  const notifications = []
+  const sandbox = {
+    console,
+    Request: FakeRequest,
+    Response,
+    AbortSignal,
+    URL,
+    setTimeout,
+    fetch: (...args) => fetchImpl(...args),
+    caches: new FakeCacheStorage(),
+    self: undefined,
+  }
+  sandbox.self = {
+    addEventListener: (type, handler) => {
+      handlers[type] = handler
+    },
+    clients: {
+      matchAll: async () => [{ postMessage: (message) => notifications.push(message) }],
+      claim: async () => {},
+    },
+    location: { origin: ORIGIN },
+    skipWaiting: async () => {},
+  }
+  vm.createContext(sandbox)
+  vm.runInContext(workerSource, sandbox)
+
+  const fireInstall = async () => {
+    let promise
+    await handlers.install({ waitUntil: (p) => (promise = p) })
+    return promise
+  }
+  const fireActivate = async () => {
+    let promise
+    await handlers.activate({ waitUntil: (p) => (promise = p) })
+    return promise
+  }
+  const fireFetch = async (path, init) => {
+    let promise
+    // A real intercepted fetch event's request.url is always absolute.
+    const request = new FakeRequest(new URL(path, ORIGIN).href, init)
+    await handlers.fetch({
+      request,
+      respondWith: (p) => (promise = p),
+      waitUntil: (p) => p, // background work is awaited explicitly in tests where it matters
+    })
+    return promise
+  }
+
+  return { caches: sandbox.caches, notifications, fireInstall, fireActivate, fireFetch }
+}
+
+const dataUrl = (name) => `/data/2025/${name}`
+
+describe('generated service worker', () => {
+  it('is valid, executable JavaScript', () => {
+    expect(() => new vm.Script(workerSource)).not.toThrow()
+  })
+
+  it('precaches every asset and reports OFFLINE_READY on a clean install', async () => {
+    const worker = loadWorker({ fetchImpl: async (req) => new Response('ok', { status: 200 }) })
+    await expect(worker.fireInstall()).resolves.toBeUndefined()
+    await worker.fireActivate()
+    expect(worker.notifications.some((m) => m.type === 'OFFLINE_READY')).toBe(true)
+  })
+
+  /**
+   * The bug behind #32: a service-worker-only code change used to reuse the
+   * active worker's CACHE_NAME, so a failed *install* of the new worker could
+   * delete a cache the old, still-active worker actually depends on. The
+   * digest now covers the worker's own source, but the cleanup itself should
+   * also never remove a cache that existed before this attempt started.
+   */
+  it('does not delete a cache that already existed when a fresh install fails', async () => {
+    const worker = loadWorker({ fetchImpl: async () => new Response('nope', { status: 500 }) })
+    // Simulate the cache already belonging to an active worker of this exact
+    // version before this (re)install attempt even begins.
+    const cacheNameMatch = /CACHE_NAME = "(dust-compass-[a-f0-9]+)"/.exec(workerSource)
+    const cacheName = cacheNameMatch[1]
+    const preexisting = await worker.caches.open(cacheName)
+    await preexisting.put('/marker', new Response('already here'))
+
+    await expect(worker.fireInstall()).rejects.toThrow()
+
+    expect(await worker.caches.has(cacheName)).toBe(true)
+    expect(await preexisting.match('/marker')).toBeDefined()
+  })
+
+  it('deletes a cache this attempt created itself when install fails', async () => {
+    const worker = loadWorker({ fetchImpl: async () => new Response('nope', { status: 500 }) })
+    const cacheNameMatch = /CACHE_NAME = "(dust-compass-[a-f0-9]+)"/.exec(workerSource)
+    const cacheName = cacheNameMatch[1]
+
+    await expect(worker.fireInstall()).rejects.toThrow()
+
+    expect(await worker.caches.has(cacheName)).toBe(false)
+  })
+
+  /**
+   * The bug behind #33: writing each live-refreshed data file into the
+   * versioned cache as its own request resolved could leave that cache
+   * holding a mix of files from different deployments. The live cache is
+   * now separate and only ever replaced as a complete set.
+   */
+  it('promotes a live-data refresh only when every file in the revision succeeds', async () => {
+    const worker = loadWorker({
+      fetchImpl: async (req) => {
+        const url = typeof req === 'string' ? req : req.url
+        if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+        // The install-time precache asset (the app shell at "/").
+        return new Response('<html></html>', { status: 200 })
+      },
+    })
+    await worker.fireInstall()
+
+    const response = await worker.fireFetch(dataUrl('layout.json'))
+    expect(response).toBeDefined()
+    // The background revalidation is fired via waitUntil inside the fetch
+    // handler itself; give its internal promise chain a tick to settle.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(worker.notifications.some((m) => m.type === 'DATA_REFRESHED')).toBe(true)
+    const live = await worker.caches.open('dust-compass-live-data')
+    expect(await live.match(dataUrl('layout.json'))).toBeDefined()
+    expect(await live.match(dataUrl('camp.json'))).toBeDefined()
+  })
+
+  it('does not promote a partial revision when one file in it fails', async () => {
+    // camp.json must still succeed once, for install's own precache — the
+    // failure under test belongs to the later, separate live-data refresh.
+    let campRequests = 0
+    const worker = loadWorker({
+      fetchImpl: async (req) => {
+        const url = typeof req === 'string' ? req : req.url
+        if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) {
+          campRequests += 1
+          if (campRequests === 1) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+          throw new Error('network down')
+        }
+        return new Response('<html></html>', { status: 200 })
+      },
+    })
+    await worker.fireInstall()
+
+    await worker.fireFetch(dataUrl('layout.json'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(worker.notifications.some((m) => m.type === 'DATA_REFRESHED')).toBe(false)
+    const live = await worker.caches.open('dust-compass-live-data')
+    // Neither file was promoted — not layout.json (which did succeed) and
+    // certainly not camp.json (which did not). A half-applied revision is
+    // exactly the mixed snapshot this is meant to prevent.
+    expect(await live.match(dataUrl('layout.json'))).toBeUndefined()
+    expect(await live.match(dataUrl('camp.json'))).toBeUndefined()
+  })
+
+  it('keeps the live-data cache through activate\'s stale-cache cleanup', async () => {
+    const worker = loadWorker({ fetchImpl: async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) })
+    const live = await worker.caches.open('dust-compass-live-data')
+    await live.put(dataUrl('layout.json'), new Response('{"kept":true}'))
+
+    await worker.fireInstall()
+    await worker.fireActivate()
+
+    expect(await worker.caches.has('dust-compass-live-data')).toBe(true)
+    expect(await live.match(dataUrl('layout.json'))).toBeDefined()
+  })
+})

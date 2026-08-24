@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const output = join(process.cwd(), 'out')
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? '').replace(/\/$/, '')
@@ -40,6 +41,13 @@ for (const file of files.sort()) {
   assets.push(`${basePath}/${route}`)
 }
 
+// This file's own source goes into the digest too, not only the precached
+// asset bytes. Precached bytes are unchanged by a commit that only touches
+// worker *logic* (retry counts, cache routing, cleanup rules) — without this,
+// such a commit reuses the previous version's CACHE_NAME. The new worker then
+// opens and can write into a cache an old, still-active worker depends on,
+// and — worse — a failed install's cleanup can delete it.
+digest.update(await readFile(fileURLToPath(import.meta.url)))
 const cacheName = `dust-compass-${digest.digest('hex').slice(0, 12)}`
 const shell = `${basePath}/`
 const dataPrefix = `${basePath}/data/`
@@ -48,6 +56,18 @@ const CACHE_NAME = ${JSON.stringify(cacheName)};
 const PRECACHE = ${JSON.stringify(assets, null, 2)};
 const SHELL = ${JSON.stringify(shell)};
 const DATA_PREFIX = ${JSON.stringify(dataPrefix)};
+// The precached data files bundled with *this* build — a manifest of exactly
+// which URLs make up one coherent data revision, so a background refresh can
+// be judged complete or incomplete as a set rather than file by file.
+const DATA_FILES = PRECACHE.filter((url) => url.indexOf(DATA_PREFIX) === 0);
+// Deliberately not scoped to CACHE_NAME. CACHE_NAME's bytes are hashed into
+// its own name specifically so that name is a promise: this exact content,
+// nothing else. Writing a live-fetched file into it — even one that merely
+// replaced an older, equally out-of-date file — would break that promise the
+// moment the two diverge from what was actually built and tested together.
+// Live data lives in its own cache that persists across worker versions.
+const LIVE_DATA_CACHE = 'dust-compass-live-data';
+const LIVE_STAGING_CACHE = 'dust-compass-live-data-staging';
 
 async function notify(message) {
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
@@ -90,6 +110,15 @@ async function store(cache, url) {
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     let completed = 0;
+    // Whether a cache by this name already existed before this attempt
+    // started. CACHE_NAME is a hash of both the precached bytes and this
+    // worker's own source, so in the ordinary case a name collision with an
+    // existing cache means this exact version, byte for byte, already
+    // installed — most likely the currently *active* worker's own cache,
+    // reopened here because the browser is retrying/reinstalling it. Deleting
+    // that on failure would take down a cache other code may already be
+    // depending on, which is exactly the bug this guards against.
+    const preexisting = await caches.has(CACHE_NAME);
     try {
       const cache = await caches.open(CACHE_NAME);
       const queue = PRECACHE.slice();
@@ -118,10 +147,11 @@ self.addEventListener('install', (event) => {
       // already full, and that used to leave the chip saying "Preparing
       // offline" forever — which reads as progress, not as failure.
       await notify({ type: 'CACHE_FAILED', completed, total: PRECACHE.length });
-      // A half-filled cache is never the active worker's, since the name is a
-      // hash of this build. Leaving it behind makes the next quota failure more
-      // likely for the one person already struggling with signal.
-      await caches.delete(CACHE_NAME);
+      // A half-filled cache this attempt created from nothing is never the
+      // active worker's — clean it up so the next quota failure is not made
+      // more likely for the one person already struggling with signal. A
+      // cache that already existed before this attempt began is left alone.
+      if (!preexisting) await caches.delete(CACHE_NAME);
       throw error;
     }
     // Deliberately no skipWaiting here. Taking over the moment a new version
@@ -134,8 +164,12 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
+    // The live-data cache is deliberately not versioned by build — it is
+    // meant to persist across worker updates, not be swept as though it were
+    // one more stale precache.
+    const KEPT = new Set([CACHE_NAME, LIVE_DATA_CACHE, LIVE_STAGING_CACHE]);
     const names = await caches.keys();
-    await Promise.all(names.filter((name) => name.startsWith('dust-compass-') && name !== CACHE_NAME).map((name) => caches.delete(name)));
+    await Promise.all(names.filter((name) => name.startsWith('dust-compass-') && !KEPT.has(name)).map((name) => caches.delete(name)));
     await self.clients.claim();
     await notify({ type: 'OFFLINE_READY', total: PRECACHE.length });
   })());
@@ -152,24 +186,71 @@ async function fromCache(request) {
 }
 
 /**
+ * A live-fetched data file that has not yet been promoted, if the whole
+ * revision it belongs to fetched cleanly. Falls back to the byte-for-byte
+ * build-time snapshot in the precache, which is always internally consistent
+ * with the app code currently running, if a live revision was never
+ * completed or a newer request beat it to a URL not yet promoted.
+ */
+async function fromLiveOrPrecache(request) {
+  const live = await caches.open(LIVE_DATA_CACHE);
+  return (await live.match(request)) || fromCache(request);
+}
+
+let refreshing = null;
+
+/**
  * The listings keep moving after a build ships — most importantly, art
  * locations become publishable when Gates open. Serve what is cached so the
- * map is instant and works offline, and quietly refresh it behind the reader.
- * Only a same-origin JSON response replaces anything: a captive portal answers
- * every request with its own login page, and it answers with HTML.
+ * map is instant and works offline, and refresh the *whole* data revision
+ * behind the reader, one background attempt at a time.
+ *
+ * Every file in the manifest is staged before any of them is promoted. Only
+ * a same-origin JSON response counts as a successful fetch — a captive
+ * portal answers every request with its own 200 OK login page, and it
+ * answers with HTML. Promoting file-by-file as each request resolved used to
+ * let one deployment's camp/event data sit in the same cache as another
+ * deployment's layout/services — a combination that was never built or
+ * tested together — the moment a background refresh partially succeeded.
  */
-async function refreshData(request) {
-  try {
-    const response = await fetch(request, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-    const type = response.headers.get('content-type') || '';
-    if (response.ok && type.includes('json')) {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(request, response.clone());
+function refreshLiveData() {
+  if (refreshing) return refreshing;
+  refreshing = (async () => {
+    try {
+      const staging = await caches.open(LIVE_STAGING_CACHE);
+      const results = await Promise.all(DATA_FILES.map(async (url) => {
+        try {
+          const response = await fetch(url, {
+            cache: 'reload',
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          });
+          const type = response.headers.get('content-type') || '';
+          if (!response.ok || !type.includes('json')) return false;
+          await staging.put(url, response.clone());
+          return true;
+        } catch {
+          return false;
+        }
+      }));
+      if (results.length > 0 && results.every(Boolean)) {
+        // The complete revision fetched cleanly — promote it as one unit
+        // rather than merging it entry-by-entry into whatever the live
+        // cache already held, which is exactly how a partial earlier
+        // attempt and this one could otherwise mix.
+        await caches.delete(LIVE_DATA_CACHE);
+        const live = await caches.open(LIVE_DATA_CACHE);
+        for (const url of DATA_FILES) {
+          const cached = await staging.match(url);
+          if (cached) await live.put(url, cached);
+        }
+        await notify({ type: 'DATA_REFRESHED' });
+      }
+      await caches.delete(LIVE_STAGING_CACHE);
+    } finally {
+      refreshing = null;
     }
-    return response;
-  } catch {
-    return undefined;
-  }
+  })();
+  return refreshing;
 }
 
 self.addEventListener('fetch', (event) => {
@@ -226,12 +307,22 @@ self.addEventListener('fetch', (event) => {
 
   if (url.pathname.startsWith(DATA_PREFIX)) {
     event.respondWith((async () => {
-      const cached = await fromCache(request);
+      if (DATA_FILES.indexOf(url.pathname) === -1) {
+        // Outside this build's known data manifest — not part of the
+        // all-or-nothing revision, so just fetch it plainly.
+        try {
+          return await fetch(request);
+        } catch {
+          return (await fromCache(request)) || Response.error();
+        }
+      }
+      const cached = await fromLiveOrPrecache(request);
       if (cached) {
-        event.waitUntil(refreshData(request));
+        event.waitUntil(refreshLiveData());
         return cached;
       }
-      return (await refreshData(request)) || fetch(request);
+      await refreshLiveData();
+      return (await fromLiveOrPrecache(request)) || fetch(request);
     })());
     return;
   }

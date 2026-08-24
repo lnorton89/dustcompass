@@ -47,8 +47,19 @@ export function usePlayaData() {
     setAttempt((current) => current + 1)
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
+  /**
+   * Shared by the initial/retry load and the silent background refresh
+   * below. `clear` decides whether to blank the screen back to the loading
+   * spinner first — appropriate for an explicit retry after a failure, wrong
+   * for a background refresh, which should keep showing the still-good data
+   * already on screen until (and unless) the new fetch actually succeeds.
+   */
+  const load = useCallback((clear: boolean) => {
+    const cancelled = { current: false }
+    if (clear) {
+      setError(undefined)
+      setData(undefined)
+    }
     const base = assetUrl(`data/${DATA_YEAR}`)
 
     Promise.all([
@@ -64,7 +75,7 @@ export function usePlayaData() {
       loadJson<GeoJSON.FeatureCollection>(`${base}/city_blocks.geojson`).catch(() => empty()),
     ])
       .then(([layout, rawArt, rawCamps, events, serviceSpecs, rawToilets, dates, outlines]) => {
-        if (cancelled) return
+        if (cancelled.current) return
         const embargo = embargoState(embargoWindowForYear(DATA_YEAR))
         const art = applyEmbargo(rawArt, embargo.artReleased)
         const camps = applyEmbargo(rawCamps, embargo.campsReleased)
@@ -90,13 +101,32 @@ export function usePlayaData() {
           campOutlines: outlines,
           embargo,
         })
+        setError(undefined)
       })
-      .catch((cause) => !cancelled && setError(cause as Error))
+      .catch((cause) => !cancelled.current && setError(cause as Error))
 
     return () => {
-      cancelled = true
+      cancelled.current = true
     }
-  }, [attempt])
+  }, [])
+
+  useEffect(() => load(true), [attempt, load])
+
+  // The service worker refreshes camp/event/listing data in the background
+  // and, once a complete revision has fetched cleanly, tells every open tab
+  // about it — otherwise a scheduled data update stayed invisible for the
+  // rest of whatever session was already open, even though the cache behind
+  // it had already moved on. Re-running the fetch now picks it up, since it
+  // is served from the (now-updated) cache rather than the network — without
+  // blanking the screen back to the loading state in the meantime.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    const onMessage = (event: MessageEvent) => {
+      if ((event.data as { type?: string } | null)?.type === 'DATA_REFRESHED') load(false)
+    }
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage)
+  }, [load])
 
   return { data, error, retry }
 }

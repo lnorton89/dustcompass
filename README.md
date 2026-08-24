@@ -97,6 +97,23 @@ PNG header of both the source and exported copies, because a share image that
 asset deliberately excluded from the offline precache: it is for crawlers, and
 the first-run download has to finish before the user reaches the desert.
 
+**A shared pin should preview as that place.** Sending someone a link and
+having it unfurl as the app's own front page wastes the only thing a preview is
+for — the name and the address. Every camp and art piece has a page of its own
+at `/p/<uid>/` carrying both, which then hands the reader on to the map with
+that listing open. A listing with a photo previews as its photo, because that
+is the better image and because the photos are whatever shape the camp
+uploaded; the ones without get a card drawn for them. Neither those pages nor
+those cards are precached — they exist for crawlers, and the offline download
+is the one number here that must not grow.
+
+**The listings keep moving after the last commit.** Art locations stay
+embargoed until Gates open, so on the morning of 30 August the map gains 329
+pieces it could not legally show the day before, and camps add and move events
+right through the week. Nobody is at a laptop for any of that, so the deploy
+runs on a schedule as well as on push — at 00:15 and midday Black Rock City
+time, the first of those a quarter of an hour after the embargo lifts.
+
 **Time is playa time.** "What's on now" uses Black Rock City's clock, not the
 device's — people arrive with phones still set to wherever they flew from. And
 outside the event week the wall clock makes every window empty, so the schedule
@@ -251,10 +268,10 @@ Two integration details worth knowing, both of which cost real debugging time:
 Four layers, all runnable locally.
 
 ```sh
-npm test                                                 # 74 unit + component tests
+npm test                                                 # 108 unit + component tests
 NEXT_PUBLIC_E2E=1 npm run build && npm run preview &
-npm run test:smoke  http://127.0.0.1:4173/dustcompass/   # browser assertions
-npm run test:a11y   http://127.0.0.1:4173/dustcompass/   # axe, 8 UI states
+npm run test:smoke  http://127.0.0.1:4173/dustcompass/   # 64 browser assertions
+npm run test:a11y   http://127.0.0.1:4173/dustcompass/   # axe, 9 UI states
 npm run test:offline http://127.0.0.1:4173/dustcompass/  # proves offline works
 ```
 

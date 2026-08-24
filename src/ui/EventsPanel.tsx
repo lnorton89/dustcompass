@@ -40,6 +40,13 @@ interface Props {
   locationStatus: LocationStatus
   /** Asked for when someone chooses "Closest" without a fix yet. */
   onNeedLocation: () => void
+  /**
+   * Called whenever this panel no longer needs the location watch it may
+   * have asked for — sort left "Closest", or the panel closed. The caller
+   * owns the actual watch and may keep it running for another reason (e.g.
+   * active navigation); this only ever releases this panel's own claim.
+   */
+  onDoneWithLocation: () => void
   onSelect: (poi: Poi) => void
   onClose: () => void
   /** Phone layout: come up from the bottom instead of in from the side. */
@@ -67,6 +74,7 @@ export function EventsPanel({
   origin,
   locationStatus,
   onNeedLocation,
+  onDoneWithLocation,
   onSelect,
   onClose,
   compact,
@@ -105,9 +113,25 @@ export function EventsPanel({
   }, [sort, locationFailed, locationStatus])
   const retryLocation = () => {
     setLocationIssue(false)
+    // The location-ownership effect below asks again on its own once sort
+    // is back to 'distance' — calling onNeedLocation directly here too would
+    // double-acquire it.
     setSort('distance')
-    onNeedLocation()
   }
+  /**
+   * The watch this panel asked for is only worth keeping while the panel is
+   * both open and actually sorted by distance — not for the rest of the
+   * session after Closest is turned off or the panel is closed. The effect's
+   * own cleanup is what releases it: whenever the condition goes false
+   * (deps change or the component unmounts), whatever claim the previous run
+   * took out is given back first.
+   */
+  useEffect(() => {
+    if (open && sort === 'distance') {
+      onNeedLocation()
+      return () => onDoneWithLocation()
+    }
+  }, [open, sort, onNeedLocation, onDoneWithLocation])
   /**
    * A window and a sort were the only two questions you could ask of three
    * thousand listings. "Is my friend's camp doing the pancake thing again" was
@@ -229,14 +253,13 @@ export function EventsPanel({
             value="distance"
             selected={sort === 'distance'}
             onChange={() => {
-              const next = sort === 'distance' ? 'time' : 'distance'
-              setSort(next)
+              // Requesting/releasing the watch itself is the location-
+              // ownership effect's job, keyed on this same sort state — it
+              // asks the moment "Closest" is chosen, which is the moment
+              // asking for location first makes sense, and releases it the
+              // moment sort leaves 'distance' again, however that happens.
+              setSort(sort === 'distance' ? 'time' : 'distance')
               setLocationIssue(false)
-              // Choosing "Closest" is the moment asking for location makes
-              // sense — offering the sort only after a fix exists means it is
-              // never there when it is first wanted. Also how a denial gets
-              // retried: pressing "Closest" again asks again.
-              if (next === 'distance' && !origin) onNeedLocation()
             }}
             sx={{ flexShrink: 0, gap: 0.5, px: 1.25 }}
           >

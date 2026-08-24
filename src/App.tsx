@@ -213,6 +213,30 @@ export default function App() {
   // stops it.
   const location = useGeolocation()
   const here = location.position
+  /**
+   * More than one feature can want a live fix at once — navigation and the
+   * Events panel's "Closest" sort, at minimum — and the watch has to keep
+   * running for as long as any of them still need it, but no longer.
+   * Without reference counting, whichever feature stopped last (or the only
+   * one that ever explicitly stops) could kill a watch another feature still
+   * owns, or a feature that never releases its own claim (the map's locate
+   * button has no "off" control) could never be cleaned up at all.
+   */
+  const locationOwners = useRef<Set<'navigation' | 'events' | 'map'>>(new Set())
+  const acquireLocation = useCallback(
+    (owner: 'navigation' | 'events' | 'map') => {
+      locationOwners.current.add(owner)
+      location.start()
+    },
+    [location],
+  )
+  const releaseLocation = useCallback(
+    (owner: 'navigation' | 'events' | 'map') => {
+      locationOwners.current.delete(owner)
+      if (locationOwners.current.size === 0) location.stop()
+    },
+    [location],
+  )
   const [eventsOpen, setEventsOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   /**
@@ -311,7 +335,7 @@ export default function App() {
         else if (selected) setSelected(undefined)
         else if (heading) {
           setHeading(undefined)
-          location.stop()
+          releaseLocation('navigation')
         } else if (typing) searchInput.current?.blur()
         return
       }
@@ -327,7 +351,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [eventsOpen, filtersOpen, heading, location, saving, selected])
+  }, [eventsOpen, filtersOpen, heading, releaseLocation, saving, selected])
 
   /**
    * A shared link names either a listing or an address. Resolve it to a
@@ -455,10 +479,18 @@ export default function App() {
     // locating and the walker may be nowhere near it. Only a fix belonging
     // to the active session may confirm arrival.
     if (!here) return
-    if (navigation.travel.meters > 25) return
+    // The buzz is trusted without looking at the screen, so a merely nearby
+    // computed point is not enough — the fix has to be accurate enough to
+    // actually support the claim. A conservative, uncertainty-aware check:
+    // even in the worst case implied by the fix's own reported accuracy, the
+    // true position could still be inside the arrival radius. Missing
+    // accuracy (not guaranteed by the Geolocation API, though effectively
+    // always present) is treated as unbounded rather than zero.
+    const accuracy = location.accuracy ?? Infinity
+    if (navigation.travel.meters + accuracy > 25) return
     arrived.current = true
     haptic('arrive')
-  }, [navigation, here])
+  }, [navigation, here, location.accuracy])
 
 
   /**
@@ -517,9 +549,9 @@ export default function App() {
         duration: 900,
         padding: navigationPadding(),
       })
-      location.start()
+      acquireLocation('navigation')
     },
-    [location, navigationPadding],
+    [acquireLocation, navigationPadding],
   )
 
   const flyTo = useCallback(
@@ -818,8 +850,12 @@ export default function App() {
                 }}
                 // The control's own one-shot fix is not kept — pressing it
                 // hands ownership of tracking to `useGeolocation`'s single
-                // watch instead of running a second one in parallel.
-                onLocate={location.start}
+                // watch instead of running a second one in parallel. There is
+                // no "off" control for this one, so its claim is never
+                // explicitly released — matching the existing behaviour that
+                // a fix started this way keeps running for the rest of the
+                // session.
+                onLocate={() => acquireLocation('map')}
                 savedPlaces={places}
                 onSelectPlace={(id) => {
                   const place = places.find((p) => p.id === id)
@@ -910,7 +946,7 @@ export default function App() {
                   onRetryLocation={location.start}
                   onClear={() => {
                     setHeading(undefined)
-                    location.stop()
+                    releaseLocation('navigation')
                   }}
                 />
               )}
@@ -1127,7 +1163,8 @@ export default function App() {
           preview={clock.preview}
           origin={here}
           locationStatus={location.status}
-          onNeedLocation={location.start}
+          onNeedLocation={() => acquireLocation('events')}
+          onDoneWithLocation={() => releaseLocation('events')}
           onSelect={(poi) => {
             setEventsOpen(false)
             flyTo(poi.position, poi)

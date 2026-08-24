@@ -836,10 +836,20 @@ await shared.close()
       await page.waitForTimeout(700)
       await page.keyboard.press('ArrowDown')
       await page.keyboard.press('Enter')
-      // Long enough for both the initial fallback-estimated flyTo (900ms) and
-      // the bounded correction that follows the real measurement (300ms) to
-      // finish settling.
-      await page.waitForTimeout(2500)
+      // Confirm the intended camp is the one that actually opened, rather
+      // than trusting timing alone — two searches back to back on the same
+      // page is exactly the kind of thing a slow-to-settle Autocomplete can
+      // silently drop, which would otherwise read the previous selection's
+      // padding twice and pass or fail for the wrong reason.
+      await page
+        .getByTestId('detail-panel')
+        .locator('h5, h6')
+        .filter({ hasText: name })
+        .first()
+        .waitFor({ timeout: 5000 })
+      // Long enough for the bounded correction that follows the real
+      // measurement (300ms) to finish settling.
+      await page.waitForTimeout(1000)
       return page.evaluate(() => window.__map.getPadding().bottom)
     }
 

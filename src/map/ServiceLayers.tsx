@@ -47,7 +47,7 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
           layout={{
             'text-field': 'Toilets',
             'text-font': ['Open Sans Regular'],
-            'text-size': 12,
+            'text-size': ['interpolate', ['linear'], ['zoom'], 15, 12, 18, 14] as unknown as number,
             'text-offset': [0, 0.8],
             'text-anchor': 'top',
             'text-optional': true,
@@ -96,7 +96,9 @@ export function ServiceLayers({ services, toilets, showServices, showToilets, pa
           layout={{
             'text-field': ['get', 'name'],
             'text-font': ['Open Sans Regular'],
-            'text-size': 13,
+            // Medical, rangers, ice. Bigger than a camp label, because the
+            // moment one of these is wanted is not a moment for squinting.
+            'text-size': ['interpolate', ['linear'], ['zoom'], 13, 13, 17, 16] as unknown as number,
             'text-offset': [0, 0.9],
             'text-anchor': 'top',
           }}

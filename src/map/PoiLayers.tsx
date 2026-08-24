@@ -58,7 +58,12 @@ export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
         filter={['has', 'point_count']}
         paint={{
           'circle-color': palette.camp,
-          'circle-opacity': 0.85,
+          // A cluster is scaffolding — it says "there is a lot here", and it
+          // disappears the moment you look closer. At 0.85 with a full-strength
+          // count on it, "160" was reading louder than "Center Camp": the city
+          // came across as a field of numbered bubbles with place names lost
+          // between them. It steps back so the named places can come forward.
+          'circle-opacity': 0.62,
           'circle-radius': ['step', ['get', 'point_count'], 13, 20, 18, 60, 24],
           'circle-stroke-color': palette.playa,
           'circle-stroke-width': 2,
@@ -71,9 +76,9 @@ export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
         layout={{
           'text-field': ['get', 'point_count_abbreviated'],
           'text-font': ['Open Sans Regular'],
-          'text-size': 12,
+          'text-size': 11,
         }}
-        paint={{ 'text-color': palette.playa }}
+        paint={{ 'text-color': palette.playa, 'text-opacity': 0.85 }}
       />
       <Layer
         id={POI_LAYER_ID}
@@ -98,9 +103,16 @@ export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
         layout={{
           'text-field': ['get', 'name'],
           'text-font': ['Open Sans Regular'],
-          'text-size': 13,
+          // Read at arm's length, on a screen with dust on it, in daylight.
+          // Grows with zoom, because at close range there is room for it and
+          // the name is the whole reason you zoomed in.
+          'text-size': ['interpolate', ['linear'], ['zoom'], 15.5, 13, 18, 16] as unknown as number,
           'text-offset': [0, 0.9],
           'text-anchor': 'top',
+          // Camps are the most numerous thing on the map and the least likely
+          // to be what you are looking for right now, so they are the labels
+          // that give way when something has to. Landmarks, saved spots and
+          // services are all placed before this layer and therefore win.
           'text-optional': true,
         }}
         paint={{

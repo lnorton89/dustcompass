@@ -44,7 +44,9 @@ export function SavedPlacesLayer({ places, palette }: Props) {
         layout={{
           'text-field': ['get', 'name'],
           'text-font': ['Open Sans Regular'],
-          'text-size': 13,
+          // The user's own places. Second only to the landmarks, because on
+          // the walk home at 4am this is the label that matters.
+          'text-size': ['interpolate', ['linear'], ['zoom'], 14, 13, 18, 16] as unknown as number,
           'text-offset': [0, 1],
           'text-anchor': 'top',
           'text-allow-overlap': false,

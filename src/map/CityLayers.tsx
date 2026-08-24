@@ -77,7 +77,7 @@ export function CityLayers({ city, campOutlines, palette }: Props) {
             'symbol-placement': 'line',
             'text-field': ['get', 'name'],
             'text-font': ['Open Sans Regular'],
-            'text-size': ['interpolate', ['linear'], ['zoom'], 12.75, 9, 15, 11] as unknown as number,
+            'text-size': ['interpolate', ['linear'], ['zoom'], 12.75, 10, 15, 13] as unknown as number,
             'text-letter-spacing': 0.08,
             'text-max-angle': 30,
           }}
@@ -96,7 +96,9 @@ export function CityLayers({ city, campOutlines, palette }: Props) {
           layout={{
             'text-field': ['get', 'name'],
             'text-font': ['Open Sans Regular'],
-            'text-size': 12,
+            // The city's fixed points, and the ones everybody navigates by.
+            // Placed before every other label layer, so they win collisions.
+            'text-size': ['interpolate', ['linear'], ['zoom'], 13, 13, 17, 17] as unknown as number,
             'text-offset': [0, 1.1],
             'text-anchor': 'top',
           }}

@@ -108,6 +108,11 @@ export default function App() {
   const theme = useMemo(() => playaTheme(mode), [mode])
   // Phones are the real target here; the desktop layout is the special case.
   const compact = useMediaQuery(theme.breakpoints.down('md'))
+  // The inline filter chips are a convenience, and search is not. Below a wide
+  // desktop the two together overflow the bar: everything else in it refuses to
+  // shrink, so the search box was the only thing left to squeeze, and it
+  // collapsed to nothing. The chips step aside; the filter sheet still has them.
+  const roomForFilterChips = useMediaQuery(theme.breakpoints.up('lg'))
   const eventsByHost = useEventsByHost(data)
   const { initial: deepLink, publish } = useDeepLink()
   const [pin, setPin] = useState<{ position: Position; address: string }>()
@@ -280,7 +285,11 @@ export default function App() {
       <Box sx={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
         <AppBar position="static" color="default" elevation={0} enableColorOnDark>
           <Toolbar sx={{ gap: 1, minHeight: { xs: 56, md: 64 }, py: 1 }}>
-            {compact && <BrandMark size={32} sx={{ flexShrink: 0 }} />}
+            {/* On a phone this is decoration standing between the user and the
+                one control that matters; the icon and splash already brand it. */}
+            {compact && (
+              <BrandMark size={32} sx={{ flexShrink: 0, display: { xs: 'none', sm: 'block' } }} />
+            )}
             {!compact && (
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mr: 1 }}>
                 <BrandMark size={34} sx={{ flexShrink: 0 }} />
@@ -295,7 +304,7 @@ export default function App() {
               </Stack>
             )}
 
-            <Box sx={{ flex: '1 1 auto', minWidth: 0, maxWidth: { md: 480 } }}>
+            <Box sx={{ flex: '1 1 auto', minWidth: { xs: 0, sm: 220 }, maxWidth: { md: 480 } }}>
               {data && (
                 <SearchPanel
                   layout={data.layout}
@@ -314,6 +323,7 @@ export default function App() {
             >
               <PwaStatus compact={compact} />
               {!compact &&
+                roomForFilterChips &&
                 FILTERS.map((filter) => (
                   <Chip
                     key={filter.key}

@@ -32,7 +32,9 @@ for (const size of SIZES) {
   )
   const name =
     size === 32 ? 'favicon-32.png' : size === 180 ? 'apple-touch-icon.png' : `icon-${size}.png`
-  await page.screenshot({ path: `public/${name}`, omitBackground: false })
+  // The mark is a rounded square with transparent corners by design; the page's
+  // default white background would otherwise fill them in.
+  await page.screenshot({ path: `public/${name}`, omitBackground: true })
   console.log(`public/${name}`)
 }
 
@@ -42,7 +44,7 @@ for (const size of ICO_SIZES) {
   await page.setContent(
     `<body style="margin:0">${svg.replace('<svg', `<svg width="${size}" height="${size}"`)}</body>`,
   )
-  icoImages.push({ size, png: await page.screenshot({ omitBackground: false }) })
+  icoImages.push({ size, png: await page.screenshot({ omitBackground: true }) })
 }
 
 writeFileSync('public/favicon.ico', makeIco(icoImages))

@@ -59,6 +59,17 @@ jobs:
           BURNING_MAN_API_KEY: ${{ secrets.BURNING_MAN_API_KEY }}
         run: npm run fetch-api -- 2026
 
+      # The data this publishes is fetched here, so CI has never seen it: the
+      # scheduled run pulls whatever Burning Man published this morning and
+      # ships it. Every guard that matters lives in the suite — the derived
+      # layout against the survey's own control points, the embargo, the
+      # response shapes — and none of them ran on the only path that deploys.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test against the data being published
+        run: npm test
+
       - name: Build
         # A GitHub Pages project site is served from /<repo>/, so the app has to
         # be built with that prefix.

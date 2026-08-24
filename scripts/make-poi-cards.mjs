@@ -22,6 +22,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { poiOg } from './lib/poi-card.mjs'
+import { releaseForYear } from './lib/api.mjs'
 
 const YEAR = process.argv[2] ?? process.env.NEXT_PUBLIC_DATA_YEAR ?? '2026'
 const ROOT = resolve(import.meta.dirname, '..')
@@ -36,10 +37,19 @@ const FOOTNOTE = 'FREE COMMUNITY TOOL · NOT AFFILIATED WITH BURNING MAN'
 const CONCURRENCY = 6
 const EMBED_PHOTOS = process.env.SHARE_CARDS === 'embed'
 
+// A card carries the address in ink. The fetcher strips embargoed locations
+// before they reach disk, but this reads the file rather than the API, so it
+// applies the same rule again rather than trusting the file it was handed.
+const RELEASE = releaseForYear(YEAR)
+const withheld = (kind) => new Date() < (kind === 'art' ? RELEASE.art : RELEASE.camp)
+
 const read = async (name) => {
   const path = join(DATA, name)
   if (!existsSync(path)) return []
-  return JSON.parse(await readFile(path, 'utf8'))
+  const records = JSON.parse(await readFile(path, 'utf8'))
+  const kind = name.startsWith('art') ? 'art' : 'camp'
+  if (!withheld(kind)) return records
+  return records.map((record) => ({ ...record, location_string: undefined }))
 }
 
 /** Widen serves whatever width is asked for; the card only shows 440. */

@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import { socialImageMetadata } from 'metaplate'
 import { BRAND } from '../../../brand'
 import { BASE_PATH, DATA_YEAR, SITE_URL } from '../../../config'
+import { embargoState, embargoWindowForYear } from '../../../data/embargo'
 import { ShareRedirect } from './ShareRedirect'
 
 /**
@@ -29,9 +30,24 @@ const listings = (): { item: Listing; kind: 'camp' | 'art' }[] => {
     if (!existsSync(path)) return []
     return JSON.parse(readFileSync(path, 'utf8')) as Listing[]
   }
+  /**
+   * These pages are a publishing path in their own right — metadata, a visible
+   * address and a rendered card — and they were reading the listings without
+   * the check the map applies. Nothing leaks today because the fetcher strips
+   * embargoed locations before they reach disk, but a second layer that only
+   * covers one of two exits is not a second layer.
+   */
+  const released = embargoState(embargoWindowForYear(DATA_YEAR))
+  const withhold = (item: Listing): Listing => ({ ...item, location_string: undefined })
   return [
-    ...read('camp.json').map((item) => ({ item, kind: 'camp' as const })),
-    ...read('art.json').map((item) => ({ item, kind: 'art' as const })),
+    ...read('camp.json').map((item) => ({
+      item: released.campsReleased ? item : withhold(item),
+      kind: 'camp' as const,
+    })),
+    ...read('art.json').map((item) => ({
+      item: released.artReleased ? item : withhold(item),
+      kind: 'art' as const,
+    })),
   ].filter(({ item }) => item.uid && item.name)
 }
 

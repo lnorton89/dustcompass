@@ -82,9 +82,12 @@ const cx = anchors.reduce((a, f) => a + f.cx, 0) / anchors.length
 const cy = anchors.reduce((a, f) => a + f.cy, 0) / anchors.length
 const offset = Math.hypot(cx, cy) / FEET_PER_METRE
 console.log(`  centre from ${anchors.length} fitted rings sits ${offset.toFixed(2)} m from the surveyed Man`)
-if (offset > 5) {
+// `NaN > 5` is false, so an empty fit used to walk straight past this guard and
+// write "12:NaN" into the layout. A refusal has to be the default, not the
+// consequence of a comparison that happens to be true.
+if (anchors.length < 3 || !Number.isFinite(offset) || offset > 5) {
   throw new Error(
-    `The fitted city centre is ${offset.toFixed(1)} m from the surveyed Man. ` +
+    `Fitted ${anchors.length} rings, centre ${offset.toFixed(1)} m from the surveyed Man. ` +
       'One of the two is being read wrong; refusing to publish a layout on that basis.',
   )
 }
@@ -108,7 +111,16 @@ const meanRotation = rotations.reduce((a, b) => a + b, 0) / rotations.length
 const spread = Math.max(...rotations) - Math.min(...rotations)
 const bearing = Math.round(meanRotation * 100) / 100
 console.log(`  rotation ${bearing} degrees from ${rotations.length} radials (spread ${spread.toFixed(3)})`)
-if (spread > 1) throw new Error(`Radials disagree on the city rotation by ${spread.toFixed(2)} degrees.`)
+// Same trap: with no radials parsed, `spread` is -Infinity and this passed,
+// leaving `bearing` as NaN. That serialises to null, which the app reads as
+// zero — the whole city drawn 45 degrees out, plausibly, with confident pins.
+// A single parseable radial also gives a spread of 0, which proves nothing.
+if (rotations.length < 3 || !Number.isFinite(spread) || spread > 1) {
+  throw new Error(
+    `${rotations.length} radials gave a rotation spread of ${spread.toFixed(2)} degrees; ` +
+      'refusing to publish a bearing on that basis.',
+  )
+}
 
 // --- Annular streets ------------------------------------------------------
 const refOf = (name) => (/^esp/i.test(name.trim()) ? 'esplanade' : name.trim()[0].toLowerCase())
@@ -266,6 +278,22 @@ await mkdir(dirname(OUT), { recursive: true })
 await writeFile(OUT, JSON.stringify(layout, null, 2) + '\n')
 
 const worst = Math.max(...cStreets.map((s) => s.rms))
+// The residual was measured and only printed. The centre check averages across
+// rings, so opposing errors cancel and one badly fitted street stays invisible
+// — and the 2026 survey only publishes plazas on B and G, so the independent
+// check in survey.test.ts cannot see the other ten streets at all. A ring that
+// is not a circle is not a street.
+// 10 ft, not 5: the noisiest real year measures 4.97 ft — 2025 files eighteen
+// segments under "Esplanade", some curving around Center Camp — and a threshold
+// with a 0.6% margin would fail on ordinary survey noise. Untrimmed, that same
+// ring fitted at 69.9 ft, so an order of magnitude of headroom still catches a
+// street that is not a circle.
+if (!Number.isFinite(worst) || worst > 10) {
+  throw new Error(
+    `Worst annular fit residual is ${worst.toFixed(2)} ft. One of these streets is ` +
+      'not the circle it is being published as; refusing to write the layout.',
+  )
+}
 console.log(`\n  ${cStreets.length} annular streets, worst circle-fit residual ${worst.toFixed(2)} ft`)
 console.log(`  ${tStreets.length} radials, ${plazas.length} plazas, ${portals.length} portals`)
 console.log(`  fence ${fence_distance} ft, roads ${road_width} ft`)

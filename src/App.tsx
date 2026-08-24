@@ -32,7 +32,6 @@ import EventIcon from '@mui/icons-material/Event'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import GroupsIcon from '@mui/icons-material/Groups'
 import WcIcon from '@mui/icons-material/Wc'
-import LocalHospitalIcon from '@mui/icons-material/LocalHospital'
 import StarIcon from '@mui/icons-material/Star'
 import type { MapRef } from '@vis.gl/react-maplibre'
 import { MapView } from './map/MapView'
@@ -96,7 +95,14 @@ const FILTERS: {
   { key: 'art', label: 'Art', accent: 'art', icon: <AutoAwesomeIcon /> },
   { key: 'camp', label: 'Camps', accent: 'camp', icon: <GroupsIcon /> },
   { key: 'toilets', label: 'Toilets', accent: 'toilet', icon: <WcIcon /> },
-  { key: 'services', label: 'Services', accent: 'medical', icon: <LocalHospitalIcon /> },
+  // Rangers, medical and ice/civic stations all live in this one layer and
+  // draw in their own colours (see ServiceLayers) — a medical-red hospital
+  // icon here claimed the whole layer was medical, which was never true and
+  // was misleading exactly when someone was specifically looking for
+  // emergency infrastructure. `civic` is the layer's actual default color
+  // (everything that isn't specifically medical or ranger), and a neutral
+  // info glyph doesn't claim a single category the way a hospital cross does.
+  { key: 'services', label: 'Services', accent: 'civic', icon: <InfoOutlinedIcon /> },
   { key: 'favorites', label: 'Saved', accent: 'saved', icon: <StarIcon /> },
 ]
 
@@ -113,16 +119,89 @@ function joinWithAnd(items: string[]): string {
   return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`
 }
 
+// Persisted local preferences: theme mode, map orientation, and the active
+// filter set. Every reader falls back to the same default a fresh install
+// would use rather than trusting stored JSON blindly — corrupted or
+// hand-edited storage should lose the preference, not the map.
+export const MODE_KEY = 'dust-compass:mode'
+export const CITY_UP_KEY = 'dust-compass:city-up'
+export const ACTIVE_FILTERS_KEY = 'dust-compass:active-filters'
+const DEFAULT_FILTERS: Filter[] = ['art', 'camp', 'toilets', 'services']
+const VALID_FILTER_KEYS = new Set<Filter>(FILTERS.map((f) => f.key))
+
+export function isThemeMode(value: unknown): value is ThemeMode {
+  return value === 'dark' || value === 'light' || value === 'night'
+}
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}
+
+/** Exported for the tests: the corruption boundary for every persisted preference below. */
+export function readStored<T>(key: string, isValid: (value: unknown) => value is T, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw === null) return fallback
+    const parsed: unknown = JSON.parse(raw)
+    return isValid(parsed) ? parsed : fallback
+  } catch {
+    // Private windows and blocked site data both throw; landing back on the
+    // default preference is a far smaller problem than the map not opening.
+    return fallback
+  }
+}
+
+function writeStored(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    /* nothing to do — see readStored */
+  }
+}
+
+/** Exported for the tests. */
+export function readStoredFilters(): Set<Filter> {
+  try {
+    const raw = localStorage.getItem(ACTIVE_FILTERS_KEY)
+    if (raw === null) return new Set(DEFAULT_FILTERS)
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set(DEFAULT_FILTERS)
+    const valid = parsed.filter((key): key is Filter => VALID_FILTER_KEYS.has(key))
+    // An array that was never empty but produced zero valid entries is
+    // corruption, not someone deliberately switching every filter off —
+    // only the latter should be allowed to persist as an empty set.
+    if (valid.length === 0 && parsed.length > 0) return new Set(DEFAULT_FILTERS)
+    return new Set(valid)
+  } catch {
+    return new Set(DEFAULT_FILTERS)
+  }
+}
+
 export default function App() {
   const { data, error, retry } = usePlayaData()
   const { favorites, toggle: toggleFavorite } = useFavorites()
   const { places, save: savePlace, remove: removePlace, restore: restorePlace } = useSavedPlaces()
   const [saving, setSaving] = useState<{ position: Position; address: string }>()
-  const [mode, setMode] = useState<ThemeMode>('dark')
-  const [cityUp, setCityUp] = useState(true)
-  const [active, setActive] = useState<Set<Filter>>(
-    () => new Set<Filter>(['art', 'camp', 'toilets', 'services']),
-  )
+  // Night mode is a functional night-vision feature, not decoration, so
+  // reloading — or a crash recovering — back to a bright default would be a
+  // real regression, not just a lost preference. Orientation and the active
+  // filter set get the same treatment for the same reason: nothing about
+  // them should reset just because the tab did.
+  const [mode, setMode] = useState<ThemeMode>(() => readStored(MODE_KEY, isThemeMode, 'dark'))
+  const [cityUp, setCityUp] = useState(() => readStored(CITY_UP_KEY, isBoolean, true))
+  const [active, setActive] = useState<Set<Filter>>(() => readStoredFilters())
+  useEffect(() => writeStored(MODE_KEY, mode), [mode])
+  useEffect(() => writeStored(CITY_UP_KEY, cityUp), [cityUp])
+  useEffect(() => writeStored(ACTIVE_FILTERS_KEY, [...active]), [active])
+  // The static <meta name="theme-color"> in layout.tsx only covers first
+  // paint; browser/PWA chrome should follow the live theme afterward, the
+  // same as everything else on screen does.
+  const theme = useMemo(() => playaTheme(mode), [mode])
+  useEffect(() => {
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      'content',
+      theme.palette.background.default,
+    )
+  }, [theme])
   const [selected, setSelected] = useState<Poi>()
   // A listing with no location to open on — before Gates, all of the art.
   const [unplaced, setUnplaced] = useState<UnplacedListing>()
@@ -163,7 +242,6 @@ export default function App() {
   const [realNow, setRealNow] = useState(() => new Date())
   const clock = useMemo(() => scheduleClock(data?.range, realNow), [data?.range, realNow])
   const mapRef = useRef<MapRef>(null)
-  const theme = useMemo(() => playaTheme(mode), [mode])
   const palette = useMemo(() => paletteFor(mode), [mode])
   // Phones are the real target here; the desktop layout is the special case.
   const compact = useMediaQuery(theme.breakpoints.down('md'))
@@ -930,6 +1008,13 @@ export default function App() {
             originLabel={originLabel}
             now={clock.now}
             isFavorite={selected ? favorites.has(selected.uid) : false}
+            // The Saved/Favorites filter always keeps every civic place
+            // visible regardless of favorite state — on purpose, since
+            // toilets/rangers/medical are safety infrastructure a filter
+            // meant to cut clutter should never hide. Starring one currently
+            // has no effect anywhere else in the app, so the action is not
+            // offered rather than making a promise it doesn't keep.
+            canFavorite={selected ? !isCivic(selected) : false}
             onToggleFavorite={toggleFavorite}
             onShare={(poi) => void share({ poi: poi.uid }, poi.name, !isCivic(poi))}
             onNavigate={navigateTo}

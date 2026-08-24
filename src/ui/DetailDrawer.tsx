@@ -35,6 +35,12 @@ interface Props {
   /** The playa schedule clock, so a repeating event shows its current showing. */
   now: Date
   isFavorite: boolean
+  /**
+   * False for kinds the Saved/Favorites filter always shows regardless of
+   * favorite state (civic infrastructure) — starring one of those would be a
+   * durable action with no observable effect anywhere in the app.
+   */
+  canFavorite: boolean
   onToggleFavorite: (uid: string) => void
   onShare: (poi: Poi) => void
   onNavigate: (poi: Poi) => void
@@ -64,6 +70,7 @@ export function DetailDrawer({
   originLabel,
   now,
   isFavorite,
+  canFavorite,
   onToggleFavorite,
   onShare,
   onNavigate,
@@ -119,14 +126,16 @@ export function DetailDrawer({
           <IconButton onClick={() => onShare(poi)} size="small" aria-label="Share this location">
             <IosShareIcon fontSize="small" />
           </IconButton>
-          <IconButton
-            onClick={() => onToggleFavorite(poi.uid)}
-            size="small"
-            aria-label={isFavorite ? 'Remove from favourites' : 'Add to favourites'}
-            color={isFavorite ? 'primary' : 'default'}
-          >
-            {isFavorite ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
-          </IconButton>
+          {canFavorite && (
+            <IconButton
+              onClick={() => onToggleFavorite(poi.uid)}
+              size="small"
+              aria-label={isFavorite ? 'Remove from favourites' : 'Add to favourites'}
+              color={isFavorite ? 'primary' : 'default'}
+            >
+              {isFavorite ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
+            </IconButton>
+          )}
           <IconButton onClick={onClose} size="small" aria-label="Close details">
             <CloseIcon fontSize="small" />
           </IconButton>

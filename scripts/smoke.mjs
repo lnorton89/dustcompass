@@ -77,40 +77,42 @@ if (await embargoNotice.count()) {
   )
 }
 
-// The offline-status chip drops its label on a narrow screen and shows only
-// the icon. MUI keeps the empty label element, and its padding used to push
-// that icon eight pixels left of centre.
+/**
+ * The offline status indicator takes two shapes: a pressable chip for the two
+ * states that want something from the user, and a passive icon for the rest.
+ * On a narrow screen both drop their label, and MUI leaves an empty label
+ * element behind whose padding used to shoulder the chip's icon eight pixels
+ * off-centre.
+ */
 await page.setViewportSize({ width: 697, height: 900 })
-// A resize is not instant, and on a slower machine the chip has not
-// re-rendered by the time a fixed wait expires.
-await page.locator('[class*=MuiChip-root]').first().waitFor({ timeout: 15000 }).catch(() => {})
+await page.locator('[role="status"], [class*=MuiChip-root]').first().waitFor({ timeout: 15000 }).catch(() => {})
 await page.waitForTimeout(400)
-const chipMeasure = await page.evaluate(() => {
-  const chip = document.querySelector('[class*=MuiChip-root]')
-  if (!chip) {
-    // Say what is in the bar instead of just "no chip", so a failure on a
-    // machine I cannot reach still explains itself.
-    const bar = document.querySelector('header')
-    return {
-      why: 'no element matching [class*=MuiChip-root]',
-      classes: [...(bar?.querySelectorAll('*') ?? [])]
-        .map((el) => el.className)
-        .filter((c) => typeof c === 'string' && c.includes('Mui'))
-        .slice(0, 12),
-    }
+const indicator = await page.evaluate(() => {
+  const el = document.querySelector('header [role="status"], header [class*=MuiChip-root]')
+  if (!el) return { why: 'no status indicator in the toolbar' }
+  const icon = el.querySelector('svg')
+  if (!icon) return { why: 'the status indicator shows no icon' }
+  const box = el.getBoundingClientRect()
+  const glyph = icon.getBoundingClientRect()
+  return {
+    kind: String(el.className).includes('MuiChip') ? 'chip' : 'passive',
+    off: Math.abs(glyph.x + glyph.width / 2 - (box.x + box.width / 2)),
+    width: Math.round(box.width),
   }
-  const icon = chip.querySelector('svg')
-  if (!icon) return { why: 'chip has no svg', classes: [String(chip.className)] }
-  const c = chip.getBoundingClientRect()
-  const i = icon.getBoundingClientRect()
-  return { off: Math.abs(i.x + i.width / 2 - (c.x + c.width / 2)) }
 })
-const chipIcon = chipMeasure.off
-if (chipIcon === undefined) console.log('      ' + JSON.stringify(chipMeasure))
+if (indicator.off === undefined) console.log('      ' + JSON.stringify(indicator))
 assert(
-  chipIcon !== undefined && chipIcon <= 1,
-  `status chip centres its icon (${chipIcon?.toFixed(1) ?? 'no chip'}px off)`,
+  indicator.off !== undefined,
+  `the toolbar shows an offline status indicator (${indicator.kind ?? indicator.why})`,
 )
+// A passive icon sits in a flex row beside its label, so only the pill shape
+// has a centre to be off.
+if (indicator.kind === 'chip') {
+  assert(
+    indicator.off <= 1,
+    `the status chip centres its icon (${indicator.off.toFixed(1)}px off)`,
+  )
+}
 await page.setViewportSize({ width: 1440, height: 900 })
 await page.waitForTimeout(400)
 
@@ -443,6 +445,10 @@ const settle = () =>
  */
 const tapBarePlaya = async () => {
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    // Whatever step ran last may have left the map deep inside a block, where
+    // there are no empty pixels to find. The ground between the Man and the
+    // Esplanade is open playa and is large on screen at city zoom.
+    await page.evaluate(() => window.__map.jumpTo({ zoom: 14.2 }))
     await settle()
     const at = await bareSpot()
     if (!at) continue

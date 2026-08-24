@@ -42,15 +42,15 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
       - name: Build
         env:
           NEXT_PUBLIC_BASE_PATH: /dustcompass
           NEXT_PUBLIC_DATA_YEAR: '2026'
           NEXT_PUBLIC_E2E: '1'
         run: npm run build
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
 
       - name: Production browser, accessibility, and offline tests
         env:

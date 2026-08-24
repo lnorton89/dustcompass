@@ -50,6 +50,7 @@ import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
 import { useGeolocation, type LocationStatus } from './data/useGeolocation'
 import { useWakeLock } from './data/useWakeLock'
+import { useCompassHeading } from './data/useCompassHeading'
 import { nearestOfCategory } from './data/nearest'
 import type { ServiceCategory } from './brc/services'
 import { useSavedPlaces } from './data/useSavedPlaces'
@@ -648,9 +649,14 @@ export default function App() {
 
   const navigation = useMemo(() => {
     if (!heading || !origin || !data) return undefined
+    const bearing = bearingBetween(origin, heading.position)
     return {
       travel: travelBetween(origin, heading.position),
-      clock: bearingToClock(data.layout, bearingBetween(origin, heading.position)),
+      clock: bearingToClock(data.layout, bearing),
+      // Kept alongside the clock string rather than recomputed: it's the same
+      // bearing, and it's what the device-heading compass needle needs
+      // (#63) — `needleAngle(bearing, deviceHeading)` in NavBar/CompassNeedle.
+      bearing,
     }
   }, [heading, origin, data])
   // Distance and heading are meant to be read hands-free while walking or
@@ -658,6 +664,13 @@ export default function App() {
   // matches NavBar's own visibility condition below exactly: the lock only
   // holds while there is an active destination on screen.
   const wakeLock = useWakeLock(Boolean(heading))
+  /**
+   * The physical compass sensor — unrelated to the map's own bearing/
+   * orientation controls, which rotate the MapLibre camera and never touch
+   * this. Only listens while there is somewhere to point at, same lifecycle
+   * as the navigation strip that shows its needle.
+   */
+  const compass = useCompassHeading(Boolean(navigation))
   /**
    * Arrival, buzzed once. The whole point of giving the heading as a clock
    * position is that you can act on it without looking at the screen, so the
@@ -1230,6 +1243,9 @@ export default function App() {
                   address={heading.address}
                   travel={navigation.travel}
                   heading={navigation.clock}
+                  bearing={navigation.bearing}
+                  compass={compass}
+                  palette={palette}
                   located={Boolean(usableFix)}
                   status={location.status}
                   accuracy={location.accuracy}

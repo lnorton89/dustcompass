@@ -62,6 +62,21 @@ export function bearingsMatch(a: number, b: number, toleranceDeg = 1.5): boolean
   return diff <= toleranceDeg
 }
 
+/**
+ * Signed turn, in degrees, from the device's current compass heading to a
+ * target bearing — the angle a compass needle should be rotated by to point
+ * at the target. Wraparound-safe: target 2°, device 358° is a 4° turn, not
+ * the raw arithmetic difference of -356°.
+ *
+ * Range is always `[-180, 180)` — negative is a turn to the left (counter-
+ * clockwise), positive to the right (clockwise), and the seam sits behind
+ * you (180° = -180°, "target is directly behind, go either way") rather than
+ * in front, where a real destination could land on it.
+ */
+export function needleAngle(targetBearing: number, deviceHeading: number): number {
+  return (((targetBearing - deviceHeading + 180) % 360 + 360) % 360) - 180
+}
+
 export function distanceBetween(from: Position, to: Position): number {
   const scale = localScale((from[1] + to[1]) / 2)
   return Math.hypot(rad(to[0] - from[0]) * scale.east, rad(to[1] - from[1]) * scale.north)

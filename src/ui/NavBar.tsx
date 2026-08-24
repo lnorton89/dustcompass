@@ -1,4 +1,4 @@
-import { Box, IconButton, Paper, Stack, Typography } from '@mui/material'
+import { Box, Button, IconButton, Paper, Stack, Typography } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk'
 import DirectionsBikeIcon from '@mui/icons-material/DirectionsBike'
@@ -93,22 +93,34 @@ export function NavBar({ name, address, travel, heading, located, status, accura
           </Typography>
         )}
         {(status === 'denied' || status === 'unavailable') && (
-          <Typography
-            component="button"
-            type="button"
+          // A real MuiButton rather than a bare `<Typography component="button">`
+          // so it picks up theme.ts's 44px touch floor (MuiButton styleOverrides,
+          // below `md`) the same way every other control in the app does, instead
+          // of needing its own copy of that breakpoint rule. The sx below only
+          // undoes Button's own padding/typography so it still reads as the small
+          // underlined caption link this was before, not a filled button — the
+          // extra hit area is invisible, via negative margin absorbing the padding
+          // that creates it.
+          <Button
             onClick={onRetryLocation}
-            variant="caption"
+            type="button"
+            variant="text"
+            disableRipple
             sx={{
-              border: 0,
-              p: 0,
-              bgcolor: 'transparent',
-              color: 'primary.main',
-              cursor: 'pointer',
+              alignSelf: 'flex-start',
+              minWidth: 0,
+              py: 0,
+              px: 0.75,
+              mx: -0.75,
+              fontSize: (theme) => theme.typography.caption.fontSize,
+              fontWeight: 400,
               textDecoration: 'underline',
+              color: 'primary.main',
+              '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' },
             }}
           >
             Retry device location
-          </Typography>
+          </Button>
         )}
       </Box>
       <IconButton onClick={onClear} size="small" aria-label="Stop navigating">

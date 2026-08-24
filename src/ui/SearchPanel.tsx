@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type RefObject } from 'react'
 import {
   Autocomplete,
   Chip,
@@ -35,6 +35,8 @@ interface Props {
   onGo: (position: Position, poi?: Poi) => void
   /** Opens a listing that has no position, so `onGo` has nothing to move to. */
   onOpenUnplaced: (listing: UnplacedListing) => void
+  /** So "/" can put the cursor here from anywhere on the page. */
+  inputRef?: RefObject<HTMLInputElement | null>
   compact?: boolean
 }
 
@@ -61,6 +63,7 @@ export function SearchPanel({
   places,
   onGo,
   onOpenUnplaced,
+  inputRef,
   compact = false,
 }: Props) {
   const [query, setQuery] = useState('')
@@ -172,6 +175,10 @@ export function SearchPanel({
         <TextField
           {...params}
           placeholder={compact ? 'Search the playa' : 'Camp, art, or an address like 7:30 & Esplanade'}
+          inputRef={inputRef}
+          // Stays `small`: the touch floor is applied to the field's box in the
+          // theme, which buys the 44px without the 56px of bulk `medium` would
+          // put across the top of a phone.
           size="small"
           slotProps={{
             ...params.slotProps,

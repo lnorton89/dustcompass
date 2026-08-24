@@ -50,14 +50,26 @@ export function NavBar({ name, address, travel, heading, located, status, accura
         <Typography variant="subtitle2" sx={{ lineHeight: 1.2 }}>
           Heading to {name}
         </Typography>
-        <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center', color: 'text.secondary', flexWrap: 'wrap', rowGap: 0.25 }}>
+        <Stack
+          direction="row"
+          spacing={1.25}
+          sx={{
+            alignItems: 'center',
+            color: 'text.secondary',
+            flexWrap: 'wrap',
+            rowGap: 0.25,
+            // The travel icons take their size from here, so the row moves with
+            // the type scale rather than being pinned to a raw pixel value.
+            fontSize: (theme) => theme.typography.caption.fontSize,
+          }}
+        >
           <Typography variant="caption">{formatDistance(travel)}</Typography>
           <Stack direction="row" spacing={0.4} sx={{ alignItems: 'center' }}>
-            <DirectionsWalkIcon sx={{ fontSize: 15 }} />
+            <DirectionsWalkIcon fontSize="inherit" />
             <Typography variant="caption">{formatMinutes(travel.walkMinutes)}</Typography>
           </Stack>
           <Stack direction="row" spacing={0.4} sx={{ alignItems: 'center' }}>
-            <DirectionsBikeIcon sx={{ fontSize: 15 }} />
+            <DirectionsBikeIcon fontSize="inherit" />
             <Typography variant="caption">{formatMinutes(travel.bikeMinutes)}</Typography>
           </Stack>
           <Typography variant="caption" noWrap>
@@ -85,7 +97,15 @@ export function NavBar({ name, address, travel, heading, located, status, accura
             component="button"
             type="button"
             onClick={onRetryLocation}
-            sx={{ border: 0, p: 0, bgcolor: 'transparent', color: 'primary.main', cursor: 'pointer', fontSize: 12 }}
+            variant="caption"
+            sx={{
+              border: 0,
+              p: 0,
+              bgcolor: 'transparent',
+              color: 'primary.main',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+            }}
           >
             Retry device location
           </Typography>

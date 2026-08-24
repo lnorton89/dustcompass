@@ -106,8 +106,9 @@ export function FilterSheet<T extends string>({
               onClick={() => onToggle(option.key)}
               sx={{
                 // Bigger than a default chip on purpose: this is the filter UI
-                // on a phone, used one-handed, in gloves, in the dark.
-                height: 40,
+                // on a phone, used one-handed, in gloves, in the dark. 44px is
+                // the touch floor the rest of the app now holds to.
+                height: 44,
                 borderRadius: '12px',
                 px: 0.5,
                 fontSize: 14,

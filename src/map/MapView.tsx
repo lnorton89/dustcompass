@@ -15,7 +15,13 @@ import { reverseGeocode } from '../brc/geocode'
 import type { Position } from '../brc/geo'
 import { cityOutlinePoints, frameFor } from '../brc/frame'
 import { CityLayers, LANDMARK_LAYER_ID } from './CityLayers'
-import { POI_CLUSTER_LAYER_ID, POI_LABEL_LAYER_ID, POI_LAYER_ID, PoiLayers } from './PoiLayers'
+import {
+  POI_CLUSTER_LAYER_ID,
+  POI_LABEL_LAYER_ID,
+  POI_LAYER_ID,
+  PoiLayers,
+  stackKey,
+} from './PoiLayers'
 
 /** How far from the tap to look for the label that names what was tapped. */
 const LABEL_HIT_RADIUS = 18
@@ -44,6 +50,13 @@ interface Props {
   /** True to rotate the map so 12:00 points up, which is how the city reads. */
   cityUp: boolean
   onSelect: (poi: Poi | undefined) => void
+  /**
+   * A tap that lands on several listings at once. Until the survey publishes
+   * coordinates every listing is placed from its address, so most points on
+   * the map carry more than one camp and picking one of them for the reader
+   * is a guess. They get the list instead.
+   */
+  onSelectStack: (pois: Poi[]) => void
   onProbe: (address: string, position: Position) => void
   /** Fires when the browser reports the user's position. */
   onLocate: (position: Position) => void
@@ -92,6 +105,7 @@ export function MapView({
   showToilets,
   cityUp,
   onSelect,
+  onSelectStack,
   onProbe,
   onLocate,
   pin,
@@ -110,6 +124,23 @@ export function MapView({
     () => new globalThis.Map(data.pois.map((poi) => [poi.uid, poi])),
     [data.pois],
   )
+
+  /**
+   * Everything sharing each point, by the same key the dots are drawn by — and
+   * over the same listings, so the list a tap opens holds exactly what the map
+   * is showing. Counting hidden kinds here offered the reader a camp they had
+   * just filtered out, under a dot with no count on it.
+   */
+  const stacks = useMemo(() => {
+    const out = new globalThis.Map<string, Poi[]>()
+    for (const poi of data.pois.filter((candidate) => visible.has(candidate.kind))) {
+      const key = stackKey(poi.position)
+      const found = out.get(key)
+      if (found) found.push(poi)
+      else out.set(key, [poi])
+    }
+    return out
+  }, [data.pois, visible])
 
   // Frame the whole city rather than guessing a zoom. A fixed zoom that suits a
   // desktop window crops the city badly on a tall phone screen.
@@ -156,17 +187,32 @@ export function MapView({
         return
       }
 
-      // A playa address names an intersection, so several camps genuinely sit
-      // on one point. Only one of them wins the label, and that is the name the
-      // person just tapped — take theirs rather than whichever the renderer
-      // happened to return first.
-      // The label is drawn below its dot, so the exact click pixel is never
-      // inside it. Look in a small box instead, and among whatever is labelled
-      // there take the one anchored nearest the tap.
-      const labelled = nearestIn([POI_LABEL_LAYER_ID], LABEL_HIT_RADIUS)
-      const chosen = labelled ?? event.features?.find((feature) => feature.properties?.uid)
+      // A dot the tap landed on is the least ambiguous thing there is, so it
+      // goes first. Labels used to win instead, because when several camps sat
+      // on one point only one of them was named and that name was the one the
+      // reader had aimed at. But the box a label is hunted in is 18px wide, so
+      // a neighbouring camp's label could take a tap that was squarely on
+      // someone else's dot — aiming at Jelly Dance opened Stoop, two hundred
+      // feet away. Coincident camps no longer need the label to disambiguate
+      // them: they all share a point, so they all open the same list.
+      //
+      // The label search stays as the fallback. The label is drawn below its
+      // dot, so a reader aiming at the name lands on no dot at all, and among
+      // whatever is labelled nearby the one anchored nearest the tap is theirs.
+      const onDot = event.features?.find((feature) => feature.properties?.uid)
+      const chosen = onDot ?? nearestIn([POI_LABEL_LAYER_ID], LABEL_HIT_RADIUS)
       if (chosen?.properties?.uid) {
-        onSelect(poiIndex.get(String(chosen.properties.uid)))
+        const poi = poiIndex.get(String(chosen.properties.uid))
+        // Whichever of the nine the renderer happened to hand back was the one
+        // the reader got, and the other eight were unreachable — the map had no
+        // way of admitting they existed. Hand over the whole point instead and
+        // let them say which one they meant.
+        const sharing = poi ? (stacks.get(stackKey(poi.position)) ?? [poi]) : []
+        if (sharing.length > 1) {
+          onSelectStack(sharing)
+          return
+        }
+        onSelect(poi)
         return
       }
       // Clicking bare playa answers "where am I?" in the only vocabulary that
@@ -175,7 +221,7 @@ export function MapView({
       onProbe(reverseGeocode(position, data.layout).label, position)
       onSelect(undefined)
     },
-    [data.layout, onProbe, onSelect, onSelectPlace, poiIndex],
+    [data.layout, onProbe, onSelect, onSelectPlace, onSelectStack, poiIndex, stacks],
   )
 
   return (

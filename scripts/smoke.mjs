@@ -521,6 +521,32 @@ assert(restored.marked > 0, `shared link restores the marker (${restored.marked}
 assert(restored.zoom > 15, `shared link restores the zoom (${restored.zoom.toFixed(1)})`)
 await shared.close()
 
+// A shared listing link goes to a page of its own so it previews as that place.
+// Nobody is meant to read that page — it has to hand the reader on to the map
+// with the camp already open, or the preview was the only thing it was good for.
+{
+  const linked = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await linked.newPage()
+  const listings = await (
+    await linked.request.get(new URL(`data/${DATA_YEAR}/camp.json`, url).href)
+  ).json()
+  const camp = listings.find((entry) => entry.location_string && entry.uid && entry.name)
+  await page.goto(new URL(`p/${camp.uid}/`, url).href, { waitUntil: 'load' })
+  await page.waitForTimeout(1200)
+  assert(
+    new URL(page.url()).searchParams.get('poi') === camp.uid,
+    'a shared listing link hands the reader on to the map',
+  )
+  await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+  await page.waitForTimeout(3000)
+  const opened = await page.locator('.MuiDrawer-root h5, .MuiDrawer-root h6').first().innerText().catch(() => '')
+  assert(
+    opened.trim() === camp.name,
+    `a shared listing link opens that listing (wanted "${camp.name}", got "${opened.trim()}")`,
+  )
+  await linked.close()
+}
+
 console.log(problems.length ? `\n${problems.length} problem(s):\n` + problems.join('\n') : '\nno console or network errors')
 await browser.close()
 process.exit(problems.length || process.exitCode ? 1 : 0)

@@ -50,6 +50,8 @@ import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
 import { useGeolocation, type LocationStatus } from './data/useGeolocation'
 import { useWakeLock } from './data/useWakeLock'
+import { nearestOfCategory } from './data/nearest'
+import type { ServiceCategory } from './brc/services'
 import { useSavedPlaces } from './data/useSavedPlaces'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
@@ -327,6 +329,10 @@ export default function App() {
   // event's own description (issue #20).
   const [selectedEvent, setSelectedEvent] = useState<EventItem>()
   const [probe, setProbe] = useState<string>()
+  // Set while a "nearest toilet/ranger/medical" tap (#66) is waiting on a
+  // usable GPS fix — resolved (or abandoned on watch failure) by the effects
+  // below once one arrives, rather than blocking the tap itself on it.
+  const [pendingNearest, setPendingNearest] = useState<ServiceCategory>()
   // Set from tapping the live-location marker (#62), rather than stashing a
   // frozen string into `probe` — computing the snackbar's text fresh on
   // every render while this stays true is what lets "You are near ..." keep
@@ -348,16 +354,16 @@ export default function App() {
    * owns, or a feature that never releases its own claim (the map's locate
    * button has no "off" control) could never be cleaned up at all.
    */
-  const locationOwners = useRef<Set<'navigation' | 'events' | 'map'>>(new Set())
+  const locationOwners = useRef<Set<'navigation' | 'events' | 'map' | 'nearest'>>(new Set())
   const acquireLocation = useCallback(
-    (owner: 'navigation' | 'events' | 'map') => {
+    (owner: 'navigation' | 'events' | 'map' | 'nearest') => {
       locationOwners.current.add(owner)
       location.start()
     },
     [location.start],
   )
   const releaseLocation = useCallback(
-    (owner: 'navigation' | 'events' | 'map') => {
+    (owner: 'navigation' | 'events' | 'map' | 'nearest') => {
       locationOwners.current.delete(owner)
       if (locationOwners.current.size === 0) location.stop()
     },
@@ -770,6 +776,53 @@ export default function App() {
     },
     [data, focusPadding],
   )
+
+  /**
+   * One-tap "nearest toilet/ranger/medical" (#66). With a usable fix already
+   * in hand this resolves immediately; otherwise it defers to the two
+   * effects below, which pick it back up once a fix arrives or give up if
+   * the shared watch fails outright — either way the tap itself never
+   * blocks on GPS.
+   */
+  const findNearest = useCallback(
+    (category: ServiceCategory) => {
+      if (!data) return
+      if (usableFix) {
+        const nearest = nearestOfCategory(data.pois, category, usableFix)
+        if (nearest) flyTo(nearest.position, nearest)
+        else setProbe(`No ${category} found in this dataset`)
+        return
+      }
+      setPendingNearest(category)
+      acquireLocation('nearest')
+    },
+    [data, usableFix, flyTo, acquireLocation],
+  )
+  useEffect(() => {
+    if (!pendingNearest || !usableFix || !data) return
+    const category = pendingNearest
+    const fix = usableFix
+    // Deferred a frame rather than run synchronously in the effect body — the
+    // resolution (releasing the watch, moving the camera) is a reaction to a
+    // fix arriving, not itself a value this render should produce.
+    const id = requestAnimationFrame(() => {
+      setPendingNearest(undefined)
+      releaseLocation('nearest')
+      const nearest = nearestOfCategory(data.pois, category, fix)
+      if (nearest) flyTo(nearest.position, nearest)
+      else setProbe(`No ${category} found in this dataset`)
+    })
+    return () => cancelAnimationFrame(id)
+  }, [pendingNearest, usableFix, data, releaseLocation, flyTo])
+  useEffect(() => {
+    if (!pendingNearest || !locationWatchHasFailed(location.status)) return
+    const id = requestAnimationFrame(() => {
+      setPendingNearest(undefined)
+      releaseLocation('nearest')
+      setProbe('Could not get your location')
+    })
+    return () => cancelAnimationFrame(id)
+  }, [pendingNearest, location.status, releaseLocation])
 
   /**
    * Re-frames the currently selected sheet once its real measured height is
@@ -1461,6 +1514,7 @@ export default function App() {
           setDeletedPlace(place)
           setProbe(`Removed “${place.name}”`)
         }}
+        onFindNearest={findNearest}
         onClose={() => setFiltersOpen(false)}
       />
 

@@ -291,15 +291,27 @@ export default function App() {
       locationOwners.current.add(owner)
       location.start()
     },
-    [location],
+    [location.start],
   )
   const releaseLocation = useCallback(
     (owner: 'navigation' | 'events' | 'map') => {
       locationOwners.current.delete(owner)
       if (locationOwners.current.size === 0) location.stop()
     },
-    [location],
+    [location.stop],
   )
+  /**
+   * `useGeolocation()` returns a fresh object every render, so an inline
+   * `() => acquireLocation('events')` at the EventsPanel callsite would be a
+   * new function every time regardless of `acquireLocation` itself — and
+   * EventsPanel's location-ownership effect is keyed on that identity. Every
+   * incoming GPS fix re-rendered App, which handed EventsPanel a "new"
+   * onNeedLocation/onDoneWithLocation, tearing the watch down and starting it
+   * over before it ever settled — wiping `here` back to undefined in a loop
+   * instead of converging on a fix.
+   */
+  const acquireEventsLocation = useCallback(() => acquireLocation('events'), [acquireLocation])
+  const releaseEventsLocation = useCallback(() => releaseLocation('events'), [releaseLocation])
   const [eventsOpen, setEventsOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   /**
@@ -1334,8 +1346,8 @@ export default function App() {
           preview={clock.preview}
           origin={here}
           locationStatus={location.status}
-          onNeedLocation={() => acquireLocation('events')}
-          onDoneWithLocation={() => releaseLocation('events')}
+          onNeedLocation={acquireEventsLocation}
+          onDoneWithLocation={releaseEventsLocation}
           onSelectEvent={setSelectedEvent}
           onClose={() => setEventsOpen(false)}
           compact={compact}

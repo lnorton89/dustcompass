@@ -85,14 +85,28 @@ await page.setViewportSize({ width: 697, height: 900 })
 // re-rendered by the time a fixed wait expires.
 await page.locator('[class*=MuiChip-root]').first().waitFor({ timeout: 15000 }).catch(() => {})
 await page.waitForTimeout(400)
-const chipIcon = await page.evaluate(() => {
+const chipMeasure = await page.evaluate(() => {
   const chip = document.querySelector('[class*=MuiChip-root]')
-  const icon = chip?.querySelector('svg')
-  if (!chip || !icon) return undefined
+  if (!chip) {
+    // Say what is in the bar instead of just "no chip", so a failure on a
+    // machine I cannot reach still explains itself.
+    const bar = document.querySelector('header')
+    return {
+      why: 'no element matching [class*=MuiChip-root]',
+      classes: [...(bar?.querySelectorAll('*') ?? [])]
+        .map((el) => el.className)
+        .filter((c) => typeof c === 'string' && c.includes('Mui'))
+        .slice(0, 12),
+    }
+  }
+  const icon = chip.querySelector('svg')
+  if (!icon) return { why: 'chip has no svg', classes: [String(chip.className)] }
   const c = chip.getBoundingClientRect()
   const i = icon.getBoundingClientRect()
-  return Math.abs(i.x + i.width / 2 - (c.x + c.width / 2))
+  return { off: Math.abs(i.x + i.width / 2 - (c.x + c.width / 2)) }
 })
+const chipIcon = chipMeasure.off
+if (chipIcon === undefined) console.log('      ' + JSON.stringify(chipMeasure))
 assert(
   chipIcon !== undefined && chipIcon <= 1,
   `status chip centres its icon (${chipIcon?.toFixed(1) ?? 'no chip'}px off)`,
@@ -443,6 +457,23 @@ const tapBarePlaya = async () => {
 }
 
 const probe = await tapBarePlaya()
+if (!probe) {
+  console.log(
+    '      ' +
+      JSON.stringify(
+        await page.evaluate(() => {
+          const map = window.__map
+          const wanted = ['poi-dot', 'poi-cluster', 'poi-label', 'saved-dot', 'toilet-dot', 'service-dot']
+          return {
+            zoom: Number(map.getZoom().toFixed(2)),
+            canvas: [map.getCanvas().clientWidth, map.getCanvas().clientHeight],
+            layersPresent: wanted.filter((id) => map.getLayer(id)),
+            layersMissing: wanted.filter((id) => !map.getLayer(id)),
+          }
+        }),
+      ),
+  )
+}
 assert(Boolean(probe), 'found a patch of bare playa to tap')
 assert(
   Boolean(probe?.address),

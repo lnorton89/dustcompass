@@ -22,6 +22,7 @@ import SearchIcon from '@mui/icons-material/Search'
 import InputAdornment from '@mui/material/InputAdornment'
 import CloseIcon from '@mui/icons-material/Close'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
+import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import TuneIcon from '@mui/icons-material/Tune'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import NightlightIcon from '@mui/icons-material/Nightlight'
@@ -42,7 +43,7 @@ import { EventsPanel } from './ui/EventsPanel'
 import { FilterSheet } from './ui/FilterSheet'
 import { NavBar } from './ui/NavBar'
 import { playaTheme } from './ui/theme'
-import { useEventsByHost, usePlayaData } from './data/usePlayaData'
+import { useEventsByHost, usePlayaData, type PartialDataWarning } from './data/usePlayaData'
 import { scheduleClock } from './data/events'
 import { useFavorites } from './data/useFavorites'
 import { useGeolocation } from './data/useGeolocation'
@@ -98,6 +99,19 @@ const FILTERS: {
   { key: 'services', label: 'Services', accent: 'medical', icon: <LocalHospitalIcon /> },
   { key: 'favorites', label: 'Saved', accent: 'saved', icon: <StarIcon /> },
 ]
+
+/** What to say when a safety/schedule-relevant dataset failed to load. */
+const PARTIAL_DATA_LABEL: Record<PartialDataWarning, string> = {
+  toilets: 'toilet locations',
+  services: 'ranger, medical, and ice station locations',
+  dates: "this year's event date range",
+}
+
+function joinWithAnd(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  if (items.length === 2) return `${items[0]} and ${items[1]}`
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`
+}
 
 export default function App() {
   const { data, error, retry } = usePlayaData()
@@ -242,14 +256,18 @@ export default function App() {
    * position once and hand it to the map as its opening camera, so it is not
    * competing with the initial city framing.
    */
+  const deepLinkResolution = useMemo(() => {
+    if (!data || deepLink.poi) return undefined
+    return resolveDeepLink(deepLink, data.layout)
+  }, [data, deepLink])
   const initialTarget = useMemo(() => {
     if (!data) return undefined
     if (deepLink.poi) {
       const target = data.pois.find((poi) => poi.uid === deepLink.poi)
       if (target) return target.position
     }
-    return resolveDeepLink(deepLink, data.layout)
-  }, [data, deepLink])
+    return deepLinkResolution?.status === 'resolved' ? deepLinkResolution.position : undefined
+  }, [data, deepLink, deepLinkResolution])
 
   const [restoredLink, setRestoredLink] = useState<string | null>(null)
   const linkKey = deepLink.poi ?? deepLink.at ?? null
@@ -266,6 +284,15 @@ export default function App() {
         address: deepLink.at ?? addressFor(initialTarget, data.layout),
       })
     }
+    setRestoredLink(linkKey)
+  }
+  // An `at` that could not be resolved — a stale or malformed address — is a
+  // completed restoration attempt, not one still in progress. Leaving
+  // `restoredLink` unset here is what used to wedge the URL-mirroring effect
+  // below for the rest of the session: it stayed gated on a `linkKey` that
+  // was never going to resolve, so the address bar kept the dead address no
+  // matter what the user went on to select.
+  if (data && !initialTarget && deepLinkResolution?.status === 'unresolvable' && restoredLink !== linkKey) {
     setRestoredLink(linkKey)
   }
   // A shared link to something with no location still has to land on it. There
@@ -291,8 +318,15 @@ export default function App() {
     // still on the map published that unrelated pin's address, and starting
     // navigation to a place with no pin at all lost the destination from the
     // URL entirely, falling back to the bare app root.
-    else if (heading) publish(heading.uid ? { poi: heading.uid } : heading.address ? { at: heading.address } : {})
-    else if (pin) publish({ at: pin.address })
+    else if (heading)
+      publish(
+        heading.uid
+          ? { poi: heading.uid }
+          : heading.address
+            ? { at: heading.address, ll: heading.position }
+            : {},
+      )
+    else if (pin) publish({ at: pin.address, ll: pin.position })
     else publish({})
   }, [data, selected, unplaced, heading, pin, publish, linkKey, restoredLink])
 
@@ -430,7 +464,7 @@ export default function App() {
   )
 
   const share = useCallback(
-    async (link: { poi?: string; at?: string }, title: string, unfurls = true) => {
+    async (link: { poi?: string; at?: string; ll?: Position }, title: string, unfurls = true) => {
       // Only listings have a page of their own to unfurl. The survey's places
       // are not in the API's export, so a link to one has to be the app's own
       // URL — a `/p/` link would 404 rather than open anything.
@@ -841,6 +875,47 @@ export default function App() {
                   </IconButton>
                 </Paper>
               )}
+              {data.partialDataWarnings.length > 0 && (
+                // Toilets/services/dates falling back to empty used to be
+                // indistinguishable from a normal map with nothing wrong —
+                // silently dropping the safety-relevant layer entirely rather
+                // than saying so. This does not block the app the way the
+                // required-dataset error above does; it names what is
+                // missing and offers a retry.
+                <Paper
+                  elevation={0}
+                  sx={{
+                    position: 'absolute',
+                    // Stack below the embargo notice on a phone when both are
+                    // showing at once, rather than overlapping it.
+                    top:
+                      !data.embargo.artReleased && !embargoNoticeSeen
+                        ? { xs: 'calc(104px + var(--safe-top))', sm: 56 }
+                        : { xs: 'calc(56px + var(--safe-top))', sm: 8 },
+                    left: 8,
+                    right: { xs: 8, sm: 'auto' },
+                    maxWidth: { sm: 420 },
+                    zIndex: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    pl: 1.25,
+                    pr: 0.5,
+                    py: 0.25,
+                    border: '1px solid',
+                    borderColor: 'warning.main',
+                  }}
+                >
+                  <WarningAmberIcon sx={{ fontSize: 18, color: 'warning.main', flexShrink: 0 }} />
+                  <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
+                    Could not load {joinWithAnd(data.partialDataWarnings.map((w) => PARTIAL_DATA_LABEL[w]))}.
+                    Retry when you have signal.
+                  </Typography>
+                  <Button size="small" color="warning" onClick={retry}>
+                    Retry
+                  </Button>
+                </Paper>
+              )}
             </>
           )}
         </Box>
@@ -1004,7 +1079,9 @@ export default function App() {
               <Button
                 color="secondary"
                 size="small"
-                onClick={() => void share({ at: pin.address }, `Meet me at ${pin.address}`)}
+                onClick={() =>
+                  void share({ at: pin.address, ll: pin.position }, `Meet me at ${pin.address}`)
+                }
               >
                 Share
               </Button>

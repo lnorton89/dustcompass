@@ -9,6 +9,16 @@ import { applyEmbargo, embargoState, embargoWindowForYear, type EmbargoState } f
 import type { EventRange } from './events'
 import { DATA_YEAR, assetUrl } from '../config'
 
+/**
+ * A dataset whose fetch failed and fell back to empty. `toilets`/`services`/
+ * `dates` are safety- or schedule-relevant — silently showing a normal-
+ * looking map with zero toilets, or a schedule with no event window because
+ * `dates_info.json` never loaded, is worse than saying so. `outlines` is
+ * cosmetic camp-block geometry and is not tracked: it can fail without the
+ * user needing to know.
+ */
+export type PartialDataWarning = 'toilets' | 'services' | 'dates'
+
 export interface PlayaData {
   layout: CityLayout
   city: CityGeometry
@@ -25,6 +35,8 @@ export interface PlayaData {
   /** Surveyed camp block footprints, drawn at high zoom. */
   campOutlines: GeoJSON.FeatureCollection
   embargo: EmbargoState
+  /** Safety/schedule-relevant datasets that failed to load this attempt. */
+  partialDataWarnings: PartialDataWarning[]
 }
 
 function empty(): GeoJSON.FeatureCollection {
@@ -61,17 +73,29 @@ export function usePlayaData() {
       setData(undefined)
     }
     const base = assetUrl(`data/${DATA_YEAR}`)
+    // Populated by `optional()` below as each safety/schedule-relevant fetch
+    // settles; read once every promise in the Promise.all has resolved.
+    const partialDataWarnings: PartialDataWarning[] = []
+    const optional = <T,>(warning: PartialDataWarning, promise: Promise<T>, fallback: T): Promise<T> =>
+      promise.catch((cause) => {
+        console.error(`${warning} data failed to load; continuing without it.`, cause)
+        partialDataWarnings.push(warning)
+        return fallback
+      })
 
     Promise.all([
       loadJson<CityLayout>(`${base}/layout.json`),
       loadJson<ArtItem[]>(`${base}/art.json`),
       loadJson<CampItem[]>(`${base}/camp.json`),
       loadJson<EventItem[]>(`${base}/event.json`),
-      loadJson<GeoJSON.FeatureCollection>(`${base}/cpns.geojson`).catch(() => empty()),
-      loadJson<GeoJSON.FeatureCollection>(`${base}/toilets.geojson`).catch(() => empty()),
-      loadJson<{ rangeInfo?: EventRange }>(`${base}/dates_info.json`).catch<{
-        rangeInfo?: EventRange
-      }>(() => ({})),
+      optional('services', loadJson<GeoJSON.FeatureCollection>(`${base}/cpns.geojson`), empty()),
+      optional('toilets', loadJson<GeoJSON.FeatureCollection>(`${base}/toilets.geojson`), empty()),
+      optional(
+        'dates',
+        loadJson<{ rangeInfo?: EventRange }>(`${base}/dates_info.json`),
+        {} as { rangeInfo?: EventRange },
+      ),
+      // Cosmetic geometry only — no warning tracked for this one.
       loadJson<GeoJSON.FeatureCollection>(`${base}/city_blocks.geojson`).catch(() => empty()),
     ])
       .then(([layout, rawArt, rawCamps, events, serviceSpecs, rawToilets, dates, outlines]) => {
@@ -100,6 +124,7 @@ export function usePlayaData() {
           toilets,
           campOutlines: outlines,
           embargo,
+          partialDataWarnings,
         })
         setError(undefined)
       })

@@ -92,7 +92,12 @@ export interface UnplacedListing {
   description?: string
   thumbnail?: string
   /** Withheld under the licence, or simply never filed. They read differently. */
-  reason: 'embargoed' | 'unpublished'
+  /**
+   * `stale` is the one that is not about the listing: the locations are out,
+   * and this copy of the data was saved before they were. It is what a phone
+   * that went to the playa before Gates will say about every art piece on it.
+   */
+  reason: 'embargoed' | 'unpublished' | 'stale'
 }
 
 /**

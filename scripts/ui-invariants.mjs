@@ -262,77 +262,6 @@ for (const viewport of VIEWPORTS.filter((v) => v.width <= COMPACT_MAX)) {
 }
 
 // ---------------------------------------------------------------------------
-// 2c. Top-of-map notices (the embargo notice, the partial-data warning, the
-// stale-link notice) share one flex column now instead of each guessing its
-// own top offset from the others' assumed height (#73) — that assumption
-// broke the moment any notice varied in height: a taller footnote from Large
-// Text, a wrapped line on a narrow phone, or several missing datasets named
-// at once in the partial-data notice. Whichever of them are actually up must
-// never overlap, at both text sizes.
-//
-// The embargo and partial-data notices depend on the data this run actually
-// fetched (art may already be released; the dataset may have loaded clean),
-// so only the stale-link notice — forced here with an unknown `?poi=` — is
-// reliably present. This still exercises the shared column for whatever
-// else happens to be up alongside it, and is strengthened below if more
-// than one notice actually appears.
-// ---------------------------------------------------------------------------
-
-async function openWithNotices(viewport, reading) {
-  const context = await browser.newContext({
-    viewport: { width: viewport.width, height: viewport.height },
-    isMobile: viewport.width <= COMPACT_MAX,
-    hasTouch: viewport.width <= COMPACT_MAX,
-    geolocation: { latitude: 40.7772, longitude: -119.1893 },
-    permissions: ['geolocation'],
-  })
-  const page = await context.newPage()
-  await page.addInitScript((size) => {
-    try {
-      localStorage.setItem('dust-compass:first-run:1', 'seen')
-      // Deliberately not marking the embargo notice seen, unlike open()
-      // above — this check wants every notice the current data actually
-      // warrants to be up at once, not suppressed ahead of time.
-      localStorage.setItem('dust-compass:reading-size', size)
-    } catch {
-      /* private-mode storage throws; the notices are harmless if they appear */
-    }
-  }, reading)
-  const target = new URL(url)
-  target.searchParams.set('poi', 'ui-invariants-unknown-uid')
-  await page.goto(target.href, { waitUntil: 'load' })
-  await page
-    .waitForFunction(() => document.documentElement.dataset.mapReady === 'true', null, { timeout: 45000 })
-    .catch(() => {})
-  await page.waitForTimeout(2000)
-  return { context, page }
-}
-
-for (const reading of ['normal', 'large']) {
-  const { context, page } = await openWithNotices({ name: '375', width: 375, height: 812 }, reading)
-  const boxes = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-testid="top-notice"]')]
-      .map((el) => el.getBoundingClientRect())
-      .map((rect) => ({ top: rect.top, bottom: rect.bottom }))
-      .sort((a, b) => a.top - b.top),
-  )
-  if (boxes.length === 0) {
-    fail(`at ${reading} text: expected at least the stale-link notice to be up`, 'found none')
-  } else {
-    const overlapping = boxes.filter((box, index) => index > 0 && box.top < boxes[index - 1].bottom)
-    if (overlapping.length === 0) {
-      pass(`at ${reading} text: ${boxes.length} top notice(s) stack without overlapping`)
-    } else {
-      fail(
-        `at ${reading} text: top notices overlap`,
-        boxes.map((b) => `${Math.round(b.top)}–${Math.round(b.bottom)}`).join(', '),
-      )
-    }
-  }
-  await context.close()
-}
-
-// ---------------------------------------------------------------------------
 // 3. All three palettes reach every surface, and night stays dark.
 // ---------------------------------------------------------------------------
 
@@ -350,6 +279,48 @@ const LUMA = `(rgb) => {
  * its colours, the app bar took MUI's grey, and MapLibre's chrome was white in
  * every mode. Named rather than swept, so a failure says which one broke.
  */
+/**
+ * Nothing pinned to the top of the map may sit on top of anything else there.
+ *
+ * There are four of them now — the credit footnote and three notices — and they
+ * used to be positioned by hand at 56, 104 and 152 pixels, which is a guess
+ * about how tall a line of text is. The guess was wrong the moment the footnote
+ * above them grew a line, and it would have been wrong again the first time a
+ * reader turned the text size up. They share a column now; this is what says so.
+ */
+async function noticesDoNotOverlap(page, label) {
+  const overlaps = await page.evaluate(() => {
+    const boxes = [
+      ...document.querySelectorAll('[data-testid="api-disclaimer"], .MuiPaper-root'),
+    ]
+      .map((node) => ({ text: node.innerText.replace(/\s+/g, ' ').slice(0, 40), box: node.getBoundingClientRect() }))
+      .filter(({ box }) => box.top < 0.6 * window.innerHeight && box.width > 40 && box.height > 10)
+    const bad = []
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i].box
+        const b = boxes[j].box
+        if (a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top) {
+          bad.push(`"${boxes[i].text}" over "${boxes[j].text}"`)
+        }
+      }
+    }
+    return { bad, found: boxes.length }
+  })
+  // Finding nothing is not a pass. That is how the theme sweep quietly went on
+  // reporting clean over a scale bar that had been deleted.
+  if (overlaps.found < 2) {
+    fail(
+      `${label}: found nothing pinned to the top to check`,
+      `expected the credit footnote and at least one notice, saw ${overlaps.found}`,
+    )
+  } else if (overlaps.bad.length === 0) {
+    pass(`${label}: none of the ${overlaps.found} boxes pinned to the top overlap`)
+  } else {
+    fail(`${label}: notices are on top of each other`, overlaps.bad.join('; '))
+  }
+}
+
 const SURFACES = {
   'app bar': '.MuiAppBar-root',
   disclaimer: '[data-testid="api-disclaimer"]',
@@ -381,6 +352,7 @@ const readSurfaces = (page) =>
 {
   // A phone, because that is where the bottom bar and the compact chrome are.
   const { context, page } = await open({ name: '375', width: 375, height: 812 })
+  await noticesDoNotOverlap(page, '375')
   const byMode = {}
 
   byMode.dark = await readSurfaces(page)

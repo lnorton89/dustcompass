@@ -56,7 +56,14 @@ describe.runIf(hasListings)(`${DATA_YEAR} listings that cannot be placed`, () =>
     // The fixture on disk is already redacted, so nothing can be placed from
     // it. What this pins is the reason: released and absent is not embargoed.
     expect(pois.length + unplaced.length).toBe(rawArt.length)
-    expect(unplaced.every((listing) => listing.reason === 'unpublished')).toBe(true)
+    expect(unplaced.some((listing) => listing.reason === 'embargoed')).toBe(false)
+    /*
+     * Released, and not one of hundreds carries a location: this copy of the
+     * data is older than the release, which is a different thing from Burning
+     * Man not having published one — and the only one of the two the reader can
+     * do anything about. See gatesTransition.test.ts.
+     */
+    expect(unplaced.every((listing) => listing.reason === 'stale')).toBe(true)
   })
 
   it('leaves the placed camps on the map and only strands the locationless', () => {

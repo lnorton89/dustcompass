@@ -85,10 +85,14 @@ export function UnplacedSheet({ listing, onShare, onClose, compact }: Props) {
               ? listing.kind === 'art'
                 ? 'Location published when Gates open.'
                 : 'Location published closer to the event.'
-              : 'No location published for this listing.'}
+              : listing.reason === 'stale'
+                ? 'This location is out — this copy of the map is older than it is.'
+                : 'No location published for this listing.'}
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-            It is not on the map yet, so there is nothing to navigate to.
+            {listing.reason === 'stale'
+              ? 'A minute of signal is enough to pick it up. Until then there is nothing to navigate to.'
+              : 'It is not on the map yet, so there is nothing to navigate to.'}
           </Typography>
 
           {listing.thumbnail && !imageState.failed && (

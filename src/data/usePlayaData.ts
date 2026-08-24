@@ -241,6 +241,13 @@ export function usePlayaData() {
  * without it falls back to geocoding its address string, which is how records
  * behave before the survey team publishes coordinates.
  */
+/**
+ * How many art records it takes before "none of them has a location" means the
+ * data is old rather than empty. Burning Man publishes hundreds; a handful
+ * would not tell us anything either way.
+ */
+const STALE_THRESHOLD = 20
+
 /** Exported for the tests: this is where the embargo decides what is reachable. */
 export function toPois(
   layout: CityLayout,
@@ -294,6 +301,25 @@ export function toPois(
 
   for (const item of art) sort(item, 'art', item.artist, embargo.artReleased)
   for (const item of camps) sort(item, 'camp', item.hometown, embargo.campsReleased)
+
+  /*
+   * Gates open on the clock, but the locations arrive over the network — and
+   * the people this app is for are the ones with no network. A phone that
+   * cached the city before Gates holds art records with every location stripped
+   * out, and the moment the embargo lifts it would have called all 329 of them
+   * "no location published", which is the opposite of what happened: they were
+   * published, and this copy is older than they are.
+   *
+   * Not one of hundreds having a location is not a catalogue with nothing in
+   * it, it is a snapshot from before. Said plainly, it also tells the reader
+   * the one thing that would fix it — a minute of signal.
+   */
+  const placedArt = pois.filter((poi) => poi.kind === 'art').length
+  if (embargo.artReleased && art.length >= STALE_THRESHOLD && placedArt === 0) {
+    for (const listing of unplaced) {
+      if (listing.kind === 'art') listing.reason = 'stale'
+    }
+  }
 
   return { pois, unplaced }
 }

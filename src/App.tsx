@@ -435,6 +435,29 @@ export default function App() {
       /* nothing to do — see above */
     }
   }, [EMBARGO_NOTICE_KEY])
+  /**
+   * Dismissed separately, because it is different news. Someone who waved away
+   * "the locations are not out yet" three weeks ago still needs telling that
+   * they are out now and that this copy predates them — that one is actionable,
+   * and it is the only thing standing between them and the art.
+   */
+  const STALE_NOTICE_KEY = `dust-compass:art-stale-notice:${DATA_YEAR}`
+  const [staleNoticeSeen, setStaleNoticeSeen] = useState(false)
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(STALE_NOTICE_KEY) === 'seen') setStaleNoticeSeen(true)
+    } catch {
+      /* nothing to do — see above */
+    }
+  }, [STALE_NOTICE_KEY])
+  const dismissStaleNotice = useCallback(() => {
+    setStaleNoticeSeen(true)
+    try {
+      localStorage.setItem(STALE_NOTICE_KEY, 'seen')
+    } catch {
+      /* nothing to do — see above */
+    }
+  }, [STALE_NOTICE_KEY])
   const [realNow, setRealNow] = useState(() => new Date())
   const clock = useMemo(() => scheduleClock(data?.range, realNow), [data?.range, realNow])
   const mapRef = useRef<MapRef>(null)
@@ -642,6 +665,35 @@ export default function App() {
    * what the readout already says it is doing when there is no fix at all.
    */
   const usableFix = here && data && isNearCity(data.layout, here) ? here : undefined
+  /**
+   * What the map owes the reader about art, if anything.
+   *
+   * Two different pieces of news, and only one of them can be true at a time:
+   * the locations are not out yet, or they are out and this copy is older than
+   * they are. The second is the one that matters on playa, where the fix is a
+   * minute of signal and nothing else.
+   */
+  const artNotice = useMemo(() => {
+    if (!data) return undefined
+    if (!data.embargo.artReleased) {
+      return embargoNoticeSeen
+        ? undefined
+        : {
+            text: 'Art locations are embargoed until Gates open.',
+            dismiss: dismissEmbargoNotice,
+          }
+    }
+    if (data.unplaced.some((listing) => listing.reason === 'stale')) {
+      return staleNoticeSeen
+        ? undefined
+        : {
+            text: 'Art locations are out. This copy was saved before Gates — a minute of signal picks them up.',
+            dismiss: dismissStaleNotice,
+          }
+    }
+    return undefined
+  }, [data, dismissEmbargoNotice, dismissStaleNotice, embargoNoticeSeen, staleNoticeSeen])
+
   const origin = usableFix ?? (data?.layout.center.geometry.coordinates as Position | undefined)
   const originLabel = usableFix
     ? data
@@ -1266,22 +1318,14 @@ export default function App() {
                 />
               )}
               {/*
-               * Every notice below shares one absolutely positioned column
-               * instead of each guessing its own top offset from a fixed
-               * "banners are 48px tall" assumption (#73). That assumption
-               * broke the moment any notice actually varied in height — a
-               * taller footnote from Large Text mode or a long survey
-               * credit, a wrapped line on a narrow phone, or the
-               * partial-data notice naming several missing datasets at
-               * once — leaving later banners starting above where the
-               * previous one actually ended. A plain flex column lets
-               * ordinary layout absorb all of that; only the column itself
-               * needs a position, and only once, using the same measured
-               * `footnoteHeight` the embargo notice already computed this
-               * from.
-               */}
-              <Stack
-                spacing={1}
+                * One column, not three boxes each computing where the others
+                * end. They were pinned at 56, 104 and 152 pixels, which was
+                * already a guess about how tall a line of text is and became a
+                * wrong one the moment the footnote above them grew — they
+                * overlapped. Stacked, nothing has to know anything about its
+                * neighbours, and the reader's text-size control cannot break it.
+                */}
+              <Box
                 sx={{
                   position: 'absolute',
                   top: {
@@ -1290,11 +1334,18 @@ export default function App() {
                   },
                   left: 8,
                   right: { xs: 8, sm: 'auto' },
+                  maxWidth: { sm: 420 },
                   zIndex: 2,
-                  alignItems: 'flex-start',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 1,
+                  // The gaps between the notices are map, and a tap there
+                  // belongs to the map.
+                  pointerEvents: 'none',
+                  '& > *': { pointerEvents: 'auto' },
                 }}
               >
-                {!data.embargo.artReleased && !embargoNoticeSeen && (
+                {artNotice && (
                   /*
                    * This was MUI's filled `info` alert — a saturated #0288d1
                    * billboard in an app made of ember, teal and dust, and on a
@@ -1305,10 +1356,8 @@ export default function App() {
                    */
                   <Paper
                     elevation={0}
-                    data-testid="top-notice"
                     sx={{
-                      width: { xs: '100%', sm: 'auto' },
-                      maxWidth: { sm: 400 },
+                      // Laid out by the notice column above; see there.
                       display: 'flex',
                       alignItems: 'center',
                       gap: 1,
@@ -1321,9 +1370,13 @@ export default function App() {
                   >
                     <InfoOutlinedIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
                     <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
-                      Art locations are embargoed until Gates open.
+                      {artNotice.text}
                     </Typography>
-                    <IconButton size="small" onClick={dismissEmbargoNotice} aria-label="Dismiss">
+                    <IconButton
+                      size="small"
+                      onClick={artNotice.dismiss}
+                      aria-label="Dismiss"
+                    >
                       <CloseIcon sx={{ fontSize: 18 }} />
                     </IconButton>
                   </Paper>
@@ -1337,10 +1390,8 @@ export default function App() {
                   // missing and offers a retry.
                   <Paper
                     elevation={0}
-                    data-testid="top-notice"
                     sx={{
-                      width: { xs: '100%', sm: 'auto' },
-                      maxWidth: { sm: 420 },
+                      // Laid out by the notice column above; see there.
                       display: 'flex',
                       alignItems: 'center',
                       gap: 1,
@@ -1371,10 +1422,8 @@ export default function App() {
                   // effect's own `staleLink` guard) until it is dismissed.
                   <Paper
                     elevation={0}
-                    data-testid="top-notice"
                     sx={{
-                      width: { xs: '100%', sm: 'auto' },
-                      maxWidth: { sm: 420 },
+                      // Laid out by the notice column above; see there.
                       display: 'flex',
                       alignItems: 'center',
                       gap: 1,
@@ -1403,7 +1452,7 @@ export default function App() {
                     </Button>
                   </Paper>
                 )}
-              </Stack>
+              </Box>
             </>
           )}
         </Box>

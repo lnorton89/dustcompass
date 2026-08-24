@@ -104,7 +104,19 @@ export function PwaStatus({ compact }: { compact: boolean }) {
                 () => window.location.reload()
               : undefined
         }
-        sx={compact ? { width: 32, '& .MuiChip-icon': { mx: 'auto' } } : undefined}
+        sx={
+          compact
+            ? {
+                width: 32,
+                justifyContent: 'center',
+                // With no label text MUI still renders the label element, and
+                // its 8px of padding shoulders the icon off-centre. Auto
+                // margins cannot win against a sibling that is still 16px wide.
+                '& .MuiChip-label': { display: 'none' },
+                '& .MuiChip-icon': { m: 0 },
+              }
+            : undefined
+        }
       />
     </Tooltip>
   )

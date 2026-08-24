@@ -62,6 +62,26 @@ assert(
 )
 assert(await page.getByTestId('api-disclaimer').isVisible(), 'required API disclaimer is prominent')
 
+// The offline-status chip drops its label on a narrow screen and shows only
+// the icon. MUI keeps the empty label element, and its padding used to push
+// that icon eight pixels left of centre.
+await page.setViewportSize({ width: 697, height: 900 })
+await page.waitForTimeout(400)
+const chipIcon = await page.evaluate(() => {
+  const chip = document.querySelector('[class*=MuiChip-root]')
+  const icon = chip?.querySelector('svg')
+  if (!chip || !icon) return undefined
+  const c = chip.getBoundingClientRect()
+  const i = icon.getBoundingClientRect()
+  return Math.abs(i.x + i.width / 2 - (c.x + c.width / 2))
+})
+assert(
+  chipIcon !== undefined && chipIcon <= 1,
+  `status chip centres its icon (${chipIcon?.toFixed(1) ?? 'no chip'}px off)`,
+)
+await page.setViewportSize({ width: 1440, height: 900 })
+await page.waitForTimeout(400)
+
 // Search is the only way to find a camp by name, and the toolbar is the one
 // place where everything competes for width. At 900px the brand block, five
 // filter chips and the status pill all refused to shrink, so the search box

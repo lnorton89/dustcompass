@@ -69,15 +69,28 @@ export function useGeolocation(): Geolocation {
         setStatus('tracking')
       },
       (error) => {
-        // Clear the watch explicitly rather than only dropping the ref to
-        // it — otherwise a retry after a transient (non-permission) error
-        // starts a second watch while the browser still owns the first,
-        // and lifecycle ownership of it is lost.
+        // Permission denial is terminal — the browser will never call this
+        // watch back again, so tear it down the same way `stop()` does.
+        // POSITION_UNAVAILABLE and TIMEOUT are not: real devices throw these
+        // as transient blips (a moment of lost signal, a slow first fix)
+        // while the underlying watch keeps running and calling back again
+        // once a fix is available — Chromium's own mocked geolocation fires
+        // exactly this kind of error immediately before delivering an
+        // updated position when a test moves the override. Clearing the
+        // watch here used to end tracking permanently on that single blip,
+        // with nothing left to restart it since `start()` no-ops while
+        // `watchId` looks already-active. Leaving the watch (and the last
+        // known position) alone lets it recover on its own, the same way a
+        // real GPS reacquisition does.
+        if (error.code !== error.PERMISSION_DENIED) {
+          setStatus('locating')
+          return
+        }
         if (watchId.current !== undefined) {
           navigator.geolocation.clearWatch(watchId.current)
           watchId.current = undefined
         }
-        setStatus(error.code === error.PERMISSION_DENIED ? 'denied' : 'unavailable')
+        setStatus('denied')
       },
       { enableHighAccuracy: true, maximumAge: 5_000, timeout: 20_000 },
     )

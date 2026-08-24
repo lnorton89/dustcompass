@@ -17,6 +17,49 @@ export const POI_CLUSTER_LAYER_ID = 'poi-cluster'
 /** The label layer decides which of several coincident camps is named. */
 export const POI_LABEL_LAYER_ID = 'poi-label'
 
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '')
+  return [
+    parseInt(clean.slice(0, 2), 16),
+    parseInt(clean.slice(2, 4), 16),
+    parseInt(clean.slice(4, 6), 16),
+  ]
+}
+
+/**
+ * The filter bar uses palette.art/palette.camp as a legend — turning a toggle
+ * on paints the map in that color. A cluster containing both kinds can't
+ * honestly claim either legend color, so it gets an even blend instead of
+ * silently defaulting to camp (the bug in issue #35). It's computed from the
+ * live palette rather than a fixed hex so it stays correct across dark,
+ * light and night themes without a third palette entry.
+ */
+function mixColors(a: string, b: string): string {
+  const [ar, ag, ab] = hexToRgb(a)
+  const [br, bg, bb] = hexToRgb(b)
+  const mix = (x: number, y: number) => Math.round((x + y) / 2)
+  return `#${[mix(ar, br), mix(ag, bg), mix(ab, bb)]
+    .map((v) => v.toString(16).padStart(2, '0'))
+    .join('')}`
+}
+
+/**
+ * clusterProperties (see the <Source> below) sums an `artCount` per cluster.
+ * A cluster is all-art when that count equals the cluster's total, all-camp
+ * when it's zero, and mixed otherwise — mixed gets a deliberate blended
+ * color rather than falling through to camp.
+ */
+export function clusterColor(palette: PlayaPalette) {
+  return [
+    'case',
+    ['==', ['get', 'artCount'], ['get', 'point_count']],
+    palette.art,
+    ['==', ['get', 'artCount'], 0],
+    palette.camp,
+    mixColors(palette.art, palette.camp),
+  ] as const
+}
+
 /**
  * Camps and art as a single clustered source. ~1,700 points is well inside what
  * MapLibre's own GeoJSON clustering handles on a phone — deck.gl only starts to
@@ -51,13 +94,29 @@ export function PoiLayers({ pois, visible, palette, focusPosition }: Props) {
   const colorByKind = ['match', ['get', 'kind'], 'art', palette.art, palette.camp] as const
 
   return (
-    <Source id="pois" type="geojson" data={data} cluster clusterRadius={44} clusterMaxZoom={15}>
+    <Source
+      id="pois"
+      type="geojson"
+      data={data}
+      cluster
+      clusterRadius={44}
+      clusterMaxZoom={15}
+      // Counts art members per cluster so the circle layer below can tell a
+      // pure-art cluster from a pure-camp one from a mixed one, instead of
+      // the fixed camp color every cluster used to get regardless of what
+      // was actually inside it (issue #35). Camp count is implied by
+      // point_count - artCount, since visible.has() upstream only ever lets
+      // art/camp through this source.
+      clusterProperties={{
+        artCount: ['+', ['case', ['==', ['get', 'kind'], 'art'], 1, 0]],
+      }}
+    >
       <Layer
         id={POI_CLUSTER_LAYER_ID}
         type="circle"
         filter={['has', 'point_count']}
         paint={{
-          'circle-color': palette.camp,
+          'circle-color': clusterColor(palette) as unknown as string,
           // A cluster is scaffolding — it says "there is a lot here", and it
           // disappears the moment you look closer. At 0.85 with a full-strength
           // count on it, "160" was reading louder than "Center Camp": the city

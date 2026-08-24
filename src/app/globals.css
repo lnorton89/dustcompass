@@ -7,7 +7,7 @@
  *
  * They cannot be applied to `body`: the app shell is `position: fixed` and the
  * drawers are portals, and fixed boxes are laid out against the viewport, not
- * against a padded body. Padding there would look correct and do nothing.
+ * against a padded body. Padding here would look correct and do nothing.
  */
 :root {
   --safe-top: env(safe-area-inset-top, 0px);

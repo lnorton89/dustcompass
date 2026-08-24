@@ -14,10 +14,13 @@ import {
   ToggleButton,
   Toolbar,
   Tooltip,
+  TextField,
   Typography,
 } from '@mui/material'
 import { useMediaQuery } from '@mui/material'
+import SearchIcon from '@mui/icons-material/Search'
 import IconButton from '@mui/material/IconButton'
+import InputAdornment from '@mui/material/InputAdornment'
 import TuneIcon from '@mui/icons-material/Tune'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import NightlightIcon from '@mui/icons-material/Nightlight'
@@ -318,13 +321,31 @@ export default function App() {
             )}
 
             <Box sx={{ flex: '1 1 auto', minWidth: { xs: 0, sm: 220 }, maxWidth: { md: 480 } }}>
-              {data && (
+              {data ? (
                 <SearchPanel
                   layout={data.layout}
                   pois={data.pois}
                   places={places}
                   onGo={flyTo}
                   compact={compact}
+                />
+              ) : (
+                // Hold the shape. An empty box here left the buttons stranded
+                // against the right edge of an otherwise blank bar.
+                <TextField
+                  fullWidth
+                  size="small"
+                  disabled
+                  placeholder="Loading the playa…"
+                  slotProps={{
+                    input: {
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon fontSize="small" />
+                        </InputAdornment>
+                      ),
+                    },
+                  }}
                 />
               )}
             </Box>
@@ -424,8 +445,24 @@ export default function App() {
             </Alert>
           )}
           {!data && !error && (
-            <Stack sx={{ height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+            <Stack
+              sx={{
+                height: '100%',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 2,
+                px: 4,
+                textAlign: 'center',
+              }}
+            >
               <CircularProgress />
+              <Typography variant="h6">Drawing Black Rock City</Typography>
+              {/* A spinner on a black screen is indistinguishable from a broken
+                  app, and this is the one moment the map has nothing to show. */}
+              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 340 }}>
+                The city is built on your device from this year&rsquo;s survey, so there are no map
+                tiles to wait for.
+              </Typography>
             </Stack>
           )}
           {data && (

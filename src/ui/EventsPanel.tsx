@@ -24,6 +24,7 @@ import type { EventItem, Poi } from '../data/types'
 import { PLAYA_TIME_ZONE, formatWhen, occurrencesInWindow, type EventWindow } from '../data/events'
 import { formatDistance, travelBetween } from '../brc/travel'
 import type { Position } from '../brc/geo'
+import type { LocationStatus } from '../data/useGeolocation'
 
 interface Props {
   open: boolean
@@ -35,6 +36,8 @@ interface Props {
   preview: boolean
   /** Where to measure from when sorting by distance. */
   origin?: Position
+  /** State of the shared location watch, so a denial can be told apart from still locating. */
+  locationStatus: LocationStatus
   /** Asked for when someone chooses "Closest" without a fix yet. */
   onNeedLocation: () => void
   onSelect: (poi: Poi) => void
@@ -62,6 +65,7 @@ export function EventsPanel({
   now,
   preview,
   origin,
+  locationStatus,
   onNeedLocation,
   onSelect,
   onClose,
@@ -80,6 +84,30 @@ export function EventsPanel({
     }
   }, [preview])
   const [sort, setSort] = useState<'time' | 'distance'>('time')
+  // Set once a location attempt made for "Closest" comes back denied or
+  // unavailable, so the terminal state stays visible until a retry — not
+  // just for the instant the status flips.
+  const [locationIssue, setLocationIssue] = useState(false)
+  const locationFailed = locationStatus === 'denied' || locationStatus === 'unavailable'
+  useEffect(() => {
+    // A permission denial must not leave "Closest" selected while the rows
+    // have silently fallen back to plain time order — that reads as a
+    // working distance sort that simply never finishes. Fall back to time
+    // sorting explicitly, and say why, rather than leaving it indefinitely
+    // on "finding you…".
+    if (sort === 'distance' && locationFailed) {
+      setSort('time')
+      setLocationIssue(true)
+    }
+    // A fix arriving by any route (navigation, the map's own locate button)
+    // resolves the notice; it is not scoped to this panel's own request.
+    if (locationStatus === 'tracking') setLocationIssue(false)
+  }, [sort, locationFailed, locationStatus])
+  const retryLocation = () => {
+    setLocationIssue(false)
+    setSort('distance')
+    onNeedLocation()
+  }
   /**
    * A window and a sort were the only two questions you could ask of three
    * thousand listings. "Is my friend's camp doing the pancake thing again" was
@@ -203,9 +231,11 @@ export function EventsPanel({
             onChange={() => {
               const next = sort === 'distance' ? 'time' : 'distance'
               setSort(next)
+              setLocationIssue(false)
               // Choosing "Closest" is the moment asking for location makes
               // sense — offering the sort only after a fix exists means it is
-              // never there when it is first wanted.
+              // never there when it is first wanted. Also how a denial gets
+              // retried: pressing "Closest" again asks again.
               if (next === 'distance' && !origin) onNeedLocation()
             }}
             sx={{ flexShrink: 0, gap: 0.5, px: 1.25 }}
@@ -220,6 +250,32 @@ export function EventsPanel({
           {preview &&
             ` · previewing from ${now.toLocaleDateString(undefined, { timeZone: PLAYA_TIME_ZONE, weekday: 'long', month: 'short', day: 'numeric' })}`}
         </Typography>
+        {locationIssue && (
+          // A terminal state rather than the same "finding you…" left running
+          // forever — permission denial does not resolve itself, so nothing
+          // here is worth waiting on without pressing Retry.
+          <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: 'warning.main' }}>
+            {locationStatus === 'denied'
+              ? 'Location access is off, so events are sorted by time instead.'
+              : 'Could not get your location, so events are sorted by time instead.'}{' '}
+            <Box
+              component="button"
+              type="button"
+              onClick={retryLocation}
+              sx={{
+                border: 0,
+                p: 0,
+                bgcolor: 'transparent',
+                color: 'primary.main',
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                font: 'inherit',
+              }}
+            >
+              Retry
+            </Box>
+          </Typography>
+        )}
       </Box>
 
       {/* The rows scroll; the header above them stays. `pb` keeps the last

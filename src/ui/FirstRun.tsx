@@ -105,7 +105,8 @@ export function FirstRun() {
         </Stack>
 
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 3 }}>
-          Your location is only ever read while you are navigating, and it stays on this device.
+          Your location is only ever read when you ask for it — navigating, sorting events by
+          distance, or the map's own locate button — and it stays on this device.
         </Typography>
 
         <Button variant="contained" fullWidth onClick={dismiss} sx={{ mt: 2 }}>

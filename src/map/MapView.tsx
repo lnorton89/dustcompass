@@ -40,8 +40,8 @@ interface Props {
   cityUp: boolean
   onSelect: (poi: Poi | undefined) => void
   onProbe: (address: string, position: Position) => void
-  /** Fires when the browser reports the user's position. */
-  onLocate: (position: Position) => void
+  /** Fires when the map's locate control is pressed. */
+  onLocate: () => void
   /** A dropped or shared location to mark, if any. */
   pin?: { position: Position; address: string }
   /**
@@ -227,11 +227,18 @@ export function MapView({
       style={{ position: 'absolute', inset: 0 }}
     >
       <NavigationControl position="bottom-right" visualizePitch showCompass />
+      {/*
+       * `trackUserLocation` is deliberately off. With it on, this control ran
+       * its own continuous `watchPosition` independent of `useGeolocation`'s —
+       * two high-accuracy trackers that could both be active at once, with no
+       * single place to stop them from. As a one-shot locate button it fires
+       * once per press and hands ownership of ongoing tracking to the app's
+       * one watch instead.
+       */}
       <GeolocateControl
         position="bottom-right"
-        trackUserLocation
         positionOptions={{ enableHighAccuracy: true }}
-        onGeolocate={(event) => onLocate([event.coords.longitude, event.coords.latitude])}
+        onGeolocate={() => onLocate()}
       />
       {pin && (
         <Marker longitude={pin.position[0]} latitude={pin.position[1]} anchor="bottom">

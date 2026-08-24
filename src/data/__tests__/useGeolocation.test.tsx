@@ -1,0 +1,105 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { act, renderHook } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useGeolocation } from '../useGeolocation'
+
+type Success = (position: GeolocationPosition) => void
+type Failure = (error: GeolocationPositionError) => void
+
+describe('useGeolocation', () => {
+  let calls: { success: Success; error: Failure }[]
+  let nextWatchId: number
+  let watchPosition: ReturnType<typeof vi.fn>
+  let clearWatch: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    calls = []
+    nextWatchId = 0
+    watchPosition = vi.fn((success: Success, error: Failure) => {
+      calls.push({ success, error })
+      nextWatchId += 1
+      return nextWatchId
+    })
+    clearWatch = vi.fn()
+    // jsdom does not implement Geolocation; stand in with a test double whose
+    // watchPosition/clearWatch calls the hook is responsible for pairing up.
+    Object.defineProperty(navigator, 'geolocation', {
+      value: { watchPosition, clearWatch },
+      configurable: true,
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const fix = (lng: number, lat: number): GeolocationPosition =>
+    ({ coords: { longitude: lng, latitude: lat, accuracy: 5 }, timestamp: 1000 }) as GeolocationPosition
+
+  const error = (code: number): GeolocationPositionError =>
+    ({ code, PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 }) as GeolocationPositionError
+
+  /**
+   * A fix from a previous navigation session is minutes old and possibly from
+   * somewhere else entirely. Restarting must show a locating state, not
+   * immediately resolve to that stale fix as though it were current.
+   */
+  it('does not resolve to a stale fix immediately after stop -> start', () => {
+    const { result } = renderHook(() => useGeolocation())
+
+    act(() => result.current.start())
+    act(() => calls[0].success(fix(-119.2, 40.78)))
+    expect(result.current.position).toEqual([-119.2, 40.78])
+    expect(result.current.status).toBe('tracking')
+
+    act(() => result.current.stop())
+    act(() => result.current.start())
+
+    expect(result.current.position).toBeUndefined()
+    expect(result.current.accuracy).toBeUndefined()
+    expect(result.current.status).toBe('locating')
+
+    act(() => calls[1].success(fix(-119.21, 40.79)))
+    expect(result.current.position).toEqual([-119.21, 40.79])
+    expect(result.current.status).toBe('tracking')
+  })
+
+  it('starts exactly one watch per start() call and pairs each with a clearWatch', () => {
+    const { result } = renderHook(() => useGeolocation())
+    act(() => result.current.start())
+    expect(watchPosition).toHaveBeenCalledTimes(1)
+    // Calling start again while already watching must not start a second one.
+    act(() => result.current.start())
+    expect(watchPosition).toHaveBeenCalledTimes(1)
+
+    act(() => result.current.stop())
+    expect(clearWatch).toHaveBeenCalledWith(1)
+  })
+
+  /**
+   * A transient (non-permission) error used to drop the watch ID reference
+   * without telling the browser to stop watching, leaving lifecycle
+   * ownership of that watch ambiguous for any retry that followed.
+   */
+  it('clears the active watch on error before dropping ownership of it', () => {
+    const { result } = renderHook(() => useGeolocation())
+    act(() => result.current.start())
+    act(() => calls[0].error(error(2)))
+
+    expect(clearWatch).toHaveBeenCalledWith(1)
+    expect(result.current.status).toBe('unavailable')
+
+    // A retry after the error starts a fresh watch rather than accumulating.
+    act(() => result.current.start())
+    expect(watchPosition).toHaveBeenCalledTimes(2)
+  })
+
+  it('distinguishes permission denial from other failures', () => {
+    const { result } = renderHook(() => useGeolocation())
+    act(() => result.current.start())
+    act(() => calls[0].error(error(1)))
+    expect(result.current.status).toBe('denied')
+  })
+})

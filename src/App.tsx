@@ -114,11 +114,12 @@ export default function App() {
   const [unplaced, setUnplaced] = useState<UnplacedListing>()
   const [probe, setProbe] = useState<string>()
   const [deletedPlace, setDeletedPlace] = useState<(typeof places)[number]>()
-  // The map's own locate button and the "take me there" flow feed the same
-  // watch, so a heading stays live however it was started.
+  // The map's own locate control and the "take me there" flow feed the same
+  // watch, so a heading stays live however it was started, only one
+  // high-accuracy tracker is ever running, and stopping navigation reliably
+  // stops it.
   const location = useGeolocation()
-  const [manualHere, setManualHere] = useState<Position>()
-  const here = location.position ?? manualHere
+  const here = location.position
   const [eventsOpen, setEventsOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   /**
@@ -328,10 +329,16 @@ export default function App() {
   const arrived = useRef(false)
   useEffect(() => {
     if (!navigation || arrived.current) return
+    // `origin` falls back to the Man's own coordinates until a real GPS fix
+    // exists, so a destination within 25m of the Man could otherwise arm a
+    // false arrival the instant navigation starts, while the phone is still
+    // locating and the walker may be nowhere near it. Only a fix belonging
+    // to the active session may confirm arrival.
+    if (!here) return
     if (navigation.travel.meters > 25) return
     arrived.current = true
     haptic('arrive')
-  }, [navigation])
+  }, [navigation, here])
 
 
   /**
@@ -668,7 +675,10 @@ export default function App() {
                   setProbe(address)
                   setPin({ position, address })
                 }}
-                onLocate={setManualHere}
+                // The control's own one-shot fix is not kept — pressing it
+                // hands ownership of tracking to `useGeolocation`'s single
+                // watch instead of running a second one in parallel.
+                onLocate={location.start}
                 savedPlaces={places}
                 onSelectPlace={(id) => {
                   const place = places.find((p) => p.id === id)
@@ -676,7 +686,10 @@ export default function App() {
                 }}
                 pin={pin}
                 initialTarget={initialTarget}
-                route={heading && origin ? { from: origin, to: heading.position } : undefined}
+                // Withheld until a real fix exists rather than drawn from the
+                // Man fallback — a route line with no ambiguity about where it
+                // starts, matching what NavBar's own copy already says.
+                route={heading && here ? { from: here, to: heading.position } : undefined}
                 selected={selected}
                 destination={heading}
               />
@@ -923,6 +936,7 @@ export default function App() {
           now={clock.now}
           preview={clock.preview}
           origin={here}
+          locationStatus={location.status}
           onNeedLocation={location.start}
           onSelect={(poi) => {
             setEventsOpen(false)

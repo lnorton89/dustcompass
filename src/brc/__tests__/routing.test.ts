@@ -25,6 +25,18 @@ const layout: CityLayout = {
   portals: [],
 }
 
+const sparseLayout: CityLayout = {
+  ...layout,
+  cStreets: [
+    { ref: 'a', name: 'A', distance: 1000, segments: [['5:00', '7:00']] },
+    { ref: 'b', name: 'B', distance: 2000, segments: [['5:00', '7:00']] },
+    { ref: 'c', name: 'C', distance: 3000, segments: [['5:00', '7:00']] },
+  ],
+  tStreets: [
+    { refs: ['5:00', '7:00'], segments: [['a', 'c']] },
+  ],
+}
+
 describe('offline surveyed street routing', () => {
   it('builds edges only from surveyed radial/annular intersections', () => {
     const graph = buildStreetGraph(layout)
@@ -45,6 +57,17 @@ describe('offline surveyed street routing', () => {
     expect(route.coordinates.at(-1)).toEqual(to)
   })
 
+  it('snaps a frontage point to the middle of a real annular edge rather than requiring an intersection', () => {
+    const from = polarToPosition(sparseLayout, '6:00', 2000)
+    const to = polarToPosition(sparseLayout, '5:00', 2000)
+    const route = routeBetween(sparseLayout, from, to)
+
+    expect(route.kind).toBe('street')
+    expect(route.coordinates[0]).toEqual(from)
+    expect(route.coordinates.at(-1)).toEqual(to)
+    expect(route.coordinates.length).toBeGreaterThan(2)
+  })
+
   it('keeps open-playa travel as direct bearing guidance', () => {
     const from = polarToPosition(layout, '3:00', 300)
     const to = polarToPosition(layout, '6:00', 700)
@@ -55,10 +78,14 @@ describe('offline surveyed street routing', () => {
     expect(route.meters).toBeCloseTo(distanceBetween(from, to), 6)
   })
 
-  it('falls back to explicit direct guidance when a city point cannot safely snap to the graph', () => {
-    const from = polarToPosition(layout, '6:00', 1300)
-    const to = polarToPosition(layout, '4:00', 1300)
-    const route = routeBetween(layout, from, to)
+  it('falls back to explicit direct guidance when a city point cannot safely snap to any surveyed street', () => {
+    // Halfway between B and C is ~152 m from either annular in this deliberately
+    // sparse synthetic plan, beyond the 140 m frontage snap ceiling; 6:00 is
+    // also halfway between the only two radials, so there is no valid street
+    // access to invent.
+    const from = polarToPosition(sparseLayout, '6:00', 2500)
+    const to = polarToPosition(sparseLayout, '5:00', 2000)
+    const route = routeBetween(sparseLayout, from, to)
 
     expect(route.kind).toBe('direct')
     expect(route.coordinates).toEqual([from, to])

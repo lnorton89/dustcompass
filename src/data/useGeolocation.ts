@@ -26,6 +26,12 @@ export function useGeolocation(): Geolocation {
   const [lastFixAt, setLastFixAt] = useState<number>()
   const watchId = useRef<number>(undefined)
 
+  const clearFix = useCallback(() => {
+    setPosition(undefined)
+    setAccuracy(undefined)
+    setLastFixAt(undefined)
+  }, [])
+
   const stop = useCallback(() => {
     if (watchId.current !== undefined) {
       navigator.geolocation.clearWatch(watchId.current)
@@ -36,15 +42,9 @@ export function useGeolocation(): Geolocation {
     // *right now*. Once nothing is watching any more, it can only get more
     // wrong as the person keeps moving — leaving it in state let it be read
     // indefinitely by DetailDrawer/EventDetail/navigation as a live "you"
-    // fix that could in truth be minutes or hours stale (#50). Clearing it
-    // here makes "stopped" behave exactly like "never located" for every
-    // consumer that already treats `Boolean(position)` as "do I know where
-    // they are", rather than needing each of those call sites to separately
-    // reason about staleness.
-    setPosition(undefined)
-    setAccuracy(undefined)
-    setLastFixAt(undefined)
-  }, [])
+    // fix that could in truth be minutes or hours stale (#50).
+    clearFix()
+  }, [clearFix])
 
   const start = useCallback((initialFix?: GeolocationPosition) => {
     // The map control has already paid for a one-shot fix by the time its
@@ -59,18 +59,15 @@ export function useGeolocation(): Geolocation {
     }
     if (watchId.current !== undefined) return
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      clearFix()
       setStatus('unavailable')
       return
     }
     // A fix from a previous session — possibly minutes old and from
     // somewhere else on the playa — must not be presented as the current
-    // position while a fresh one is still being acquired. Clear it so
-    // `position` stays undefined (and callers relying on `Boolean(position)`
-    // correctly read "not located yet") until the new watch actually reports.
+    // position while a fresh one is still being acquired.
     if (!initialFix) {
-      setPosition(undefined)
-      setAccuracy(undefined)
-      setLastFixAt(undefined)
+      clearFix()
       setStatus('locating')
     }
     watchId.current = navigator.geolocation.watchPosition(
@@ -82,32 +79,12 @@ export function useGeolocation(): Geolocation {
       },
       (error) => {
         // Permission denial is terminal — the browser will never call this
-        // watch back again, so tear it down the same way `stop()` does.
-        // POSITION_UNAVAILABLE and TIMEOUT are not: real devices throw these
-        // as transient blips (a moment of lost signal, a slow first fix)
-        // while the underlying watch keeps running and calling back again
-        // once a fix is available — Chromium's own mocked geolocation fires
-        // exactly this kind of error immediately before delivering an
-        // updated position when a test moves the override. Clearing the
-        // watch here used to end tracking permanently on that single blip,
-        // with nothing left to restart it since `start()` no-ops while
-        // `watchId` looks already-active. Keep the watch so it can recover,
-        // but withdraw the old fix immediately: navigation, arrival and
-        // nearest-service actions must never keep treating it as live.
-        //
-        // Status stays 'locating', not 'unavailable': the latter surfaces
-        // NavBar's "Retry device location" button, whose handler is `start()`
-        // with no args — a no-op here since `watchId` is deliberately left
-        // set so the same watch can recover. On a real phone these blips are
-        // routine (a moment of lost signal, a slow cold-start fix), so
-        // reporting them as 'unavailable' left users staring at a Retry
-        // button that did nothing. 'locating' shows "finding you…" instead,
-        // which is what's actually happening while the watch waits to
-        // recover on its own.
+        // watch back again, so tear it down and withdraw the old fix just as
+        // `stop()` does. A denial can happen after successful samples if the
+        // user revokes permission while the app is open; retaining that sample
+        // would leave navigation trusting a coordinate that can never refresh.
         if (error.code !== error.PERMISSION_DENIED) {
-          setPosition(undefined)
-          setAccuracy(undefined)
-          setLastFixAt(undefined)
+          clearFix()
           setStatus('locating')
           return
         }
@@ -115,11 +92,12 @@ export function useGeolocation(): Geolocation {
           navigator.geolocation.clearWatch(watchId.current)
           watchId.current = undefined
         }
+        clearFix()
         setStatus('denied')
       },
       { enableHighAccuracy: true, maximumAge: 5_000, timeout: 20_000 },
     )
-  }, [])
+  }, [clearFix])
 
   useEffect(() => stop, [stop])
 

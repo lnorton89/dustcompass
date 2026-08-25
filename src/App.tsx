@@ -59,7 +59,7 @@ import { useSavedEvents } from './data/useSavedEvents'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
 import { travelForMeters } from './brc/travel'
-import { routeBetween, type PlayaRoute } from './brc/routing'
+import { routeBetween } from './brc/routing'
 import { bearingToClock, bearingBetween, bearingsMatch, distanceBetween, isNearCity } from './brc/geo'
 import { shareLink } from './ui/share'
 import type { EventItem, Poi, PoiKind, UnplacedListing } from './data/types'
@@ -1098,7 +1098,10 @@ export default function App() {
       positionSource?: 'gps' | 'address'
       uid?: string
     }) => {
-      setDirectionsFrom(defaultDirectionsOrigin(Boolean(usableFix)))
+      const routeOrigin: DirectionsEndpoint = usableFix || location.status === 'idle' || location.status === 'locating'
+        ? { kind: 'live' }
+        : { kind: 'man' }
+      setDirectionsFrom(routeOrigin)
       setDirectionsTo(
         target.uid
           ? { kind: 'poi', uid: target.uid }
@@ -1113,7 +1116,7 @@ export default function App() {
         address: target.address,
         approximate: target.positionSource === 'address',
         uid: target.uid,
-        liveOrigin: true,
+        liveOrigin: routeOrigin.kind === 'live',
         mode: directionsMode,
       })
       arrived.current = false
@@ -1154,9 +1157,10 @@ export default function App() {
         })
         framedNavigationFor.current = undefined
       }
-      acquireLocation('navigation')
+      if (routeOrigin.kind === 'live') acquireLocation('navigation')
+      else releaseLocation('navigation')
     },
-    [acquireLocation, directionsMode, navigationPadding, usableFix],
+    [acquireLocation, directionsMode, location.status, navigationPadding, releaseLocation, usableFix],
   )
 
   useEffect(() => {

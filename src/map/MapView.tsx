@@ -7,7 +7,7 @@ import {
   type MapLayerMouseEvent,
   type MapRef,
 } from '@vis.gl/react-maplibre'
-import { Button, Stack, Typography } from '@mui/material'
+import { Box, Button, Stack, Typography } from '@mui/material'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
 import type { GeoJSONSource } from 'maplibre-gl'
 import type { PlayaData } from '../data/usePlayaData'

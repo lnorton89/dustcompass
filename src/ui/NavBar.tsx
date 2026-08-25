@@ -55,7 +55,6 @@ interface Props {
  */
 export function NavBar({
   name,
-  address,
   travel,
   heading,
   located,

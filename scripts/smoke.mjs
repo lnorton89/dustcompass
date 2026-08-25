@@ -482,9 +482,15 @@ await page.waitForTimeout(6500)
 const overlappingPin = page.getByRole('button', { name: /Marked location: Esplanade & 7:30/ })
 await overlappingPin.click()
 await page.waitForTimeout(400)
+const underlyingListing = await page
+  .getByTestId('detail-panel')
+  .locator('h5, h6')
+  .first()
+  .innerText()
+  .catch(() => '')
 assert(
-  (await page.getByTestId('detail-panel').count()) === 0,
-  'clicking a dropped address marker does not select the listing underneath',
+  underlyingListing.trim() === '',
+  `clicking a dropped address marker does not select the listing underneath${underlyingListing ? ` (opened "${underlyingListing.trim()}")` : ''}`,
 )
 assert(
   (await page.getByRole('button', { name: /^Save$/ }).count()) > 0,

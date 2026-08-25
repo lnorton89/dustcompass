@@ -18,19 +18,19 @@ export function isInteractiveMapMarkerTarget(target: EventTarget | null): boolea
   return Boolean(target.closest('[data-map-marker-interactive="true"]'))
 }
 
-const MARKER_CLICK_GUARD_MS = 1_000
+interface ScreenPoint {
+  x: number
+  y: number
+}
 
-/** MapLibre can retarget its synthesized map click to the canvas, losing the
- * original marker element. A preceding pointer-down is therefore the durable
- * signal that the next map click belongs to the marker. */
-export function shouldIgnoreMapClick(
-  target: EventTarget | null,
-  markerPointerAt: number,
-  now = Date.now(),
-): boolean {
+/** The marker is bottom-centred on its coordinate and its transparent button
+ * is 44px square. Geometry remains reliable even when MapLibre retargets the
+ * native click to its canvas and discards the original DOM marker target. */
+export function isDroppedMarkerHit(click: ScreenPoint, anchor: ScreenPoint): boolean {
   return (
-    isInteractiveMapMarkerTarget(target) ||
-    (markerPointerAt > 0 && now - markerPointerAt <= MARKER_CLICK_GUARD_MS)
+    Math.abs(click.x - anchor.x) <= 22 &&
+    click.y <= anchor.y &&
+    click.y >= anchor.y - 44
   )
 }
 

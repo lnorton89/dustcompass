@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   handleMapMarkerClick,
+  isDroppedMarkerHit,
   isInteractiveMapMarkerTarget,
-  shouldIgnoreMapClick,
 } from '../markerClick'
 
 describe('map marker click isolation', () => {
@@ -27,10 +27,12 @@ describe('map marker click isolation', () => {
     expect(isInteractiveMapMarkerTarget(null)).toBe(false)
   })
 
-  it('guards a canvas-retargeted map click immediately after marker pointer-down', () => {
-    const canvas = Object.assign(new EventTarget(), { closest: vi.fn(() => null) })
+  it('recognizes the bottom-centred 44px marker box after canvas retargeting', () => {
+    const anchor = { x: 100, y: 200 }
 
-    expect(shouldIgnoreMapClick(canvas, 10_000, 10_500)).toBe(true)
-    expect(shouldIgnoreMapClick(canvas, 10_000, 11_001)).toBe(false)
+    expect(isDroppedMarkerHit({ x: 100, y: 178 }, anchor)).toBe(true)
+    expect(isDroppedMarkerHit({ x: 78, y: 156 }, anchor)).toBe(true)
+    expect(isDroppedMarkerHit({ x: 77, y: 178 }, anchor)).toBe(false)
+    expect(isDroppedMarkerHit({ x: 100, y: 201 }, anchor)).toBe(false)
   })
 })

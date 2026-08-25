@@ -1,0 +1,58 @@
+name: Verify PR133 browser
+
+on:
+  push:
+    branches: [verify/pr133-browser]
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run fetch-data -- 2026
+      - run: npm run fetch-api -- 2026
+        env:
+          BURNING_MAN_API_KEY: ${{ secrets.BURNING_MAN_API_KEY }}
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_BASE_PATH: /dustcompass
+          NEXT_PUBLIC_DATA_YEAR: 2026
+      - name: Start production export
+        run: |
+          node scripts/serve-export.mjs &
+          npx wait-on -t 60000 http://127.0.0.1:4173/dustcompass/
+        env:
+          NEXT_PUBLIC_BASE_PATH: /dustcompass
+      - name: Human browser journeys
+        run: npm run test:human
+        env:
+          HUMAN_E2E_URL: http://127.0.0.1:4173/dustcompass/
+      - name: Smoke
+        if: always()
+        run: npm run test:smoke http://127.0.0.1:4173/dustcompass/
+      - name: Accessibility
+        if: always()
+        run: npm run test:a11y http://127.0.0.1:4173/dustcompass/
+      - name: UI invariants
+        if: always()
+        run: npm run test:ui http://127.0.0.1:4173/dustcompass/
+      - name: Offline
+        if: always()
+        run: npm run test:offline http://127.0.0.1:4173/dustcompass/
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr133-browser-screenshots
+          path: '*.png'
+          if-no-files-found: ignore

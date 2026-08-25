@@ -63,11 +63,6 @@ function persist(events: SavedEvent[]): boolean {
   }
 }
 
-/**
- * Mutations synchronously attempt their durable write and return its result.
- * State still changes when storage is unavailable so the current session can
- * keep working, but callers can no longer present that fallback as durable.
- */
 export function useSavedEvents() {
   const [savedEvents, setSavedEvents] = useState<SavedEvent[]>(read)
   const savedEventsRef = useRef(savedEvents)

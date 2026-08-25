@@ -3,6 +3,7 @@ import { Box, Chip, Drawer, IconButton, Stack, Typography } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import IosShareIcon from '@mui/icons-material/IosShare'
 import type { UnplacedListing } from '../data/types'
+import { ArtAudioGuide } from './ArtAudioGuide'
 
 interface Props {
   listing: UnplacedListing | undefined
@@ -118,6 +119,10 @@ export function UnplacedSheet({ listing, onShare, onClose, compact }: Props) {
                 : 'No description published yet. Camps often add one closer to the event.'}
             </Typography>
           )}
+
+          {/* UID-only lookup: this stays useful before Gates without ever
+              reading or deriving an embargoed art location. */}
+          {listing.kind === 'art' && <ArtAudioGuide uid={listing.uid} />}
         </Box>
       )}
     </Drawer>

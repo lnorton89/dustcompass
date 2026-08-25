@@ -924,6 +924,8 @@ export default function App() {
     [compact],
   )
 
+  const framedNavigationFor = useRef<string | undefined>(undefined)
+
   const startDirections = useCallback(() => {
     if (!data || !directionsTo) return
     const route = resolveDirectionsRoute(directionsFrom, directionsTo, {
@@ -989,7 +991,6 @@ export default function App() {
     setDirectionsTo(previousFrom)
   }, [directionsFrom, directionsTo])
 
-  const framedNavigationFor = useRef<string | undefined>(undefined)
   const navigateTo = useCallback(
     (target: {
       name: string

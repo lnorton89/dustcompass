@@ -43,7 +43,7 @@ import { FocusMarker } from './FocusMarker'
 import { UserLocationMarker } from './UserLocationMarker'
 import { PlayaScene } from './PlayaScene'
 import { assetUrl } from '../config'
-import { handleMapMarkerClick } from './markerClick'
+import { handleMapMarkerClick, shouldIgnoreMapClick } from './markerClick'
 
 interface Props {
   data: PlayaData
@@ -249,9 +249,15 @@ export function MapView({
   // Frame the whole city rather than guessing a zoom. A fixed zoom that suits a
   // desktop window crops the city badly on a tall phone screen.
   const outline = useMemo(() => cityOutlinePoints(data.city.streets), [data.city])
+  const markerPointerAt = useRef(0)
 
   const handleClick = useCallback(
     (event: MapLayerMouseEvent) => {
+      // React's stopPropagation does not necessarily beat MapLibre's native
+      // listener on the container. The original target is authoritative: a
+      // click on the dropped marker belongs to that marker, never to a POI
+      // rendered under the same pixel.
+      if (shouldIgnoreMapClick(event.originalEvent.target, markerPointerAt.current)) return
       const { x, y } = event.point
       const project = (position: [number, number]) => event.target.project(position)
       const queryLayer = (layers: string[], radius: number) =>
@@ -491,8 +497,12 @@ export function MapView({
            */}
           <button
             type="button"
+            data-map-marker-interactive="true"
             title={pin.address}
             aria-label={`Marked location: ${pin.address}. Reopen save and share options.`}
+            onPointerDown={() => {
+              markerPointerAt.current = Date.now()
+            }}
             onClick={(event) => {
               // A DOM marker sits over the WebGL canvas. Without stopping the
               // click here, MapLibre also selects whichever POI is underneath.

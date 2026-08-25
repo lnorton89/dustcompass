@@ -470,6 +470,29 @@ if (contested) {
   console.log('      no shared pin drawn at this zoom')
 }
 
+// A dropped address marker can occupy the exact pixel as a geocoded camp.
+// React stopping its button click is insufficient because MapLibre's native
+// container listener still sees the same DOM event. Once the initial actions
+// hide, clicking this marker must reopen them without selecting Camp Home (or
+// whichever listing happens to share that address) underneath.
+await search.fill('7:30 & Esplanade')
+await page.waitForTimeout(700)
+await page.getByRole('option', { name: /Esplanade & 7:30/ }).click()
+await page.waitForTimeout(6500)
+const overlappingPin = page.getByRole('button', { name: /Marked location: Esplanade & 7:30/ })
+await overlappingPin.click()
+await page.waitForTimeout(400)
+assert(
+  (await page.getByTestId('detail-panel').count()) === 0,
+  'clicking a dropped address marker does not select the listing underneath',
+)
+assert(
+  (await page.getByRole('button', { name: /^Save$/ }).count()) > 0,
+  'clicking a dropped address marker reopens its save/share actions',
+)
+await page.getByRole('button', { name: /^Clear$/ }).last().click()
+await page.waitForTimeout(300)
+
 // Tapping bare playa drops a shareable pin and puts the address in the URL.
 /**
  * Ask the map where there is nothing, rather than guessing pixels. Hard-coded

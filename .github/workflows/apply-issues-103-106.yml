@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: node scripts/apply-issues-103-106.mjs
+      - run: node scripts/patch-app-103-106.mjs
       - name: Commit generated fix
         run: |
           git config user.name 'github-actions[bot]'

@@ -17,9 +17,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Run human-style journeys against deployed Pages site
-        env:
-          HUMAN_E2E_URL: https://lnorton89.github.io/dustcompass/
-        run: node scripts/human-e2e-live.mjs
+        run: node scripts/human-e2e-live-v2.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -510,6 +510,12 @@ if (contested) {
 await search.fill('7:30 & Esplanade')
 await page.waitForTimeout(700)
 await page.getByRole('option', { name: /Esplanade & 7:30/ }).click()
+await page.waitForTimeout(400)
+assert(
+  (await page.getByRole('button', { name: /^Save$/ }).count()) > 0,
+  'selecting a searched address immediately exposes its Save action (#122)',
+)
+// The action bar may still auto-dismiss; the marker remains the recovery path.
 await page.waitForTimeout(6500)
 const overlappingPin = page.getByRole('button', { name: /Marked location: Esplanade & 7:30/ })
 await overlappingPin.click()

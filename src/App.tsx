@@ -950,7 +950,15 @@ export default function App() {
       // different target and should not leave that earlier pin sitting on
       // the map as an unrelated, unexplained marker.
       if (poi) setPin(undefined)
-      else if (data) setPin({ position, address: addressFor(position, data.layout) })
+      else if (data) {
+        const address = addressFor(position, data.layout)
+        setPin({ position, address })
+        // Searching an address is the same human action as tapping bare playa:
+        // a fresh pin was just created, so expose Save/Share/Clear now rather
+        // than requiring the reader to discover that the marker can be tapped
+        // a second time (#122).
+        setProbe(address)
+      }
     },
     [data, focusPadding],
   )

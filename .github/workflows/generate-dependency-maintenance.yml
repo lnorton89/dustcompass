@@ -1,0 +1,32 @@
+name: Generate dependency maintenance
+on:
+  push:
+    branches: [chore/dependabot-maintenance-2026-08-25]
+permissions:
+  contents: write
+jobs:
+  update:
+    if: ${{ !contains(github.event.head_commit.message, '[deps-generated]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: chore/dependabot-maintenance-2026-08-25
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install supported dependency updates
+        run: npm install --save-dev typescript@^6.0.3 @types/node@^26.2.0 @vitejs/plugin-react@^6.1.0
+      - name: Update cache action
+        run: sed -i 's#actions/cache@v4#actions/cache@v6#g' .github/workflows/ci.yml .github/workflows/deploy.yml
+      - name: Verify lockfile installs cleanly
+        run: npm ci
+      - name: Commit generated dependency update
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add package.json package-lock.json .github/workflows/ci.yml .github/workflows/deploy.yml
+          git commit -m "chore: apply supported dependency updates [deps-generated]"
+          git push origin HEAD:chore/dependabot-maintenance-2026-08-25

@@ -519,23 +519,29 @@ self.addEventListener('fetch', (event) => {
       const exact = await cache.match(request);
       if (exact) return exact;
 
-      // A listing page is a real page on the server and is deliberately not
-      // precached, so it has to be fetched — but never written back, which is
-      // what was poisoning the shell. Falling straight through to SHELL here
-      // served the app at /p/<uid>/ with no listing in the URL, so every
-      // shared link opened the bare city once a cache existed. Bounded by
-      // REQUEST_TIMEOUT_MS so a captive portal or dead hotspot that never
-      // answers can't hold up the eventual fallback to the cached shell.
+      const listing = /[/]p[/]([^/]+)[/]?$/.exec(url.pathname);
+
+      // A listing page exists for crawlers and is deliberately not precached,
+      // so an online request may still fetch it. Do not trust HTTP success as
+      // proof that the response is ours, though: captive portals routinely
+      // answer arbitrary navigation URLs with their own 200 OK HTML. The
+      // generated share page carries a stable marker in its server-rendered
+      // body; only a response containing that marker is accepted for /p/<uid>.
+      // Any unrelated 2xx response falls through to the same cached-shell
+      // restoration used by timeout/offline failures (#94).
       try {
         const network = await fetch(request, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-        if (network.ok) return network;
+        if (network.ok) {
+          if (!listing) return network;
+          const body = await network.clone().text();
+          if (body.includes('data-dust-compass-share-page="1"')) return network;
+        }
       } catch {
-        /* offline, timed out, or the page has gone; fall through */
+        /* offline, timed out, unreadable response, or the page has gone; fall through */
       }
 
-      // Offline, a shared listing link still has somewhere to go: the app is
-      // cached, and the listing travels as a query parameter instead of a path.
-      const listing = /[/]p[/]([^/]+)[/]?$/.exec(url.pathname);
+      // Offline or intercepted, a shared listing link still has somewhere to
+      // go: the app is cached, and the listing travels as a query parameter.
       if (listing) {
         // Response.redirect() requires an absolute URL. SHELL is
         // root-relative on a project-subpath deployment (e.g.

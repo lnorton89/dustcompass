@@ -230,7 +230,7 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
   // The trailing guard matters: without it the hour of a second clock reads
   // as a distance, and "10:00 & 10:00 B Plaza" pins ten feet from the Man
   // instead of on a plaza a kilometre away.
-  const open = new RegExp(String.raw`^(${CLOCK})\s*[,&@]?\s*(\d{1,5})(?![\d:.])\s*(?:'|ft|feet)?\s*const open = new RegExp(String.raw`^(${CLOCK})\s*[,&@]?\s*(\d{1,5})(?![\d:.])\s*(?:'|ft|feet), 'i').exec(raw)
+  const open = new RegExp(String.raw`^(${CLOCK})\s*[,&@]?\s*(\d{1,5})(?![\d:.])\s*(?:'|ft|feet)?\s*$`, 'i').exec(raw)
   if (open) {
     const clock = normaliseClock(open[1])
     return {

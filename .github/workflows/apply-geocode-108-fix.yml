@@ -6,7 +6,7 @@ permissions:
   contents: write
 jobs:
   patch:
-    if: ${{ !contains(github.event.head_commit.message, '[geocode-clean-applied]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[geocode-final-applied]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -17,11 +17,11 @@ jobs:
         with:
           node-version: 24
       - run: git fetch origin master
-      - run: node scripts/repair-geocode-from-master.mjs
+      - run: node scripts/repair-geocode-final.mjs
       - run: |
-          rm -f scripts/patch-geocode-108.mjs scripts/repair-geocode-from-master.mjs
+          rm -f scripts/repair-geocode-final.mjs scripts/repair-geocode-from-master.mjs scripts/patch-geocode-108.mjs
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "fix: restore and guard open-playa parser [geocode-clean-applied]"
+          git commit -m "fix: restore and guard open-playa parser [geocode-final-applied]"
           git push origin HEAD:fix/issues-107-114

@@ -1,0 +1,24 @@
+name: Apply mobile navigation fixes
+on:
+  push:
+    branches: [fix/mobile-nav-and-human-e2e]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[mobile-nav-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node scripts/apply-mobile-nav-fixes.mjs
+      - name: Commit applied patch and remove helper
+        run: |
+          git rm scripts/apply-mobile-nav-fixes.mjs .github/workflows/apply-mobile-nav-fixes.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/ui/NavBar.tsx src/ui/DetailDrawer.tsx
+          git commit -m "Fix mobile navigation stacking and focus restoration (#129, #130) [mobile-nav-applied]"
+          git push

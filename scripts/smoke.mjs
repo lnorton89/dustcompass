@@ -44,7 +44,15 @@ page.on('console', (m) => {
  * rather than clicked away after: this run is about the forty flows behind it,
  * and the dialog itself is covered by the accessibility pass.
  */
-await page.addInitScript(() => {
+// Context-scoped, not page-scoped: `shared` below opens a second page in
+// this same context and also needs the map handle.
+await context.addInitScript(() => {
+  // Runtime flag MapView.tsx checks before exposing `window.__map` (#68) —
+  // the same compiled bundle ships to every environment; only a harness
+  // that sets this global before load ever sees the handle, so the exact
+  // bytes this suite tests are the exact bytes that get published, with
+  // nothing a real visitor's browser would ever set.
+  window.__DUST_COMPASS_E2E__ = true
   try {
     localStorage.setItem('dust-compass:first-run:1', 'seen')
   } catch {
@@ -696,6 +704,7 @@ assert(
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 } })
   const orient = await mobile.newPage()
   await orient.addInitScript(() => {
+    window.__DUST_COMPASS_E2E__ = true
     try {
       localStorage.setItem('dust-compass:first-run:1', 'seen')
     } catch {
@@ -759,6 +768,9 @@ await shared.close()
 {
   const linked = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const page = await linked.newPage()
+  await page.addInitScript(() => {
+    window.__DUST_COMPASS_E2E__ = true
+  })
   const listings = await (
     await linked.request.get(new URL(`data/${DATA_YEAR}/camp.json`, url).href)
   ).json()
@@ -800,6 +812,7 @@ await shared.close()
   const stale = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const page = await stale.newPage()
   await page.addInitScript(() => {
+    window.__DUST_COMPASS_E2E__ = true
     try {
       localStorage.setItem('dust-compass:first-run:1', 'seen')
     } catch {
@@ -845,6 +858,7 @@ await shared.close()
   const detail = await browser.newContext({ viewport: { width: 390, height: 844 } })
   const page = await detail.newPage()
   await page.addInitScript(() => {
+    window.__DUST_COMPASS_E2E__ = true
     try {
       localStorage.setItem('dust-compass:first-run:1', 'seen')
     } catch {
@@ -943,6 +957,9 @@ await shared.close()
       permissions: ['geolocation'],
     })
     const page = await ctx.newPage()
+    await page.addInitScript(() => {
+      window.__DUST_COMPASS_E2E__ = true
+    })
     const listings = await (await ctx.request.get(`${base}camp.json`)).json()
     const layout = await (await ctx.request.get(`${base}layout.json`)).json()
     const man = layout.center.geometry.coordinates
@@ -1017,6 +1034,9 @@ await shared.close()
     permissions: ['geolocation'],
   })
   const page = await ctx.newPage()
+  await page.addInitScript(() => {
+    window.__DUST_COMPASS_E2E__ = true
+  })
   const listings = await (await ctx.request.get(`${base}camp.json`)).json()
   const camp = listings.find((entry) => entry.location_string && entry.uid && entry.name)
 
@@ -1083,6 +1103,9 @@ await shared.close()
   const readNotice = async (when) => {
     const ctx = await browser.newContext({ viewport: { width: 1200, height: 850 } })
     const page = await ctx.newPage()
+    await page.addInitScript(() => {
+      window.__DUST_COMPASS_E2E__ = true
+    })
     await page.clock.install({ time: new Date(when) })
     await page.goto(url, { waitUntil: 'load' })
     await page.waitForFunction(() => window.__map, null, { timeout: 30000 })

@@ -41,7 +41,6 @@ const fail = (label, detail) => {
   console.log(`FAIL  ${label}`)
   if (detail) console.log(`        ${detail}`)
 }
-const skip = (label) => console.log(`SKIP  ${label}`)
 
 const browser = await chromium.launch({
   ...(CHROME ? { executablePath: CHROME } : {}),
@@ -62,6 +61,10 @@ async function open(viewport, reading = 'normal') {
   })
   const page = await context.newPage()
   await page.addInitScript((size) => {
+    // Runtime flag MapView.tsx checks before exposing `window.__map` (#68) —
+    // set here rather than baked in at build time, so this suite exercises
+    // the exact same bundle that gets published, not a build-time sibling.
+    window.__DUST_COMPASS_E2E__ = true
     try {
       localStorage.setItem('dust-compass:first-run:1', 'seen')
       localStorage.setItem('dust-compass:embargo-notice:2026', 'seen')
@@ -161,14 +164,12 @@ for (const viewport of VIEWPORTS) {
   const { context, page } = await open({ name: '375', width: 375, height: 812 })
   const result = await page.evaluate(() => {
     const map = window.__map
-    // `window.__map` is a test-only hook (see MapView.tsx), deliberately
-    // built only into the `NEXT_PUBLIC_E2E=1` build and never the real
-    // production one — this check needs live access to the map instance to
-    // find a tappable patch of open playa, which a production build has no
-    // way to offer. That is a property of the artifact under test, not a
-    // real UI defect, so it is reported distinctly from an actual failure
-    // rather than folded into the same "could not find open playa" case a
-    // genuinely broken map would also produce.
+    // `window.__map` is a test-only hook (see MapView.tsx) gated on a
+    // runtime flag this script's own `open()` sets before every page loads
+    // (#68), not a build-time env var — so it is expected to be present in
+    // every build this suite runs against, including the exact one that
+    // gets published. Its absence here is a real defect (the flag failed to
+    // apply, or the map never loaded), not an artifact-parity gap.
     if (!map) return { ok: false, reason: 'no-map-handle' }
     const layers = ['poi-dot', 'poi-cluster', 'poi-label', 'saved-dot', 'toilet-dot', 'service-dot'].filter(
       (id) => map.getLayer(id),
@@ -195,7 +196,7 @@ for (const viewport of VIEWPORTS) {
     return { ok: false, reason: 'not-found' }
   })
   if (!result.ok && result.reason === 'no-map-handle') {
-    skip("dropped-pin marker hit target: needs the E2E build's window.__map, not exposed here")
+    fail('dropped-pin marker: window.__map was not exposed — the runtime E2E flag did not apply')
   } else if (!result.ok) {
     fail('dropped-pin marker: could not find open playa to tap')
   } else {

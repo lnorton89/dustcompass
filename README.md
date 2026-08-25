@@ -101,7 +101,6 @@ NEXT_PUBLIC_DATA_YEAR=2026 npm run dev
 | `NEXT_PUBLIC_DATA_YEAR` | `2026` | Data directory the client loads |
 | `NEXT_PUBLIC_BASE_PATH` | empty | Deployment subpath, such as `/dustcompass` on GitHub Pages |
 | `NEXT_PUBLIC_SITE_URL` | live GitHub Pages URL | Canonical base URL used for metadata and share pages |
-| `NEXT_PUBLIC_E2E` | unset | Enables deterministic browser-test instrumentation; do not use for production builds |
 
 ## How it works
 
@@ -174,10 +173,11 @@ npm run lint
 npm test
 ```
 
-For the production browser suites:
+For the production browser suites — this is the real production build, not a
+separate test-instrumented one:
 
 ```sh
-NEXT_PUBLIC_BASE_PATH=/dustcompass NEXT_PUBLIC_E2E=1 npm run build
+NEXT_PUBLIC_BASE_PATH=/dustcompass npm run build
 NEXT_PUBLIC_BASE_PATH=/dustcompass npm run preview &
 
 npm run test:smoke -- http://127.0.0.1:4173/dustcompass/

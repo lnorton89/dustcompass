@@ -57,11 +57,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-
 
+      # No NEXT_PUBLIC_E2E flag: `window.__map` (the test-only map handle the
+      # browser suites drive) is gated on a runtime flag a test harness sets
+      # via `page.addInitScript()`, not a build-time env var (see MapView.tsx
+      # and issue #68) — so this build is the same artifact in every
+      # environment, including the one deploy.yml publishes.
       - name: Build
         env:
           NEXT_PUBLIC_BASE_PATH: /dustcompass
           NEXT_PUBLIC_DATA_YEAR: '2026'
-          NEXT_PUBLIC_E2E: '1'
         run: npm run build
 
       # Each browser-test suite below is its own step (rather than one shell
@@ -71,9 +75,14 @@ jobs:
       # every `run:` block under `bash -e`, which used to abort the whole
       # block at the first non-zero exit — that let real, unrelated bugs in
       # the later scripts (a broken theme switch, an undersized touch target)
-      # sit invisible behind an earlier failure. Each test step below is
-      # gated on the preview server having started successfully, not on the
-      # other test steps, so one suite's failure can't hide another's.
+      # sit invisible behind an earlier failure.
+      #
+      # Splitting into steps was not enough on its own (issue #70): a bare
+      # `steps.start-server.outcome == 'success'` condition still gets ANDed
+      # with the job's own running success() behind the scenes, so one suite
+      # failing here still skipped every suite listed after it. `!cancelled()`
+      # makes the override explicit: each suite runs whenever the server
+      # started, regardless of any earlier suite's result.
       - name: Start preview server
         id: start-server
         env:
@@ -83,19 +92,19 @@ jobs:
           npx wait-on -t 60000 http://127.0.0.1:4173/dustcompass/
 
       - name: Smoke tests
-        if: steps.start-server.outcome == 'success'
+        if: ${{ !cancelled() && steps.start-server.outcome == 'success' }}
         run: npm run test:smoke http://127.0.0.1:4173/dustcompass/
 
       - name: Accessibility tests
-        if: steps.start-server.outcome == 'success'
+        if: ${{ !cancelled() && steps.start-server.outcome == 'success' }}
         run: npm run test:a11y http://127.0.0.1:4173/dustcompass/
 
       - name: UI invariant tests
-        if: steps.start-server.outcome == 'success'
+        if: ${{ !cancelled() && steps.start-server.outcome == 'success' }}
         run: npm run test:ui http://127.0.0.1:4173/dustcompass/
 
       - name: Offline tests
-        if: steps.start-server.outcome == 'success'
+        if: ${{ !cancelled() && steps.start-server.outcome == 'success' }}
         run: npm run test:offline http://127.0.0.1:4173/dustcompass/
 
       - name: Upload failure screenshots

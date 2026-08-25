@@ -448,9 +448,19 @@ export function MapView({
           if (frame) map.jumpTo({ center: frame.center, zoom: frame.zoom, bearing })
         }
         // A readiness flag end-to-end tests can wait on in any build. The map
-        // handle itself is only exposed in development.
+        // handle itself is gated on a runtime flag rather than a build-time
+        // one (issue #68): a `NEXT_PUBLIC_E2E`-style env var is baked into
+        // the compiled bundle at build time, which made the artifact the
+        // browser suite tested provably different bytes from the artifact
+        // actually published — a regression scoped to the true production
+        // build could pass every test and still ship. `__DUST_COMPASS_E2E__`
+        // is read at runtime instead, from the one bundle that is both
+        // tested and deployed; nothing in the app itself ever sets it, only
+        // a test harness's `page.addInitScript()` does, before the page
+        // loads, so a real visitor's browser never has it defined and this
+        // handle stays exactly as unreachable to them as it always was.
         document.documentElement.dataset.mapReady = 'true'
-        if (process.env.NEXT_PUBLIC_E2E === '1') {
+        if ((window as unknown as Record<string, unknown>).__DUST_COMPASS_E2E__) {
           ;(window as unknown as Record<string, unknown>).__map = event.target
         }
         applyRenderEvent('load')

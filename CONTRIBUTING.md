@@ -61,11 +61,12 @@ npm test
 
 For user-facing, map, navigation, data-loading, PWA, responsive-layout, or
 accessibility changes, test the exported production app as well. Build it with
-the same subpath and test flag used by CI, start the export, then run the
-relevant suites (run all four when the change crosses those areas):
+the same subpath used by CI — this is the real production build, not a
+separate test-instrumented one — start the export, then run the relevant
+suites (run all four when the change crosses those areas):
 
 ```sh
-NEXT_PUBLIC_BASE_PATH=/dustcompass NEXT_PUBLIC_E2E=1 npm run build
+NEXT_PUBLIC_BASE_PATH=/dustcompass npm run build
 NEXT_PUBLIC_BASE_PATH=/dustcompass npm run preview
 ```
 

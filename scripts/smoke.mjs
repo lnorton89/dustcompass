@@ -82,7 +82,29 @@ assert(
   (await page.locator('meta[property="og:image"]').getAttribute('content'))?.endsWith('/og-image.png'),
   'Open Graph share image is configured',
 )
-assert(await page.getByTestId('api-disclaimer').isVisible(), 'required API disclaimer is prominent')
+const disclaimerSurface = page.getByTestId('api-disclaimer')
+assert(await disclaimerSurface.isVisible(), 'required API disclaimer is prominent on first view')
+assert(
+  (await disclaimerSurface.innerText()).includes('This app is not affiliated, endorsed, or verified by Burning Man Project.'),
+  'the visible disclosure contains the exact required non-affiliation text',
+)
+await disclaimerSurface.getByRole('button', { name: 'Dismiss survey and disclaimer' }).click()
+await page.waitForTimeout(250)
+assert((await disclaimerSurface.count()) === 0, 'the large disclaimer surface can be dismissed')
+await page.reload({ waitUntil: 'load' })
+await page.waitForFunction(() => window.__map, null, { timeout: 30000 })
+await page.waitForTimeout(1200)
+assert((await disclaimerSurface.count()) === 0, 'disclaimer-surface dismissal persists across reload')
+// The exact legal/source disclosure remains reachable after the overlay is gone.
+await page.keyboard.press('f')
+await page.getByText('About this map', { exact: true }).waitFor({ timeout: 5000 })
+const aboutMap = await page.locator('.MuiDrawer-paper').innerText()
+assert(
+  aboutMap.includes('This app is not affiliated, endorsed, or verified by Burning Man Project.'),
+  'required disclaimer remains available in Layers > About this map',
+)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(300)
 
 // The embargo notice is true for weeks before the event. Re-announcing it on
 // every launch turns an explanation into something to swat away each time.
@@ -232,6 +254,8 @@ assert(moved > 0.001, `map flew to the address (moved ${moved.toFixed(5)}°, zoo
 // Events panel: the "Now" window must produce rows that are actually running.
 await page.getByLabel('Show events').click()
 await page.waitForTimeout(900)
+const eventSearch = page.getByRole('textbox', { name: 'Search events' })
+assert((await eventSearch.count()) === 1, 'events search exposes its accessible name on the native textbox (#121)')
 const eventRows = await page.locator('.MuiDrawer-root .MuiListItemButton-root').count()
 assert(eventRows > 0, `events listed in the Now window (${eventRows})`)
 

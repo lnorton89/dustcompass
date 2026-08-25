@@ -296,7 +296,10 @@ export default function App() {
    */
   const [footnoteHeight, setFootnoteHeight] = useState(0)
   const footnoteRef = useCallback((node: HTMLElement | null) => {
-    if (!node) return
+    if (!node) {
+      setFootnoteHeight(0)
+      return
+    }
     const observer = new ResizeObserver(() => setFootnoteHeight(node.offsetHeight))
     observer.observe(node)
     return () => observer.disconnect()
@@ -437,6 +440,30 @@ export default function App() {
   )
   const [eventsOpen, setEventsOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  // The large source/non-affiliation disclosure is useful once and costly on a
+  // phone forever. Its exact required text remains in FirstRun and Layers >
+  // About this map, so dismissing this overlay reclaims map space without
+  // hiding the disclosure from the app (#119).
+  const DISCLAIMER_SURFACE_KEY = 'dust-compass:disclaimer-surface:1'
+  const [disclaimerSurfaceDismissed, setDisclaimerSurfaceDismissed] = useState(false)
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(DISCLAIMER_SURFACE_KEY) === 'dismissed') {
+        setDisclaimerSurfaceDismissed(true)
+      }
+    } catch {
+      /* blocked storage means the disclosure remains visible */
+    }
+  }, [])
+  const dismissDisclaimerSurface = useCallback(() => {
+    setDisclaimerSurfaceDismissed(true)
+    setFootnoteHeight(0)
+    try {
+      localStorage.setItem(DISCLAIMER_SURFACE_KEY, 'dismissed')
+    } catch {
+      /* the current-session dismissal still works */
+    }
+  }, [])
   /**
    * Dismissing the embargo notice has to stick. It is true for weeks before the
    * event, and re-announcing it on every launch turns a useful explanation into
@@ -1329,6 +1356,7 @@ export default function App() {
                 selected={selected}
                 destination={heading}
               />
+              {!disclaimerSurfaceDismissed && (
               <Box
                 ref={footnoteRef}
                 data-testid="api-disclaimer"
@@ -1349,6 +1377,9 @@ export default function App() {
                     sm: `calc(${heading ? 112 : 34}px + var(--safe-bottom))`,
                   },
                   zIndex: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.25,
                   maxWidth: {
                     xs: 'calc(100% - 88px - var(--safe-left) - var(--safe-right))',
                     sm: 430,
@@ -1383,10 +1414,18 @@ export default function App() {
                   backdropFilter: 'blur(4px)',
                 }}
               >
-                <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.25 }}>
+                <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.25, flex: 1 }}>
                   City survey &amp; listings: Burning Man Project. {BRAND.disclaimer}
                 </Typography>
+                <IconButton
+                  aria-label="Dismiss survey and disclaimer"
+                  onClick={dismissDisclaimerSurface}
+                  sx={{ pointerEvents: 'auto', width: 44, height: 44, flexShrink: 0 }}
+                >
+                  <CloseIcon fontSize="small" />
+                </IconButton>
               </Box>
+              )}
               {heading && navigation && (
                 <NavBar
                   name={heading.name}

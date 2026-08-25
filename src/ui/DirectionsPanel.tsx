@@ -172,7 +172,9 @@ function EndpointPicker({
   }, [layout, options, query])
 
   const selected = value
-    ? dynamicOptions.find((option) => optionKey(option.endpoint) === optionKey(value)) ?? {
+    ? dynamicOptions.find((option) => option.key === optionKey(value))
+      ?? dynamicOptions.find((option) => optionKey(option.endpoint) === optionKey(value))
+      ?? {
         key: optionKey(value),
         label: directionsEndpointLabel(value, pois),
         detail: '',

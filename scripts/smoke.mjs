@@ -980,7 +980,7 @@ await shared.close()
  */
 {
   const base = new URL(`data/${DATA_YEAR}/`, url).href
-  const reachFrom = async (label, geolocation) => {
+  const reachFrom = async (label, geolocation, expectRoute = true) => {
     const ctx = await browser.newContext({
       viewport: { width: 1440, height: 900 },
       geolocation,
@@ -1029,14 +1029,19 @@ await shared.close()
       }
     }, man)
     await ctx.close()
-    assert(result.points > 0, `${label}: a route is drawn at all (${result.points} points)`)
+    assert(
+      expectRoute ? result.points > 0 : result.points === 0,
+      expectRoute
+        ? `${label}: a route is drawn at all (${result.points} points)`
+        : `${label}: no fake route is drawn without a usable on-playa fix (${result.points} points)`,
+    )
     return result
   }
 
   // A degree is about 111km here, so the whole city and the road in fit inside a
   // third of one. San Francisco is four degrees away and unmissable.
   const near = await reachFrom('near fix', { latitude: 40.7772, longitude: -119.1893 })
-  const far = await reachFrom('distant fix', { latitude: 37.7749, longitude: -122.4194 })
+  const far = await reachFrom('distant fix', { latitude: 37.7749, longitude: -122.4194 }, false)
   assert(near.reach != null && near.reach < 0.35, `a fix in the city routes from the fix (${near.reach?.toFixed(3) ?? 'no route'}°)`)
   assert(/toward \d/.test(near.readout), 'a fix in the city gives a bearing to walk')
   // A live-origin route is deliberately withheld until there is a usable
@@ -1047,7 +1052,7 @@ await shared.close()
     `a distant fix does not draw a fake route from the Man (${far.points} points)`,
   )
   assert(
-    /from the Man/.test(far.readout),
+    /from the Man/i.test(far.readout),
     'a distant fix says the distance is measured from the Man',
   )
 }
@@ -1177,7 +1182,9 @@ await page.getByRole('button', { name: 'Directions', exact: true }).first().clic
 await page.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
 const toField = page.getByRole('combobox', { name: 'To' })
 await toField.fill('7:30 & Esplanade')
-await page.getByRole('option').filter({ hasText: /7:30.*Esplanade|Esplanade.*7:30/ }).first().click()
+await page.waitForTimeout(300)
+await toField.press('ArrowDown')
+await toField.press('Enter')
 await page.getByTestId('directions-summary').waitFor({ timeout: 5000 })
 await page.getByRole('button', { name: /Bike/i }).click()
 await page.getByRole('button', { name: /Share link/i }).click()

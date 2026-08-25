@@ -16,11 +16,15 @@ import {
 import CloseIcon from '@mui/icons-material/Close'
 import DirectionsBikeIcon from '@mui/icons-material/DirectionsBike'
 import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk'
+import ImageIcon from '@mui/icons-material/Image'
+import LinkIcon from '@mui/icons-material/Link'
 import MyLocationIcon from '@mui/icons-material/MyLocation'
 import SwapVertIcon from '@mui/icons-material/SwapVert'
 import type { CityLayout } from '../brc/layout'
 import { geocode } from '../brc/geocode'
-import type { Poi } from '../data/types'
+import { formatDistance, formatMinutes, type Travel } from '../brc/travel'
+import type { PlayaRoute } from '../brc/routing'
+import type { EventItem, Poi } from '../data/types'
 import type { SavedPlace } from '../data/useSavedPlaces'
 import type { DirectionsEndpoint, DirectionsMode } from '../data/directions'
 import { directionsEndpointLabel } from '../data/directionsRuntime'
@@ -32,23 +36,36 @@ interface EndpointOption {
   endpoint: DirectionsEndpoint
 }
 
+export interface DirectionsPreview {
+  fromLabel: string
+  toLabel: string
+  toDetail?: string
+  route: PlayaRoute
+  travel: Travel
+  heading: string
+}
+
 interface Props {
   open: boolean
   compact: boolean
   layout: CityLayout
   pois: readonly Poi[]
+  events: readonly EventItem[]
   places: readonly SavedPlace[]
+  droppedPin?: { position: [number, number]; address: string }
   from: DirectionsEndpoint
   to?: DirectionsEndpoint
   mode: DirectionsMode
   hasUsableLiveFix: boolean
   findingLocation: boolean
+  preview?: DirectionsPreview
   onFromChange: (endpoint: DirectionsEndpoint) => void
   onToChange: (endpoint: DirectionsEndpoint | undefined) => void
   onModeChange: (mode: DirectionsMode) => void
   onSwap: () => void
   onStart: () => void
   onShare: () => void
+  onShareImage: () => void
   onClose: () => void
 }
 
@@ -64,7 +81,9 @@ function optionKey(endpoint: DirectionsEndpoint): string {
 
 function baseOptions(
   pois: readonly Poi[],
+  events: readonly EventItem[],
   places: readonly SavedPlace[],
+  droppedPin: Props['droppedPin'],
   allowLive: boolean,
 ): EndpointOption[] {
   const options: EndpointOption[] = [
@@ -77,12 +96,34 @@ function baseOptions(
     { key: 'man', label: 'The Man', detail: 'Black Rock City center', endpoint: { kind: 'man' } },
   ]
 
+  if (droppedPin) {
+    options.push({
+      key: 'dropped-pin',
+      label: 'Dropped pin',
+      detail: droppedPin.address,
+      endpoint: { kind: 'address', address: droppedPin.address, position: droppedPin.position },
+    })
+  }
+
   for (const place of places) {
     options.push({
       key: `saved:${place.id}`,
       label: place.name,
       detail: `Saved · ${place.address}`,
       endpoint: { kind: 'fixed', label: place.name, position: place.position },
+    })
+  }
+
+  const byUid = new Map(pois.map((poi) => [poi.uid, poi] as const))
+  for (const event of events) {
+    if (!event.hosted_by_camp) continue
+    const host = byUid.get(event.hosted_by_camp)
+    if (!host) continue
+    options.push({
+      key: `event:${event.uid}`,
+      label: event.title,
+      detail: `Event at ${host.name}${host.address ? ` · ${host.address}` : ''}`,
+      endpoint: { kind: 'poi', uid: host.uid },
     })
   }
 
@@ -172,39 +213,52 @@ function EndpointPicker({
   )
 }
 
+function routeSemantics(kind: PlayaRoute['kind']): string {
+  if (kind === 'street') return 'Surveyed street route around occupied blocks.'
+  if (kind === 'hybrid') return 'Surveyed streets plus a direct open-playa leg.'
+  return 'Straight-line bearing guidance — verify a walkable path around occupied blocks.'
+}
+
 export function DirectionsPanel({
   open,
   compact,
   layout,
   pois,
+  events,
   places,
+  droppedPin,
   from,
   to,
   mode,
   hasUsableLiveFix,
   findingLocation,
+  preview,
   onFromChange,
   onToChange,
   onModeChange,
   onSwap,
   onStart,
   onShare,
+  onShareImage,
   onClose,
 }: Props) {
   const options = useMemo(
-    () => baseOptions(pois, places, hasUsableLiveFix),
-    [pois, places, hasUsableLiveFix],
+    () => baseOptions(pois, events, places, droppedPin, hasUsableLiveFix),
+    [pois, events, places, droppedPin, hasUsableLiveFix],
   )
   const fromLabel = directionsEndpointLabel(from, pois)
-  const canStart = Boolean(to) && (from.kind !== 'live' || hasUsableLiveFix)
+  const canStart = Boolean(to && preview) && (from.kind !== 'live' || hasUsableLiveFix)
+  const eta = preview
+    ? mode === 'walk' ? preview.travel.walkMinutes : preview.travel.bikeMinutes
+    : undefined
 
   const content = (
-    <Stack spacing={1.5} sx={{ p: 2, width: compact ? 'auto' : 390, maxWidth: '100vw' }}>
+    <Stack spacing={1.5} sx={{ p: 2, width: compact ? 'auto' : 410, maxWidth: '100vw' }}>
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h6">Directions</Typography>
           <Typography variant="caption" color="text.secondary">
-            Plan point-to-point travel without leaving the offline map.
+            Point-to-point planning stays on this device and works offline.
           </Typography>
         </Box>
         <IconButton aria-label="Close directions" onClick={onClose}>
@@ -220,7 +274,7 @@ export function DirectionsPanel({
             options={options}
             layout={layout}
             pois={pois}
-            disableLive={!hasUsableLiveFix}
+            disableLive={!hasUsableLiveFix && !findingLocation}
             onChange={(endpoint) => endpoint && onFromChange(endpoint)}
           />
           <EndpointPicker
@@ -229,7 +283,7 @@ export function DirectionsPanel({
             options={options}
             layout={layout}
             pois={pois}
-            disableLive={!hasUsableLiveFix}
+            disableLive={!hasUsableLiveFix && !findingLocation}
             onChange={onToChange}
           />
         </Stack>
@@ -265,15 +319,46 @@ export function DirectionsPanel({
         <ToggleButton value="bike"><DirectionsBikeIcon fontSize="small" /> Bike</ToggleButton>
       </ToggleButtonGroup>
 
-      <Divider />
-      <Typography variant="caption" color="text.secondary">
-        Until surveyed street routing is complete, guidance remains a straight-line bearing preview. Follow streets around occupied blocks.
-      </Typography>
+      {preview && eta !== undefined && (
+        <Paper variant="outlined" data-testid="directions-summary" sx={{ p: 1.5 }}>
+          <Stack spacing={0.75}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', justifyContent: 'space-between' }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{formatDistance(preview.travel)}</Typography>
+              <Typography variant="h6" color="primary.main">{formatMinutes(eta)}</Typography>
+            </Stack>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {mode === 'walk' ? 'Walk' : 'Bike'} · head toward {preview.heading}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">{routeSemantics(preview.route.kind)}</Typography>
+            <Divider />
+            <Typography variant="caption" color="text.secondary">Start: {preview.fromLabel}</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {preview.route.kind === 'direct'
+                ? `Continue toward ${preview.heading} using bearing guidance.`
+                : preview.route.kind === 'hybrid'
+                  ? 'Use surveyed streets around occupied blocks, then continue across open playa.'
+                  : 'Use the surveyed radial and annular streets around occupied blocks.'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">Arrive: {preview.toDetail ?? preview.toLabel}</Typography>
+          </Stack>
+        </Paper>
+      )}
+
+      {!preview && to && from.kind !== 'live' && (
+        <Typography variant="caption" color="warning.main">
+          One of these endpoints cannot be resolved against the current map data.
+        </Typography>
+      )}
 
       <Stack direction="row" spacing={1}>
-        <Button variant="outlined" fullWidth disabled={!to} onClick={onShare}>Share route</Button>
-        <Button variant="contained" fullWidth disabled={!canStart} onClick={onStart}>Start</Button>
+        <Button startIcon={<LinkIcon />} variant="outlined" fullWidth disabled={!to} onClick={onShare}>
+          Share link
+        </Button>
+        <Button startIcon={<ImageIcon />} variant="outlined" fullWidth disabled={!preview} onClick={onShareImage}>
+          Route card
+        </Button>
       </Stack>
+      <Button variant="contained" fullWidth disabled={!canStart} onClick={onStart}>Start navigation</Button>
     </Stack>
   )
 

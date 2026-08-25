@@ -24,10 +24,6 @@ jobs:
           cache: npm
 
       - run: node scripts/maintenance-lint-codemod.mjs
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
 
       - name: Commit cleanup
         run: |
@@ -36,3 +32,8 @@ jobs:
           git add -A
           git commit -m 'Fix strict lint violations and enforce lint in CI'
           git push origin HEAD:feature/directions-132
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test

@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:smoke": "node scripts/smoke.mjs",
+    "test:human": "node scripts/human-e2e-live.mjs",
     "test:offline": "node scripts/offline-test.mjs",
     "icons": "node scripts/make-icons.mjs",
     "verify:icons": "node scripts/check-icons.mjs",

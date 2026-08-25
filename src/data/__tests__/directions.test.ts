@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DATA_YEAR } from '../../config'
 import {
   defaultDirectionsOrigin,
   directionsUrl,
@@ -17,6 +18,7 @@ describe('directions share links', () => {
 
     const url = directionsUrl(intent, 'https://example.test/dustcompass/?poi=old')
     const parsed = new URL(url)
+    expect(parsed.searchParams.get('year')).toBe(String(DATA_YEAR))
     expect(parsed.searchParams.get('from')).toBe('live')
     expect(parsed.search).not.toContain('119.')
     expect(readDirectionsIntent(parsed.search)).toEqual(intent)
@@ -47,11 +49,14 @@ describe('directions share links', () => {
     })
   })
 
-  it('rejects incomplete, unknown-version, and malformed route links', () => {
-    expect(readDirectionsIntent('?dir=2&from=live&to=man&mode=walk')).toBeUndefined()
-    expect(readDirectionsIntent('?dir=1&from=live&mode=walk')).toBeUndefined()
-    expect(readDirectionsIntent('?dir=1&from=fixed:camp%7C999,999&to=man&mode=walk')).toBeUndefined()
-    expect(readDirectionsIntent('?dir=1&from=live&to=man&mode=drive')).toBeUndefined()
+  it('rejects incomplete, unknown-version/year, and malformed route links', () => {
+    const year = encodeURIComponent(String(DATA_YEAR))
+    expect(readDirectionsIntent(`?dir=2&year=${year}&from=live&to=man&mode=walk`)).toBeUndefined()
+    expect(readDirectionsIntent(`?dir=1&year=${Number(DATA_YEAR) - 1}&from=live&to=man&mode=walk`)).toBeUndefined()
+    expect(readDirectionsIntent(`?dir=1&year=${year}&from=live&mode=walk`)).toBeUndefined()
+    expect(readDirectionsIntent(`?dir=1&year=${year}&from=fixed:camp%7C999,999&to=man&mode=walk`)).toBeUndefined()
+    expect(readDirectionsIntent(`?dir=1&year=${year}&from=live&to=man&mode=drive`)).toBeUndefined()
+    expect(readDirectionsIntent('?dir=1&from=live&to=man&mode=walk')).toBeUndefined()
   })
 
   it('uses symbolic live origin only when a usable fix exists', () => {

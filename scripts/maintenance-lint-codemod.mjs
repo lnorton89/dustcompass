@@ -13,12 +13,17 @@ function replaceRegex(path, pattern, replacement) {
   fs.writeFileSync(path, next)
 }
 
-// App.tsx: make persisted-filter validation type-safe rather than passing `any`
-// from JSON.parse/Array.isArray into a Set<Filter> lookup.
+// App.tsx: JSON arrays are `any[]` under Array.isArray. Give the filter
+// callback an unknown boundary before proving that a value is a Filter.
 replaceExactly(
   'src/App.tsx',
   "const VALID_FILTER_KEYS = new Set<Filter>(FILTERS.map((f) => f.key))",
   "const VALID_FILTER_KEYS: ReadonlySet<string> = new Set(FILTERS.map((f) => f.key))",
+)
+replaceExactly(
+  'src/App.tsx',
+  "    const valid = parsed.filter((key): key is Filter => VALID_FILTER_KEYS.has(key))",
+  "    const valid = parsed.filter(\n      (key: unknown): key is Filter => typeof key === 'string' && VALID_FILTER_KEYS.has(key),\n    )",
 )
 
 // Depend on stable method references rather than the fresh object returned by
@@ -52,9 +57,7 @@ replaceExactly(
   "      if (localStorage.getItem(STALE_NOTICE_KEY) === 'seen') {\n        queueMicrotask(() => setStaleNoticeSeen(true))\n      }",
 )
 
-// Declare the navigation framing ref before the callback that mutates it. The
-// React compiler's immutability analysis treats a later declaration captured by
-// an earlier hook callback as a hook-argument mutation hazard.
+// Declare the framing ref before the hook callback that mutates it.
 replaceExactly(
   'src/App.tsx',
   "\n  const framedNavigationFor = useRef<string | undefined>(undefined)\n  useEffect(() => {",
@@ -71,30 +74,18 @@ replaceExactly(
 replaceRegex(
   'src/data/usePlayaData.ts',
   /  const scheduleEmbargoTransition = useCallback\(\n    \(cancelled: \{ current: boolean \}\) => \{[\s\S]*?\n    \[clearScheduledTransition\],\n  \)\n/,
-  `  const scheduleEmbargoTransition = useCallback(\n    (cancelled: { current: boolean }) => {\n      const embargoWindow = embargoWindowForYear(DATA_YEAR)\n\n      function armNextBoundary() {\n        clearScheduledTransition()\n        const raw = rawRef.current\n        if (!raw || cancelled.current) return\n        const current = embargoState(embargoWindow)\n        const nextBoundary = !current.campsReleased\n          ? embargoWindow.campRelease\n          : !current.artReleased\n            ? embargoWindow.gatesOpen\n            : undefined\n        if (!nextBoundary) return\n\n        timerRef.current = setTimeout(() => {\n          if (cancelled.current) return\n          // A fake/host-clamped timer can fire a tick early. Re-arm from the\n          // wall clock rather than revealing embargoed data prematurely.\n          if (Date.now() < nextBoundary.getTime()) {\n            armNextBoundary()\n            return\n          }\n          const embargo = embargoState(embargoWindow)\n          const art = applyEmbargo(raw.art, embargo.artReleased)\n          const camps = applyEmbargo(raw.camps, embargo.campsReleased)\n          const listed = toPois(raw.layout, art, camps, embargo)\n          setData((prev) =>\n            prev && {\n              ...prev,\n              art,\n              camps,\n              pois: [...listed.pois, ...raw.civic],\n              unplaced: listed.unplaced,\n              embargo,\n            },\n          )\n          armNextBoundary()\n        }, Math.max(0, nextBoundary.getTime() - Date.now()))\n      }\n\n      armNextBoundary()\n    },\n    [clearScheduledTransition],\n  )\n`,
+  `  const scheduleEmbargoTransition = useCallback(\n    (cancelled: { current: boolean }) => {\n      const embargoWindow = embargoWindowForYear(DATA_YEAR)\n\n      function armNextBoundary() {\n        clearScheduledTransition()\n        const raw = rawRef.current\n        if (!raw || cancelled.current) return\n        const current = embargoState(embargoWindow)\n        const nextBoundary = !current.campsReleased\n          ? embargoWindow.campRelease\n          : !current.artReleased\n            ? embargoWindow.gatesOpen\n            : undefined\n        if (!nextBoundary) return\n\n        timerRef.current = setTimeout(() => {\n          if (cancelled.current) return\n          if (Date.now() < nextBoundary.getTime()) {\n            armNextBoundary()\n            return\n          }\n          const embargo = embargoState(embargoWindow)\n          const art = applyEmbargo(raw.art, embargo.artReleased)\n          const camps = applyEmbargo(raw.camps, embargo.campsReleased)\n          const listed = toPois(raw.layout, art, camps, embargo)\n          setData((prev) =>\n            prev && {\n              ...prev,\n              art,\n              camps,\n              pois: [...listed.pois, ...raw.civic],\n              unplaced: listed.unplaced,\n              embargo,\n            },\n          )\n          armNextBoundary()\n        }, Math.max(0, nextBoundary.getTime() - Date.now()))\n      }\n\n      armNextBoundary()\n    },\n    [clearScheduledTransition],\n  )\n`,
 )
-replaceExactly(
-  'src/data/usePlayaData.ts',
-  "        {} as { rangeInfo?: EventRange },",
-  "        {},",
-)
-
-// Loading no longer synchronously clears state from an effect. Retry already
-// clears stale error/data in the user event before incrementing `attempt`, and
-// background refreshes intentionally keep current data visible.
-replaceExactly(
-  'src/data/usePlayaData.ts',
-  "  const load = useCallback((clear: boolean) => {",
-  "  const load = useCallback(() => {",
-)
+replaceExactly('src/data/usePlayaData.ts', "        {} as { rangeInfo?: EventRange },", '        {},')
+replaceExactly('src/data/usePlayaData.ts', '  const load = useCallback((clear: boolean) => {', '  const load = useCallback(() => {')
 replaceRegex(
   'src/data/usePlayaData.ts',
   /    clearScheduledTransition\(\)\n    if \(clear\) \{\n      setError\(undefined\)\n      setData\(undefined\)\n    \}\n/,
-  "    clearScheduledTransition()\n",
+  '    clearScheduledTransition()\n',
 )
 replaceExactly(
   'src/data/usePlayaData.ts',
-  "      .catch((cause) => !cancelled.current && setError(cause as Error))",
+  '      .catch((cause) => !cancelled.current && setError(cause as Error))',
   "      .catch((cause: unknown) => {\n        if (!cancelled.current) {\n          setError(cause instanceof Error ? cause : new Error(String(cause)))\n        }\n      })",
 )
 replaceExactly('src/data/usePlayaData.ts', '  useEffect(() => load(true), [attempt, load])', '  useEffect(() => load(), [attempt, load])')
@@ -104,34 +95,67 @@ replaceExactly(
   "      if ((event.data as { type?: string } | null)?.type === 'DATA_REFRESHED') load()",
 )
 
-// PwaStatus: keep the server/client initial render stable and move support
-// promotion into an asynchronous callback rather than setting state directly
-// in the effect body.
+// PWA support starts in the hydration-safe checking state. Promotion happens
+// asynchronously after the effect has attached listeners.
 replaceExactly(
   'src/ui/PwaStatus.tsx',
   '  const [support, setSupport] = useState<Support>(initialSupport)',
   "  const [support, setSupport] = useState<Support>('checking')",
 )
-replaceExactly(
+replaceExactly('src/ui/PwaStatus.tsx', "    setSupport('supported')", "    queueMicrotask(() => setSupport('supported'))")
+replaceRegex(
   'src/ui/PwaStatus.tsx',
-  "    setSupport('supported')",
-  "    queueMicrotask(() => setSupport('supported'))",
+  /\nfunction initialSupport\(\): Support \{[\s\S]*?\n\}\n\nfunction isWorkerMessage/,
+  '\nfunction isWorkerMessage',
 )
 
-// Make the IDE's strict findings explicit project policy rather than relying on
-// transitive preset contents, and make CI actually run the linter.
+// Other production-source state transitions flagged by the same React rule.
+// They are reactions to external state and can safely happen in microtasks.
 replaceExactly(
-  'eslint.config.js',
-  "      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],",
-  `      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],\n      '@typescript-eslint/no-unsafe-argument': 'error',\n      '@typescript-eslint/no-unnecessary-type-assertion': 'error',\n      'react-hooks/exhaustive-deps': 'error',\n      'react-hooks/immutability': 'error',\n      'react-hooks/set-state-in-effect': 'error',`,
+  'src/ui/FirstRun.tsx',
+  "      if (localStorage.getItem(SEEN_KEY) !== 'seen') setOpen(true)",
+  "      if (localStorage.getItem(SEEN_KEY) !== 'seen') queueMicrotask(() => setOpen(true))",
 )
+replaceExactly(
+  'src/ui/FirstRun.tsx',
+  '      setOpen(true)\n    }\n  }, [])',
+  '      queueMicrotask(() => setOpen(true))\n    }\n  }, [])',
+)
+replaceExactly(
+  'src/ui/EventsPanel.tsx',
+  "    if (sort === 'distance' && locationFailed) {\n      setSort('time')\n      setLocationIssue(true)\n    }\n    // A fix arriving by any route (navigation, the map's own locate button)\n    // resolves the notice; it is not scoped to this panel's own request.\n    if (locationStatus === 'tracking') setLocationIssue(false)",
+  "    if (sort === 'distance' && locationFailed) {\n      queueMicrotask(() => {\n        setSort('time')\n        setLocationIssue(true)\n      })\n    }\n    // A fix arriving by any route (navigation, the map's own locate button)\n    // resolves the notice; it is not scoped to this panel's own request.\n    if (locationStatus === 'tracking') queueMicrotask(() => setLocationIssue(false))",
+)
+
+// Reset UID-scoped audio state asynchronously after an art change; the
+// cancellation guard prevents an obsolete effect from resetting the next UID.
+replaceExactly(
+  'src/ui/ArtAudioGuide.tsx',
+  "    setAudioUrl(undefined)\n    setEntry(undefined)\n    setChecking(true)\n    setDownloaded(false)\n    setSavedSize(undefined)\n    setBusy(false)\n    setError(undefined)\n\n    void (async () => {",
+  "    queueMicrotask(() => {\n      if (cancelled) return\n      setAudioUrl(undefined)\n      setEntry(undefined)\n      setChecking(true)\n      setDownloaded(false)\n      setSavedSize(undefined)\n      setBusy(false)\n      setError(undefined)\n    })\n\n    void (async () => {",
+)
+
+// GeoJSON properties are intentionally loose; narrow OBJECTID before using it
+// to create stable toilet IDs instead of letting `any` enter product code.
+replaceExactly(
+  'src/brc/services.ts',
+  '      const sourceId = feature.properties?.OBJECTID ?? index',
+  "      const rawSourceId: unknown = feature.properties?.OBJECTID\n      const sourceId =\n        typeof rawSourceId === 'string' || typeof rawSourceId === 'number' ? rawSourceId : index",
+)
+
+// Source code stays type-aware. Tests use the normal TS recommended set: mocks
+// and deliberately partial fixtures should not need production-strength unsafe
+// value rules, while React hook correctness still applies there.
+fs.writeFileSync(
+  'eslint.config.js',
+  `import js from '@eslint/js'\nimport globals from 'globals'\nimport reactHooks from 'eslint-plugin-react-hooks'\nimport tseslint from 'typescript-eslint'\n\nexport default tseslint.config(\n  { ignores: ['dist', 'dev-dist', '.next', 'out', 'public/data', 'public/fonts', 'coverage'] },\n\n  {\n    files: ['src/**/*.{ts,tsx}'],\n    ignores: ['src/**/__tests__/**/*.{ts,tsx}'],\n    extends: [js.configs.recommended, ...tseslint.configs.recommendedTypeChecked],\n    languageOptions: {\n      ecmaVersion: 2022,\n      globals: globals.browser,\n      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },\n    },\n    plugins: { 'react-hooks': reactHooks },\n    rules: {\n      ...reactHooks.configs.recommended.rules,\n      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],\n      '@typescript-eslint/no-unsafe-argument': 'error',\n      '@typescript-eslint/no-unnecessary-type-assertion': 'error',\n      'react-hooks/exhaustive-deps': 'error',\n      'react-hooks/immutability': 'error',\n      'react-hooks/set-state-in-effect': 'error',\n    },\n  },\n\n  {\n    files: ['src/**/__tests__/**/*.{ts,tsx}'],\n    extends: [js.configs.recommended, ...tseslint.configs.recommended],\n    languageOptions: { ecmaVersion: 2022, globals: globals.browser },\n    plugins: { 'react-hooks': reactHooks },\n    rules: {\n      ...reactHooks.configs.recommended.rules,\n      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],\n    },\n  },\n\n  {\n    files: ['*.config.ts'],\n    extends: [js.configs.recommended, ...tseslint.configs.recommended],\n    languageOptions: { ecmaVersion: 2022, globals: globals.node },\n  },\n\n  {\n    files: ['scripts/**/*.mjs', '*.config.js'],\n    extends: [js.configs.recommended],\n    languageOptions: { ecmaVersion: 2022, globals: { ...globals.node, ...globals.browser } },\n  },\n)\n`,
+)
+
 replaceExactly(
   '.github/workflows/ci.yml',
   "      - name: Typecheck\n        run: npm run typecheck\n\n      - name: Unit tests",
   "      - name: Typecheck\n        run: npm run typecheck\n\n      - name: Lint\n        run: npm run lint\n\n      - name: Unit tests",
 )
 
-// This is a one-shot maintenance helper; leave no codemod or workflow debris in
-// the product branch after it has done its job.
 fs.rmSync('scripts/maintenance-lint-codemod.mjs')
 fs.rmSync('.github/workflows/apply-lint-cleanup.yml')

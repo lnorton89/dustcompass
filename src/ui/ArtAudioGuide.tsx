@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Alert, Box, Button, CircularProgress, Divider, Stack, Typography } from '@mui/material'
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import CloseIcon from '@mui/icons-material/Close'
 import DownloadIcon from '@mui/icons-material/Download'
 
 const GUIDE_ZIP_URL = 'https://bm-innovate.s3.amazonaws.com/2026/2026-audio-tour-art-uid-mp3.zip'
@@ -117,7 +117,9 @@ async function cachedTrack(uid: string): Promise<Response | undefined> {
 
 async function inflateDeflateRaw(bytes: Uint8Array): Promise<ArrayBuffer> {
   if (!('DecompressionStream' in window)) throw new Error('This browser cannot unpack the official audio guide')
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  const stream = new Blob([copy.buffer]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
   return new Response(stream).arrayBuffer()
 }
 
@@ -260,7 +262,7 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
         <Button
           size="small"
           variant={downloaded ? 'outlined' : 'contained'}
-          startIcon={busy ? <CircularProgress size={16} /> : downloaded ? <DeleteOutlineIcon /> : <DownloadIcon />}
+          startIcon={busy ? <CircularProgress size={16} /> : downloaded ? <CloseIcon /> : <DownloadIcon />}
           onClick={() => void (downloaded ? remove() : save())}
           disabled={busy}
         >

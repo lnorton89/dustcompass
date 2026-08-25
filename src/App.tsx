@@ -1098,9 +1098,9 @@ export default function App() {
       positionSource?: 'gps' | 'address'
       uid?: string
     }) => {
-      const routeOrigin: DirectionsEndpoint = usableFix || location.status === 'idle' || location.status === 'locating'
-        ? { kind: 'live' }
-        : { kind: 'man' }
+      const routeOrigin = defaultDirectionsOrigin(
+        Boolean(usableFix) || location.status === 'idle' || location.status === 'locating',
+      )
       setDirectionsFrom(routeOrigin)
       setDirectionsTo(
         target.uid

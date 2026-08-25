@@ -323,9 +323,9 @@ export function EventsPanel({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search events or camps"
+          aria-label="Search events"
           sx={{ mt: 1.5 }}
           slotProps={{
-            htmlInput: { 'aria-label': 'Search events' },
             input: {
               startAdornment: (
                 <InputAdornment position="start">

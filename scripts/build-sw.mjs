@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -9,6 +9,7 @@ const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? '').replace(/\/$/, '')
 // Content-only listing changes deliberately keep the same version.
 const DATA_SCHEMA_VERSION = 1
 const dataSchemaPath = join(output, 'data', 'schema.json')
+await mkdir(join(output, 'data'), { recursive: true })
 await writeFile(dataSchemaPath, `${JSON.stringify({ schemaVersion: DATA_SCHEMA_VERSION }, null, 2)}\n`, 'utf8')
 const files = await walk(output)
 const assets = []

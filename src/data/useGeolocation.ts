@@ -8,17 +8,10 @@ export interface Geolocation {
   accuracy?: number
   lastFixAt?: number
   status: LocationStatus
-  /** Begin watching. Safe to call repeatedly. */
   start: (initialFix?: GeolocationPosition) => void
   stop: () => void
 }
 
-/**
- * Watches, rather than sampling once: the point of a heading is that it stays
- * true while you walk. Started on demand instead of at load, because a
- * permission prompt makes sense when someone asks to be taken somewhere and is
- * just an obstacle when they are only looking at the map.
- */
 export function useGeolocation(): Geolocation {
   const [position, setPosition] = useState<Position>()
   const [accuracy, setAccuracy] = useState<number>()
@@ -38,19 +31,10 @@ export function useGeolocation(): Geolocation {
       watchId.current = undefined
     }
     setStatus((current) => (current === 'tracking' || current === 'locating' ? 'idle' : current))
-    // The whole point of `position` is that it tracks where the user is
-    // *right now*. Once nothing is watching any more, it can only get more
-    // wrong as the person keeps moving — leaving it in state let it be read
-    // indefinitely by DetailDrawer/EventDetail/navigation as a live "you"
-    // fix that could in truth be minutes or hours stale (#50).
     clearFix()
   }, [clearFix])
 
   const start = useCallback((initialFix?: GeolocationPosition) => {
-    // The map control has already paid for a one-shot fix by the time its
-    // geolocate event fires. Seed the shared watch with that exact reading so
-    // hiding MapLibre's duplicate dot never creates a gap with no visible
-    // location while watchPosition obtains its first callback.
     if (initialFix) {
       setPosition([initialFix.coords.longitude, initialFix.coords.latitude])
       setAccuracy(initialFix.coords.accuracy)
@@ -59,13 +43,9 @@ export function useGeolocation(): Geolocation {
     }
     if (watchId.current !== undefined) return
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      clearFix()
       setStatus('unavailable')
       return
     }
-    // A fix from a previous session — possibly minutes old and from
-    // somewhere else on the playa — must not be presented as the current
-    // position while a fresh one is still being acquired.
     if (!initialFix) {
       clearFix()
       setStatus('locating')
@@ -78,11 +58,6 @@ export function useGeolocation(): Geolocation {
         setStatus('tracking')
       },
       (error) => {
-        // Permission denial is terminal — the browser will never call this
-        // watch back again, so tear it down and withdraw the old fix just as
-        // `stop()` does. A denial can happen after successful samples if the
-        // user revokes permission while the app is open; retaining that sample
-        // would leave navigation trusting a coordinate that can never refresh.
         if (error.code !== error.PERMISSION_DENIED) {
           clearFix()
           setStatus('locating')
@@ -92,6 +67,9 @@ export function useGeolocation(): Geolocation {
           navigator.geolocation.clearWatch(watchId.current)
           watchId.current = undefined
         }
+        // A terminal permission denial means this sample can never be refreshed.
+        // Withdraw it immediately rather than letting navigation keep treating a
+        // pre-denial coordinate and accuracy value as live forever (#102).
         clearFix()
         setStatus('denied')
       },

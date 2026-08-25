@@ -482,11 +482,18 @@ await page.waitForTimeout(6500)
 const overlappingPin = page.getByRole('button', { name: /Marked location: Esplanade & 7:30/ })
 await overlappingPin.click()
 await page.waitForTimeout(400)
+// This is a negative check — no detail panel is expected to exist at all —
+// so it needs its own short timeout rather than Playwright's 30s default:
+// without one, `.innerText()` on a locator matching nothing spends the
+// full 30s failing before the `.catch()` below falls back, by which time
+// the reopened Save/Share snackbar's own 6s autoHideDuration has long since
+// fired, so the very next assertion failed for an unrelated reason no
+// matter how correct the reopen behaviour actually was.
 const underlyingListing = await page
   .getByTestId('detail-panel')
   .locator('h5, h6')
   .first()
-  .innerText()
+  .innerText({ timeout: 1000 })
   .catch(() => '')
 assert(
   underlyingListing.trim() === '',

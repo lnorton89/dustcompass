@@ -37,6 +37,20 @@ describe('route card layout', () => {
     expect(layout.routePoints[0]).not.toEqual(layout.routePoints.at(-1))
   })
 
+  it('frames a two-point direct-bearing fallback without inventing intermediate geometry', () => {
+    const direct: PlayaRoute = {
+      kind: 'direct',
+      meters: 300,
+      coordinates: [
+        [-119.2, 40.78],
+        [-119.197, 40.782],
+      ],
+    }
+    const layout = routeCardLayout(direct)
+    expect(layout.routePoints).toHaveLength(2)
+    expect(layout.routePoints[0]).not.toEqual(layout.routePoints[1])
+  })
+
   it('keeps map and text summary in separate non-overlapping regions', () => {
     const layout = routeCardLayout(route)
     expect(layout.map.x + layout.map.width).toBeLessThan(layout.summary.x)

@@ -140,7 +140,7 @@ class FakeRequest {
 let fakeClock = 1700000000000
 
 /** Runs the generated worker source in a fresh sandboxed scope. */
-function loadWorker({ fetchImpl, cacheStorage, source = workerSource, origin = ORIGIN }) {
+function loadWorker({ fetchImpl, cacheStorage, source = workerSource, origin = ORIGIN, schemaVersion = 1 }) {
   const handlers = {}
   const notifications = []
   const sandbox = {
@@ -151,7 +151,18 @@ function loadWorker({ fetchImpl, cacheStorage, source = workerSource, origin = O
     URL,
     setTimeout,
     Date: { now: () => (fakeClock += 1) },
-    fetch: (...args) => fetchImpl(...args),
+    fetch: (...args) => {
+      const request = args[0]
+      const url = typeof request === 'string' ? request : request.url
+      if (url.endsWith('/data/schema.json')) {
+        const version = typeof schemaVersion === 'function' ? schemaVersion() : schemaVersion
+        return Promise.resolve(new Response(JSON.stringify({ schemaVersion: version }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }))
+      }
+      return fetchImpl(...args)
+    },
     caches: cacheStorage ?? new FakeCacheStorage(),
     self: undefined,
   }
@@ -296,6 +307,29 @@ describe('generated service worker', () => {
     const revision = await worker.caches.open(revisionName)
     expect(await revision.match(dataUrl('layout.json'))).toBeDefined()
     expect(await revision.match(dataUrl('camp.json'))).toBeDefined()
+  })
+
+  it('refuses live data from a newer incompatible schema (#104)', async () => {
+    let live = false
+    let schemaVersion = 1
+    const worker = loadWorker({
+      schemaVersion: () => schemaVersion,
+      fetchImpl: async (req) => {
+        const url = typeof req === 'string' ? req : req.url
+        if (url.endsWith('layout.json')) return new Response(live ? '{"schema":"new"}' : '{}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response(live ? '[2]' : '[]', { status: 200, headers: { 'content-type': 'application/json' } })
+        return new Response('<html></html>', { status: 200 })
+      },
+    })
+    await worker.fireInstall()
+    live = true
+    schemaVersion = 2
+
+    await worker.fireFetch(dataUrl('layout.json'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(await currentLiveRevision(worker)).toBeUndefined()
+    expect(worker.notifications.some((m) => m.type === 'DATA_REFRESHED')).toBe(false)
   })
 
   it('does not promote a partial revision when one file in it fails', async () => {

@@ -120,6 +120,9 @@ describe('live-data refresh throttle', () => {
     let dataRequests = 0
     const fetchImpl = async (request) => {
       const url = typeof request === 'string' ? request : request.url
+      if (url.endsWith('/data/schema.json')) {
+        return new Response('{"schemaVersion":1}', { status: 200, headers: { 'content-type': 'application/json' } })
+      }
       if (url.includes('/data/')) {
         if (refreshing) dataRequests += 1
         if (refreshing && url.endsWith('camp.json')) {
@@ -156,6 +159,9 @@ describe('live-data refresh throttle', () => {
     let dataRequests = 0
     const fetchImpl = async (request) => {
       const url = typeof request === 'string' ? request : request.url
+      if (url.endsWith('/data/schema.json')) {
+        return new Response('{"schemaVersion":1}', { status: 200, headers: { 'content-type': 'application/json' } })
+      }
       if (url.includes('/data/')) {
         if (refreshing) dataRequests += 1
         if (refreshing && url.endsWith('camp.json')) {

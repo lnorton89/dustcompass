@@ -1,10 +1,16 @@
 import { createHash } from 'node:crypto'
-import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const output = join(process.cwd(), 'out')
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? '').replace(/\/$/, '')
+// Increment only when the shape/semantics consumed by app code become incompatible.
+// Content-only listing changes deliberately keep the same version.
+const DATA_SCHEMA_VERSION = 1
+const dataSchemaPath = join(output, 'data', 'schema.json')
+await mkdir(join(output, 'data'), { recursive: true })
+await writeFile(dataSchemaPath, `${JSON.stringify({ schemaVersion: DATA_SCHEMA_VERSION }, null, 2)}\n`, 'utf8')
 const files = await walk(output)
 const assets = []
 const digest = createHash('sha256')
@@ -56,6 +62,8 @@ const CACHE_NAME = ${JSON.stringify(cacheName)};
 const PRECACHE = ${JSON.stringify(assets, null, 2)};
 const SHELL = ${JSON.stringify(shell)};
 const DATA_PREFIX = ${JSON.stringify(dataPrefix)};
+const DATA_SCHEMA_VERSION = ${DATA_SCHEMA_VERSION};
+const DATA_SCHEMA_URL = DATA_PREFIX + 'schema.json';
 // The precached data files bundled with *this* build — a manifest of exactly
 // which URLs make up one coherent data revision, so a background refresh can
 // be judged complete or incomplete as a set rather than file by file. Scoped
@@ -65,7 +73,7 @@ const DATA_PREFIX = ${JSON.stringify(dataPrefix)};
 // content-type, so including them here made results.every(Boolean) below
 // impossible to satisfy for any real build — live-data promotion silently
 // never happened (#71).
-const DATA_FILES = PRECACHE.filter((url) => url.indexOf(DATA_PREFIX) === 0 && /\\.(?:geo)?json$/.test(url));
+const DATA_FILES = PRECACHE.filter((url) => url.indexOf(DATA_PREFIX) === 0 && url !== DATA_SCHEMA_URL && /\\.(?:geo)?json$/.test(url));
 // Deliberately not scoped to CACHE_NAME. CACHE_NAME's bytes are hashed into
 // its own name specifically so that name is a promise: this exact content,
 // nothing else. Writing a live-fetched file into it — even one that merely
@@ -415,6 +423,19 @@ function refreshLiveData() {
     const revisionName = LIVE_REVISION_PREFIX + now;
     let built = false;
     try {
+      // The public /data URLs can advance while this old worker is still the
+      // active controller. Refuse to hot-load bytes whose schema requires the
+      // waiting/new app build; content-only updates keep the same version and
+      // continue through the normal revision path (#104).
+      const schemaResponse = await fetch(DATA_SCHEMA_URL, {
+        cache: 'reload',
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      const schemaType = schemaResponse.headers.get('content-type') || '';
+      if (!schemaResponse.ok || !schemaType.includes('json')) return;
+      const remoteSchema = await schemaResponse.json();
+      if (remoteSchema?.schemaVersion !== DATA_SCHEMA_VERSION) return;
+
       const responses = await Promise.all(DATA_FILES.map(async (url) => {
         try {
           const response = await fetch(url, {

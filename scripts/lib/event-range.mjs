@@ -30,26 +30,31 @@ export function deriveEventRange(events) {
       end: Date.parse(occurrence.end_time ?? ''),
     }))
     .filter(({ start, end }) => Number.isFinite(start) && Number.isFinite(end))
+    .sort((a, b) => a.start - b.start)
 
   if (occurrences.length === 0) return undefined
 
-  const months = new Map()
-  for (const { start } of occurrences) {
-    const key = new Date(start).toISOString().slice(0, 7)
-    months.set(key, (months.get(key) ?? 0) + 1)
+  let bestStartIndex = 0
+  let bestEndIndex = 0
+  let right = 0
+  for (let left = 0; left < occurrences.length; left += 1) {
+    if (right < left) right = left
+    const limit = occurrences[left].start + WINDOW_MS
+    while (right + 1 < occurrences.length && occurrences[right + 1].start <= limit) right += 1
+    if (right - left > bestEndIndex - bestStartIndex) {
+      bestStartIndex = left
+      bestEndIndex = right
+    }
   }
-  const [eventMonth] = [...months].sort((a, b) => b[1] - a[1])[0]
 
-  const inMonth = occurrences.filter(({ start }) => new Date(start).toISOString().startsWith(eventMonth))
-  const start = Math.min(...inMonth.map((o) => o.start))
+  const start = occurrences[bestStartIndex].start
   const windowEnd = start + WINDOW_MS
-  const inWindow = occurrences.filter(({ end }) => end >= start && end <= windowEnd)
+  const inWindow = occurrences.filter((o) => o.start >= start && o.start <= windowEnd && o.end <= windowEnd)
   const end = Math.max(...inWindow.map((o) => o.end))
+  const inWindowSet = new Set(inWindow)
 
-  // Not deleted from the schedule this describes — only excluded from the
-  // metadata range used for preview mode. See the module comment.
   const outliers = occurrences
-    .filter((o) => o.start < start || o.end > windowEnd)
+    .filter((o) => !inWindowSet.has(o))
     .map((o) => ({
       uid: o.event.uid ?? o.event.event_id,
       title: o.event.title,

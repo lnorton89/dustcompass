@@ -968,6 +968,18 @@ export default function App() {
     })
     return () => cancelAnimationFrame(id)
   }, [pendingNearest, location.status, releaseLocation])
+  useEffect(() => {
+    // A successful browser fix can still be unusable for a BRC-only lookup.
+    // Treat that as a completed request rather than waiting forever with a
+    // high-accuracy watch owned by nearest (#107).
+    if (!pendingNearest || location.status !== 'tracking' || !here || usableFix) return
+    const id = requestAnimationFrame(() => {
+      setPendingNearest(undefined)
+      releaseLocation('nearest')
+      setProbe('Your current location is too far from Black Rock City for nearest-service lookup')
+    })
+    return () => cancelAnimationFrame(id)
+  }, [pendingNearest, location.status, here, usableFix, releaseLocation])
 
   /**
    * Re-frames the currently selected sheet once its real measured height is

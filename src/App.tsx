@@ -30,6 +30,7 @@ import NightlightIcon from '@mui/icons-material/Nightlight'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import ExploreIcon from '@mui/icons-material/Explore'
 import EventIcon from '@mui/icons-material/Event'
+import DirectionsIcon from '@mui/icons-material/Directions'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import GroupsIcon from '@mui/icons-material/Groups'
 import WcIcon from '@mui/icons-material/Wc'
@@ -57,8 +58,9 @@ import { useSavedPlaces } from './data/useSavedPlaces'
 import { useSavedEvents } from './data/useSavedEvents'
 import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
-import { travelBetween } from './brc/travel'
-import { bearingToClock, bearingBetween, bearingsMatch, isNearCity } from './brc/geo'
+import { travelForMeters } from './brc/travel'
+import { routeBetween } from './brc/routing'
+import { bearingToClock, bearingBetween, bearingsMatch, distanceBetween, isNearCity } from './brc/geo'
 import { shareLink } from './ui/share'
 import type { EventItem, Poi, PoiKind, UnplacedListing } from './data/types'
 import { reverseGeocode } from './brc/geocode'
@@ -77,6 +79,16 @@ import { ControlButton, ControlDivider, ControlGroup } from './ui/ControlGroup'
 import { BottomBar } from './ui/BottomBar'
 import { FirstRun } from './ui/FirstRun'
 import { haptic } from './ui/haptics'
+import { DirectionsPanel } from './ui/DirectionsPanel'
+import {
+  defaultDirectionsOrigin,
+  directionsUrl,
+  readDirectionsIntent,
+  type DirectionsEndpoint,
+  type DirectionsMode,
+} from './data/directions'
+import { resolveDirectionsRoute } from './data/directionsRuntime'
+import { shareRouteCard } from './ui/routeCard'
 
 type Filter = PoiKind | 'toilets' | 'services' | 'favorites'
 
@@ -141,7 +153,7 @@ export const MODE_KEY = 'dust-compass:mode'
 export const CITY_UP_KEY = 'dust-compass:city-up'
 export const ACTIVE_FILTERS_KEY = 'dust-compass:active-filters'
 const DEFAULT_FILTERS: Filter[] = ['art', 'camp', 'toilets', 'services']
-const VALID_FILTER_KEYS = new Set<Filter>(FILTERS.map((f) => f.key))
+const VALID_FILTER_KEYS: ReadonlySet<string> = new Set(FILTERS.map((f) => f.key))
 
 export function isThemeMode(value: unknown): value is ThemeMode {
   return value === 'dark' || value === 'light' || value === 'night'
@@ -179,7 +191,9 @@ export function readStoredFilters(): Set<Filter> {
     if (raw === null) return new Set(DEFAULT_FILTERS)
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return new Set(DEFAULT_FILTERS)
-    const valid = parsed.filter((key): key is Filter => VALID_FILTER_KEYS.has(key))
+    const valid = parsed.filter(
+      (key: unknown): key is Filter => typeof key === 'string' && VALID_FILTER_KEYS.has(key),
+    )
     // An array that was never empty but produced zero valid entries is
     // corruption, not someone deliberately switching every filter off —
     // only the latter should be allowed to persist as an empty set.
@@ -234,6 +248,21 @@ export function boundsOf(a: Position, b: Position): [Position, Position] {
     [Math.min(a[0], b[0]), Math.min(a[1], b[1])],
     [Math.max(a[0], b[0]), Math.max(a[1], b[1])],
   ]
+}
+
+export function boundsOfPositions(points: readonly Position[]): [Position, Position] {
+  if (!points.length) throw new Error('Cannot frame an empty route')
+  let west = points[0][0]
+  let east = points[0][0]
+  let south = points[0][1]
+  let north = points[0][1]
+  for (const [lng, lat] of points.slice(1)) {
+    west = Math.min(west, lng)
+    east = Math.max(east, lng)
+    south = Math.min(south, lat)
+    north = Math.max(north, lat)
+  }
+  return [[west, south], [east, north]]
 }
 
 /**
@@ -388,6 +417,8 @@ export default function App() {
   // stops it.
   const location = useGeolocation()
   const here = location.position
+  const startLocation = location.start
+  const stopLocation = location.stop
   /**
    * More than one feature can want a live fix at once — navigation and the
    * Events panel's "Closest" sort, at minimum — and the watch has to keep
@@ -397,20 +428,21 @@ export default function App() {
    * owns, or a feature that never releases its own claim (the map's locate
    * button has no "off" control) could never be cleaned up at all.
    */
-  const locationOwners = useRef<Set<'navigation' | 'events' | 'map' | 'nearest'>>(new Set())
+  type LocationOwner = 'navigation' | 'directions' | 'events' | 'map' | 'nearest'
+  const locationOwners = useRef<Set<LocationOwner>>(new Set())
   const acquireLocation = useCallback(
-    (owner: 'navigation' | 'events' | 'map' | 'nearest', initialFix?: GeolocationPosition) => {
+    (owner: LocationOwner, initialFix?: GeolocationPosition) => {
       locationOwners.current.add(owner)
-      location.start(initialFix)
+      startLocation(initialFix)
     },
-    [location.start],
+    [startLocation],
   )
   const releaseLocation = useCallback(
-    (owner: 'navigation' | 'events' | 'map' | 'nearest') => {
+    (owner: LocationOwner) => {
       locationOwners.current.delete(owner)
-      if (locationOwners.current.size === 0) location.stop()
+      if (locationOwners.current.size === 0) stopLocation()
     },
-    [location.stop],
+    [stopLocation],
   )
   /**
    * Permission denial is terminal, so no recorded owner still represents a
@@ -449,7 +481,7 @@ export default function App() {
   useEffect(() => {
     try {
       if (localStorage.getItem(DISCLAIMER_SURFACE_KEY) === 'dismissed') {
-        setDisclaimerSurfaceDismissed(true)
+        queueMicrotask(() => setDisclaimerSurfaceDismissed(true))
       }
     } catch {
       /* blocked storage means the disclosure remains visible */
@@ -480,7 +512,9 @@ export default function App() {
   const [embargoNoticeSeen, setEmbargoNoticeSeen] = useState(false)
   useEffect(() => {
     try {
-      if (localStorage.getItem(EMBARGO_NOTICE_KEY) === 'seen') setEmbargoNoticeSeen(true)
+      if (localStorage.getItem(EMBARGO_NOTICE_KEY) === 'seen') {
+        queueMicrotask(() => setEmbargoNoticeSeen(true))
+      }
     } catch {
       // Private windows and blocked site data both throw. The notice showing
       // twice is a far smaller problem than the map not opening.
@@ -504,7 +538,9 @@ export default function App() {
   const [staleNoticeSeen, setStaleNoticeSeen] = useState(false)
   useEffect(() => {
     try {
-      if (localStorage.getItem(STALE_NOTICE_KEY) === 'seen') setStaleNoticeSeen(true)
+      if (localStorage.getItem(STALE_NOTICE_KEY) === 'seen') {
+        queueMicrotask(() => setStaleNoticeSeen(true))
+      }
     } catch {
       /* nothing to do — see above */
     }
@@ -545,7 +581,23 @@ export default function App() {
     approximate?: boolean
     /** Present when heading to a listed camp/art piece, so the URL can name it. */
     uid?: string
+    /** Fixed planning origins stay fixed; live origins continue following GPS. */
+    origin?: Position
+    originLabel?: string
+    liveOrigin?: boolean
+    mode?: DirectionsMode
   }>()
+  const [initialDirections] = useState(() => readDirectionsIntent())
+  const [directionsOpen, setDirectionsOpen] = useState(() => Boolean(initialDirections))
+  const [directionsFrom, setDirectionsFrom] = useState<DirectionsEndpoint>(
+    () => initialDirections?.from ?? { kind: 'man' },
+  )
+  const [directionsTo, setDirectionsTo] = useState<DirectionsEndpoint | undefined>(
+    () => initialDirections?.to,
+  )
+  const [directionsMode, setDirectionsMode] = useState<DirectionsMode>(
+    () => initialDirections?.mode ?? 'walk',
+  )
 
   // "On now" has to stay true as time passes, or the panel quietly lies.
   useEffect(() => {
@@ -683,6 +735,11 @@ export default function App() {
     // the reader has done anything with it. Dismissing the notice clears
     // `staleLink` and lets this effect resume normally on the next run.
     if (staleLink) return
+    // Directions owns the query string while its editor is open. A separate
+    // effect below mirrors the complete versioned route intent; letting the
+    // legacy POI/pin publisher run here would erase `dir/from/to/mode` from a
+    // cold shared route before the reader could act on it.
+    if (directionsOpen) return
     if (selected) publish({ poi: selected.uid })
     else if (unplaced) publish({ poi: unplaced.uid })
     // The active navigation destination outranks a leftover dropped pin —
@@ -700,7 +757,29 @@ export default function App() {
       )
     else if (pin) publish({ at: pin.address, ll: pin.position })
     else publish({})
-  }, [data, selected, unplaced, heading, pin, publish, linkKey, restoredLink, staleLink])
+  }, [
+    data,
+    selected,
+    unplaced,
+    heading,
+    pin,
+    publish,
+    linkKey,
+    restoredLink,
+    staleLink,
+    directionsOpen,
+  ])
+
+  useEffect(() => {
+    if (!directionsOpen || !directionsTo) return
+    const next = directionsUrl({
+      version: 1,
+      from: directionsFrom,
+      to: directionsTo,
+      mode: directionsMode,
+    })
+    if (next !== window.location.href) window.history.replaceState(null, '', next)
+  }, [directionsOpen, directionsFrom, directionsTo, directionsMode])
 
   const visiblePois = useMemo(() => {
     if (!data) return []
@@ -724,6 +803,44 @@ export default function App() {
    * what the readout already says it is doing when there is no fix at all.
    */
   const usableFix = here && data && isNearCity(data.layout, here) ? here : undefined
+  const openDirections = useCallback(() => {
+    if (usableFix) {
+      setDirectionsFrom({ kind: 'live' })
+    } else if (location.status === 'idle' || location.status === 'locating') {
+      setDirectionsFrom({ kind: 'live' })
+      acquireLocation('directions')
+    } else {
+      setDirectionsFrom({ kind: 'man' })
+      releaseLocation('directions')
+    }
+    setDirectionsOpen(true)
+  }, [acquireLocation, location.status, releaseLocation, usableFix])
+
+  const closeDirections = useCallback(() => {
+    setDirectionsOpen(false)
+    releaseLocation('directions')
+  }, [releaseLocation])
+
+  const changeDirectionsFrom = useCallback((endpoint: DirectionsEndpoint) => {
+    setDirectionsFrom(endpoint)
+    if (endpoint.kind === 'live') acquireLocation('directions')
+    else releaseLocation('directions')
+  }, [acquireLocation, releaseLocation])
+
+  useEffect(() => {
+    if (!directionsOpen || directionsFrom.kind !== 'live' || usableFix) return
+    if (location.status === 'idle') {
+      acquireLocation('directions')
+      return
+    }
+    const outsideCity = location.status === 'tracking' && Boolean(here)
+    if (location.status === 'denied' || location.status === 'unavailable' || outsideCity) {
+      queueMicrotask(() => {
+        setDirectionsFrom({ kind: 'man' })
+        releaseLocation('directions')
+      })
+    }
+  }, [acquireLocation, directionsFrom.kind, directionsOpen, here, location.status, releaseLocation, usableFix])
   /**
    * What the map owes the reader about art, if anything.
    *
@@ -753,27 +870,50 @@ export default function App() {
     return undefined
   }, [data, dismissEmbargoNotice, dismissStaleNotice, embargoNoticeSeen, staleNoticeSeen])
 
-  const origin = usableFix ?? (data?.layout.center.geometry.coordinates as Position | undefined)
-  const originLabel = usableFix
-    ? data
-      ? `you (${reverseGeocode(usableFix, data.layout).label})`
-      : 'you'
-    : 'the Man'
+  const manPosition = data?.layout.center.geometry.coordinates as Position | undefined
+  const origin = heading?.liveOrigin
+    ? (usableFix ?? manPosition)
+    : (heading?.origin ?? usableFix ?? manPosition)
+  const originLabel = heading?.originLabel
+    ?? (usableFix
+      ? data
+        ? `you (${reverseGeocode(usableFix, data.layout).label})`
+        : 'you'
+      : 'the Man')
   // #62: the same reverse-geocode call originLabel already makes, exposed on
   // its own so the live-address snackbar can say "You are near ..." without
   // the "you (...)" framing that reads fine inline in a sentence but not as
   // a standalone answer to "where am I".
   const liveAddressLabel = usableFix && data ? reverseGeocode(usableFix, data.layout).label : undefined
 
+  const directionsPreview = useMemo(() => {
+    if (!data || !directionsTo) return undefined
+    const resolved = resolveDirectionsRoute(directionsFrom, directionsTo, {
+      layout: data.layout,
+      pois: data.pois,
+      livePosition: usableFix,
+    })
+    if (!resolved) return undefined
+    const route = routeBetween(data.layout, resolved.from.position, resolved.to.position)
+    const firstLeg = route.coordinates[1] ?? resolved.to.position
+    const bearing = bearingBetween(resolved.from.position, firstLeg)
+    return {
+      resolved,
+      route,
+      travel: travelForMeters(route.meters),
+      heading: bearingToClock(data.layout, bearing),
+    }
+  }, [data, directionsFrom, directionsTo, usableFix])
+
   const navigation = useMemo(() => {
     if (!heading || !origin || !data) return undefined
-    const bearing = bearingBetween(origin, heading.position)
+    const route = routeBetween(data.layout, origin, heading.position)
+    const firstLeg = route.coordinates[1] ?? heading.position
+    const bearing = bearingBetween(origin, firstLeg)
     return {
-      travel: travelBetween(origin, heading.position),
+      route,
+      travel: travelForMeters(route.meters),
       clock: bearingToClock(data.layout, bearing),
-      // Kept alongside the clock string rather than recomputed: it's the same
-      // bearing, and it's what the device-heading compass needle needs
-      // (#63) — `needleAngle(bearing, deviceHeading)` in NavBar/CompassNeedle.
       bearing,
     }
   }, [heading, origin, data])
@@ -816,10 +956,19 @@ export default function App() {
     // own reported accuracy, the true position could still be inside the
     // arrival radius. Missing accuracy (not guaranteed by the Geolocation
     // API, though effectively always present) is treated as unbounded.
-    if (!canConfirmArrival(navigation.travel.meters, Boolean(usableFix), location.accuracy)) return
+    const arrivalMeters = heading?.liveOrigin && usableFix
+      ? distanceBetween(usableFix, heading.position)
+      : Infinity
+    if (
+      !canConfirmArrival(
+        arrivalMeters,
+        Boolean(heading?.liveOrigin && usableFix),
+        location.accuracy,
+      )
+    ) return
     arrived.current = true
     haptic('arrive')
-  }, [navigation, usableFix, location.accuracy])
+  }, [navigation, heading, usableFix, location.accuracy])
 
 
   /**
@@ -850,6 +999,97 @@ export default function App() {
     [compact],
   )
 
+  const framedNavigationFor = useRef<string | undefined>(undefined)
+
+  const startDirections = useCallback(() => {
+    if (!data || !directionsTo) return
+    const route = resolveDirectionsRoute(directionsFrom, directionsTo, {
+      layout: data.layout,
+      pois: data.pois,
+      livePosition: usableFix,
+    })
+    if (!route) {
+      setProbe(
+        directionsFrom.kind === 'live'
+          ? 'Could not get a usable on-playa location. Choose The Man or another start.'
+          : 'Could not resolve one of those directions endpoints.',
+      )
+      return
+    }
+
+    setHeading({
+      name: route.to.label,
+      position: route.to.position,
+      address: route.to.detail,
+      approximate: route.to.endpoint.kind === 'address',
+      uid: route.to.endpoint.kind === 'poi' ? route.to.endpoint.uid : undefined,
+      origin: route.from.dynamic ? undefined : route.from.position,
+      originLabel: route.from.label,
+      liveOrigin: route.from.dynamic,
+      mode: directionsMode,
+    })
+    arrived.current = false
+    setSelected(undefined)
+    setPin(undefined)
+    setDirectionsOpen(false)
+    releaseLocation('directions')
+    const routed = routeBetween(data.layout, route.from.position, route.to.position)
+    mapRef.current?.fitBounds(boundsOfPositions(routed.coordinates), {
+      padding: navigationPadding(),
+      duration: 900,
+      maxZoom: 16.5,
+    })
+    framedNavigationFor.current = `${route.to.position[0]},${route.to.position[1]}`
+    if (route.from.dynamic) acquireLocation('navigation')
+    else releaseLocation('navigation')
+  }, [
+    acquireLocation,
+    data,
+    directionsFrom,
+    directionsMode,
+    directionsTo,
+    navigationPadding,
+    releaseLocation,
+    usableFix,
+  ])
+
+  const shareDirections = useCallback(async () => {
+    if (!directionsTo) return
+    const result = await shareLink(
+      directionsUrl({ version: 1, from: directionsFrom, to: directionsTo, mode: directionsMode }),
+      'Dust Compass directions',
+    )
+    if (result === 'copied') setProbe('Route link copied')
+    else if (result === 'unavailable') setProbe('Could not copy the route link')
+  }, [directionsFrom, directionsMode, directionsTo])
+
+  const shareDirectionsImage = useCallback(async () => {
+    if (!directionsPreview) return
+    try {
+      const result = await shareRouteCard({
+        fromLabel: directionsPreview.resolved.from.label,
+        toLabel: directionsPreview.resolved.to.label,
+        toDetail: directionsPreview.resolved.to.detail,
+        route: directionsPreview.route,
+        mode: directionsMode,
+        heading: directionsPreview.heading,
+        approximate: directionsPreview.resolved.to.endpoint.kind === 'address',
+      })
+      setProbe(result === 'shared' ? 'Route card shared' : result === 'copied' ? 'Route card copied' : 'Route card downloaded')
+    } catch {
+      setProbe('Could not create the route card')
+    }
+  }, [directionsMode, directionsPreview])
+
+  const swapDirections = useCallback(() => {
+    if (!directionsTo) return
+    const previousFrom = directionsFrom
+    setDirectionsFrom(directionsTo)
+    setDirectionsTo(previousFrom)
+    if (directionsTo.kind === 'live') acquireLocation('directions')
+    else releaseLocation('directions')
+  }, [acquireLocation, directionsFrom, directionsTo, releaseLocation])
+
   const navigateTo = useCallback(
     (target: {
       name: string
@@ -858,12 +1098,26 @@ export default function App() {
       positionSource?: 'gps' | 'address'
       uid?: string
     }) => {
+      const routeOrigin = defaultDirectionsOrigin(
+        Boolean(usableFix) || location.status === 'idle' || location.status === 'locating',
+      )
+      setDirectionsFrom(routeOrigin)
+      setDirectionsTo(
+        target.uid
+          ? { kind: 'poi', uid: target.uid }
+          : target.address
+            ? { kind: 'address', address: target.address, position: target.position }
+            : { kind: 'fixed', label: target.name, position: target.position },
+      )
+      setDirectionsOpen(false)
       setHeading({
         name: target.name,
         position: target.position,
         address: target.address,
         approximate: target.positionSource === 'address',
         uid: target.uid,
+        liveOrigin: routeOrigin.kind === 'live',
+        mode: directionsMode,
       })
       arrived.current = false
       setSelected(undefined)
@@ -903,17 +1157,18 @@ export default function App() {
         })
         framedNavigationFor.current = undefined
       }
-      acquireLocation('navigation')
+      if (routeOrigin.kind === 'live') acquireLocation('navigation')
+      else releaseLocation('navigation')
     },
-    [acquireLocation, navigationPadding, usableFix],
+    [acquireLocation, directionsMode, location.status, navigationPadding, releaseLocation, usableFix],
   )
 
-  const framedNavigationFor = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!heading) {
       framedNavigationFor.current = undefined
       return
     }
+    if (!heading.liveOrigin) return
     const key = `${heading.position[0]},${heading.position[1]}`
     if (!usableFix || framedNavigationFor.current === key) return
     framedNavigationFor.current = key
@@ -929,6 +1184,32 @@ export default function App() {
       maxZoom: 16.5,
     })
   }, [heading, usableFix, navigationPadding])
+
+  const framedDirectionsFor = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!directionsOpen || !directionsPreview) {
+      framedDirectionsFor.current = undefined
+      return
+    }
+    const key = JSON.stringify([directionsFrom, directionsTo])
+    if (framedDirectionsFor.current === key) return
+    framedDirectionsFor.current = key
+    mapRef.current?.fitBounds(boundsOfPositions(directionsPreview.route.coordinates), {
+      padding: navigationPadding(), duration: 650, maxZoom: 16.5,
+    })
+  }, [directionsFrom, directionsOpen, directionsPreview, directionsTo, navigationPadding])
+
+  const showFullRoute = useCallback(() => {
+    if (!navigation) return
+    mapRef.current?.fitBounds(boundsOfPositions(navigation.route.coordinates), {
+      padding: navigationPadding(), duration: 650, maxZoom: 16.5,
+    })
+  }, [navigation, navigationPadding])
+
+  const editCurrentRoute = useCallback(() => {
+    setDirectionsOpen(true)
+    if (directionsFrom.kind === 'live') acquireLocation('directions')
+  }, [acquireLocation, directionsFrom.kind])
 
   const flyTo = useCallback(
     (position: Position, poi?: Poi) => {
@@ -1215,6 +1496,14 @@ export default function App() {
                   </ControlGroup>
                   <ControlGroup>
                     <ControlButton
+                      icon={<DirectionsIcon />}
+                      title="Directions"
+                      tooltip="Directions"
+                      selected={directionsOpen}
+                      pressed={directionsOpen}
+                      onClick={openDirections}
+                    />
+                    <ControlButton
                       icon={<EventIcon />}
                       title="Show events"
                       tooltip="Events"
@@ -1360,7 +1649,13 @@ export default function App() {
                 // actually draws it (not `here` directly): a fix nowhere near
                 // the city still resolves to the Man, same as the distance
                 // readout, rather than a route line running off the map.
-                route={heading && here && origin ? { from: origin, to: heading.position } : undefined}
+                route={
+                  heading
+                    ? (heading.liveOrigin && !usableFix ? undefined : navigation?.route)
+                    : directionsOpen ? directionsPreview?.route : undefined
+                }
+                routeStart={!heading && directionsOpen ? directionsPreview?.resolved.from.position : undefined}
+                routeEnd={!heading && directionsOpen ? directionsPreview?.resolved.to.position : undefined}
                 selected={selected}
                 destination={heading}
               />
@@ -1443,12 +1738,18 @@ export default function App() {
                   bearing={navigation.bearing}
                   compass={compass}
                   palette={palette}
-                  located={Boolean(usableFix)}
+                  located={Boolean(heading.liveOrigin && usableFix)}
+                  liveOrigin={Boolean(heading.liveOrigin)}
+                  fromLabel={originLabel}
+                  mode={heading.mode ?? directionsMode}
+                  routeKind={navigation.route.kind}
                   status={location.status}
                   accuracy={location.accuracy}
                   approximate={heading.approximate}
                   screenAwake={wakeLock === 'active'}
                   onRetryLocation={retryNavigationLocation}
+                  onEdit={editCurrentRoute}
+                  onShowRoute={showFullRoute}
                   onClear={() => {
                     setHeading(undefined)
                     releaseLocation('navigation')
@@ -1650,6 +1951,15 @@ export default function App() {
                 onClick: () => setFiltersOpen((open) => !open),
               },
               {
+                key: 'directions',
+                label: 'Directions',
+                title: 'Directions',
+                icon: <DirectionsIcon />,
+                selected: directionsOpen,
+                pressed: directionsOpen,
+                onClick: openDirections,
+              },
+              {
                 key: 'events',
                 label: 'Events',
                 title: 'Show events',
@@ -1849,6 +2159,39 @@ export default function App() {
           ) : undefined
         }
       />
+
+      {data && (
+        <DirectionsPanel
+          open={directionsOpen}
+          compact={compact}
+          layout={data.layout}
+          pois={data.pois}
+          events={data.events}
+          places={places}
+          droppedPin={pin}
+          from={directionsFrom}
+          to={directionsTo}
+          mode={directionsMode}
+          hasUsableLiveFix={Boolean(usableFix)}
+          findingLocation={location.status === 'locating'}
+          preview={directionsPreview ? {
+            fromLabel: directionsPreview.resolved.from.label,
+            toLabel: directionsPreview.resolved.to.label,
+            toDetail: directionsPreview.resolved.to.detail,
+            route: directionsPreview.route,
+            travel: directionsPreview.travel,
+            heading: directionsPreview.heading,
+          } : undefined}
+          onFromChange={changeDirectionsFrom}
+          onToChange={setDirectionsTo}
+          onModeChange={setDirectionsMode}
+          onSwap={swapDirections}
+          onStart={startDirections}
+          onShare={() => void shareDirections()}
+          onShareImage={() => void shareDirectionsImage()}
+          onClose={closeDirections}
+        />
+      )}
 
       <FirstRun />
     </ThemeProvider>

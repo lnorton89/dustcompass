@@ -1,8 +1,13 @@
 name: CI
 
+# Pull requests get one CI run from the pull_request event. Push CI is limited
+# to master so feature-branch pushes do not create a second `CI / test` check
+# for the same SHA. Duplicate push + pull_request checks can leave a cancelled
+# push check attached to a PR head and block a protected merge even when the
+# pull_request check is green.
 on:
   push:
-    branches: ['**']
+    branches: [master]
   pull_request:
 
 concurrency:
@@ -38,6 +43,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
 
       - name: Unit tests
         run: npm test

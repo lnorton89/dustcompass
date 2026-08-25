@@ -7,7 +7,7 @@ import {
   type MapLayerMouseEvent,
   type MapRef,
 } from '@vis.gl/react-maplibre'
-import { Button, Stack, Typography } from '@mui/material'
+import { Box, Button, Stack, Typography } from '@mui/material'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
 import type { GeoJSONSource } from 'maplibre-gl'
 import type { PlayaData } from '../data/usePlayaData'
@@ -15,6 +15,7 @@ import type { Poi, PoiKind } from '../data/types'
 import type { SavedPlace } from '../data/useSavedPlaces'
 import { reverseGeocode } from '../brc/geocode'
 import type { Position } from '../brc/geo'
+import type { PlayaRoute } from '../brc/routing'
 import { cityOutlinePoints, frameFor } from '../brc/frame'
 import { CityLayers, LANDMARK_LAYER_ID } from './CityLayers'
 import {
@@ -99,8 +100,10 @@ interface Props {
    * of the place they were sent to.
    */
   initialTarget?: Position
-  /** Straight line drawn to the place being navigated to. */
-  route?: { from: Position; to: Position }
+  /** Surveyed/hybrid/direct route drawn for preview or active navigation. */
+  route?: PlayaRoute
+  routeStart?: Position
+  routeEnd?: Position
   /** The listing whose detail drawer is open. */
   selected?: Poi
   /** Kept visible after the detail drawer closes and navigation begins. */
@@ -173,6 +176,8 @@ export function MapView({
   onPinClick,
   initialTarget,
   route,
+  routeStart,
+  routeEnd,
   selected,
   destination,
   savedPlaces,
@@ -590,7 +595,31 @@ export function MapView({
         labelScale={labelScale}
         baseRoadWidth={data.layout.road_width}
       />
-      <RouteLayer from={route?.from} to={route?.to} palette={palette} />
+      <RouteLayer route={route} palette={palette} />
+      {route && !destination && routeStart && (
+        <Marker longitude={routeStart[0]} latitude={routeStart[1]} anchor="center">
+          <Box
+            data-testid="directions-start-marker"
+            sx={{
+              width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center',
+              bgcolor: palette.civic, color: palette.playa, border: `2px solid ${palette.playa}`,
+              fontWeight: 800, boxShadow: '0 2px 8px rgba(0,0,0,.45)',
+            }}
+          >A</Box>
+        </Marker>
+      )}
+      {route && !destination && routeEnd && (
+        <Marker longitude={routeEnd[0]} latitude={routeEnd[1]} anchor="center">
+          <Box
+            data-testid="directions-end-marker"
+            sx={{
+              width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center',
+              bgcolor: palette.art, color: palette.playa, border: `2px solid ${palette.playa}`,
+              fontWeight: 800, boxShadow: '0 2px 8px rgba(0,0,0,.45)',
+            }}
+          >B</Box>
+        </Marker>
+      )}
       <SavedPlacesLayer places={savedPlaces} palette={palette} labelScale={labelScale} />
       <ServiceLayers
         services={data.services}

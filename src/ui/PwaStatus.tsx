@@ -86,7 +86,7 @@ function deriveStatus(state: PwaState): Status {
 
 export function PwaStatus({ compact }: { compact: boolean }) {
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine))
-  const [support, setSupport] = useState<Support>(initialSupport)
+  const [support, setSupport] = useState<Support>('checking')
   const [cacheReady, setCacheReady] = useState(() => process.env.NODE_ENV !== 'production')
   const [installing, setInstalling] = useState(false)
   const [installFailed, setInstallFailed] = useState(false)
@@ -106,7 +106,15 @@ export function PwaStatus({ compact }: { compact: boolean }) {
     window.addEventListener('online', goOnline)
     window.addEventListener('offline', goOffline)
 
-    if (process.env.NODE_ENV !== 'production' || !('serviceWorker' in navigator)) {
+    if (process.env.NODE_ENV !== 'production') {
+      queueMicrotask(() => setSupport('supported'))
+      return () => {
+        window.removeEventListener('online', goOnline)
+        window.removeEventListener('offline', goOffline)
+      }
+    }
+    if (!('serviceWorker' in navigator)) {
+      queueMicrotask(() => setSupport('unsupported'))
       return () => {
         window.removeEventListener('online', goOnline)
         window.removeEventListener('offline', goOffline)
@@ -156,7 +164,7 @@ export function PwaStatus({ compact }: { compact: boolean }) {
     navigator.serviceWorker.addEventListener('controllerchange', controllerChanged)
     navigator.serviceWorker.addEventListener('message', message)
 
-    setSupport('supported')
+    queueMicrotask(() => setSupport('supported'))
     void navigator.serviceWorker
       .register(assetUrl('sw.js'), { scope: `${BASE_PATH}/` })
       .then((registration) => {
@@ -269,12 +277,6 @@ export function PwaStatus({ compact }: { compact: boolean }) {
       </Box>
     </Tooltip>
   )
-}
-
-function initialSupport(): Support {
-  if (typeof navigator === 'undefined') return 'checking'
-  if (process.env.NODE_ENV !== 'production') return 'supported'
-  return 'serviceWorker' in navigator ? 'checking' : 'unsupported'
 }
 
 function isWorkerMessage(value: unknown): value is WorkerMessage {

@@ -16,8 +16,7 @@ export interface Travel {
   bikeMinutes: number
 }
 
-export function travelBetween(from: Position, to: Position): Travel {
-  const meters = distanceBetween(from, to)
+export function travelForMeters(meters: number): Travel {
   return {
     meters,
     feet: metersToFeet(meters),
@@ -25,6 +24,10 @@ export function travelBetween(from: Position, to: Position): Travel {
     walkMinutes: meters / WALK_METERS_PER_SECOND / 60,
     bikeMinutes: meters / BIKE_METERS_PER_SECOND / 60,
   }
+}
+
+export function travelBetween(from: Position, to: Position): Travel {
+  return travelForMeters(distanceBetween(from, to))
 }
 
 export function formatMinutes(minutes: number): string {

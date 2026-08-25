@@ -54,12 +54,12 @@ export function FirstRun() {
   const [open, setOpen] = useState(false)
   useEffect(() => {
     try {
-      if (localStorage.getItem(SEEN_KEY) !== 'seen') setOpen(true)
+      if (localStorage.getItem(SEEN_KEY) !== 'seen') queueMicrotask(() => setOpen(true))
     } catch {
       // Private windows and blocked site data both throw. Open rather than
       // skip: dismiss() below swallows its own write failure, so the worst
       // case is this screen coming back every launch — never zero onboarding.
-      setOpen(true)
+      queueMicrotask(() => setOpen(true))
     }
   }, [])
 

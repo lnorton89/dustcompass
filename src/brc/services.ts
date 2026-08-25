@@ -210,7 +210,9 @@ export function toiletPoints(
   return {
     type: 'FeatureCollection',
     features: toilets.features.flatMap((feature, index): GeoJSON.Feature<GeoJSON.Point>[] => {
-      const sourceId = feature.properties?.OBJECTID ?? index
+      const rawSourceId: unknown = feature.properties?.OBJECTID
+      const sourceId =
+        typeof rawSourceId === 'string' || typeof rawSourceId === 'number' ? rawSourceId : index
       const point = (coordinates: GeoJSON.Position, uid: string): GeoJSON.Feature<GeoJSON.Point> => ({
         type: 'Feature',
         properties: {

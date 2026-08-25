@@ -980,7 +980,7 @@ await shared.close()
  */
 {
   const base = new URL(`data/${DATA_YEAR}/`, url).href
-  const reachFrom = async (label, geolocation) => {
+  const reachFrom = async (label, geolocation, expectRoute = true) => {
     const ctx = await browser.newContext({
       viewport: { width: 1440, height: 900 },
       geolocation,
@@ -1029,22 +1029,30 @@ await shared.close()
       }
     }, man)
     await ctx.close()
-    assert(result.points > 0, `${label}: a route is drawn at all (${result.points} points)`)
+    assert(
+      expectRoute ? result.points > 0 : result.points === 0,
+      expectRoute
+        ? `${label}: a route is drawn at all (${result.points} points)`
+        : `${label}: no fake route is drawn without a usable on-playa fix (${result.points} points)`,
+    )
     return result
   }
 
   // A degree is about 111km here, so the whole city and the road in fit inside a
   // third of one. San Francisco is four degrees away and unmissable.
   const near = await reachFrom('near fix', { latitude: 40.7772, longitude: -119.1893 })
-  const far = await reachFrom('distant fix', { latitude: 37.7749, longitude: -122.4194 })
-  assert(near.reach < 0.35, `a fix in the city routes from the fix (${near.reach.toFixed(3)}°)`)
+  const far = await reachFrom('distant fix', { latitude: 37.7749, longitude: -122.4194 }, false)
+  assert(near.reach != null && near.reach < 0.35, `a fix in the city routes from the fix (${near.reach?.toFixed(3) ?? 'no route'}°)`)
   assert(/toward \d/.test(near.readout), 'a fix in the city gives a bearing to walk')
+  // A live-origin route is deliberately withheld until there is a usable
+  // on-playa fix. The navigation readout may fall back to the Man for context,
+  // but drawing that fallback as if it were the user's path would be misleading.
   assert(
-    far.reach < 0.35,
-    `a distant fix does not drag the route off the map (${far.reach.toFixed(3)}° from the Man)`,
+    far.points === 0 && far.reach == null,
+    `a distant fix does not draw a fake route from the Man (${far.points} points)`,
   )
   assert(
-    /from the Man/.test(far.readout),
+    /from the Man/i.test(far.readout),
     'a distant fix says the distance is measured from the Man',
   )
 }
@@ -1169,6 +1177,37 @@ await shared.close()
 }
 
 console.log(problems.length ? `\n${problems.length} problem(s):\n` + problems.join('\n') : '\nno console or network errors')
+// First-class Directions: dedicated entry, editable endpoints, mode, URL round-trip.
+await page.getByRole('button', { name: 'Directions', exact: true }).first().click()
+await page.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+const toField = page.getByRole('combobox', { name: 'To' })
+await toField.fill('7:30 & Esplanade')
+await page.waitForTimeout(300)
+await toField.press('ArrowDown')
+await toField.press('Enter')
+await page.getByTestId('directions-summary').waitFor({ timeout: 5000 })
+await page.getByRole('button', { name: /Bike/i }).click()
+await page.getByRole('button', { name: /Share link/i }).click()
+await page.waitForTimeout(250)
+const routeUrl = page.url()
+assert(new URL(routeUrl).searchParams.get('dir') === '1', 'Directions share URL carries schema version')
+assert(new URL(routeUrl).searchParams.get('year') === '2026', 'Directions share URL carries annual data version')
+assert(new URL(routeUrl).searchParams.get('mode') === 'bike', 'Directions share URL carries selected mode')
+const routeCardDownload = page.waitForEvent('download', { timeout: 6000 }).catch(() => undefined)
+await page.getByRole('button', { name: /Route card/i }).click()
+const routeDownload = await routeCardDownload
+if (routeDownload) {
+  assert(routeDownload.suggestedFilename().endsWith('.png'), 'route card fallback downloads a PNG')
+} else {
+  await page.getByText(/Route card (shared|copied)/).waitFor({ timeout: 6000 })
+}
+const sharedRoute = await context.newPage()
+await sharedRoute.goto(routeUrl, { waitUntil: 'load' })
+await sharedRoute.waitForFunction(() => window.__map, null, { timeout: 30000 })
+await sharedRoute.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+assert((await sharedRoute.getByTestId('directions-summary').count()) === 1, 'shared Directions URL restores route summary')
+await sharedRoute.close()
+
 await browser.close()
 process.exit(problems.length || process.exitCode ? 1 : 0)
 

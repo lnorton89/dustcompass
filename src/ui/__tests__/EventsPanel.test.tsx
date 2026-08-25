@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventsPanel } from '../EventsPanel'
 import type { CityLayout } from '../../brc/layout'
@@ -109,7 +109,7 @@ describe('EventsPanel · browsing past the initial page (#54)', () => {
 })
 
 describe('EventsPanel · location failure for "Closest"', () => {
-  it('does not leave "Closest" selected while silently falling back to time order on denial', () => {
+  it('does not leave "Closest" selected while silently falling back to time order on denial', async () => {
     const onNeedLocation = vi.fn()
     render(
       <EventsPanel {...baseProps} origin={undefined} locationStatus="denied" onNeedLocation={onNeedLocation} />,
@@ -120,11 +120,13 @@ describe('EventsPanel · location failure for "Closest"', () => {
 
     // Denied, not merely still locating: the toggle must not remain selected
     // while the rows are quietly time-sorted underneath it.
-    expect(screen.getByRole('button', { name: /closest/i }).getAttribute('aria-pressed')).toBe('false')
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /closest/i }).getAttribute('aria-pressed')).toBe('false'),
+    )
     expect(screen.getByText(/location access is off/i)).toBeDefined()
   })
 
-  it('offers an explicit retry that asks for location again', () => {
+  it('offers an explicit retry that asks for location again', async () => {
     const onNeedLocation = vi.fn()
     render(
       <EventsPanel {...baseProps} origin={undefined} locationStatus="unavailable" onNeedLocation={onNeedLocation} />,
@@ -133,17 +135,17 @@ describe('EventsPanel · location failure for "Closest"', () => {
     fireEvent.click(screen.getByRole('button', { name: /closest/i }))
     onNeedLocation.mockClear()
 
-    fireEvent.click(screen.getByRole('button', { name: /retry/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /retry/i }))
     expect(onNeedLocation).toHaveBeenCalledTimes(1)
   })
 
-  it('uses the shared MUI button touch-target contract for Retry', () => {
+  it('uses the shared MUI button touch-target contract for Retry', async () => {
     render(
       <EventsPanel {...baseProps} origin={undefined} locationStatus="unavailable" onNeedLocation={vi.fn()} />,
     )
     fireEvent.click(screen.getByRole('button', { name: /closest/i }))
 
-    const retry = screen.getByRole('button', { name: /retry/i })
+    const retry = await screen.findByRole('button', { name: /retry/i })
     expect(retry.tagName).toBe('BUTTON')
     expect(retry.classList.contains('MuiButton-root')).toBe(true)
   })

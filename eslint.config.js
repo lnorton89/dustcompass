@@ -6,9 +6,9 @@ import tseslint from 'typescript-eslint'
 export default tseslint.config(
   { ignores: ['dist', 'dev-dist', '.next', 'out', 'public/data', 'public/fonts', 'coverage'] },
 
-  // Application source: type-aware rules, browser globals.
   {
     files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/**/__tests__/**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       ecmaVersion: 2022,
@@ -18,20 +18,32 @@ export default tseslint.config(
     plugins: { 'react-hooks': reactHooks },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      // Underscore-prefixed arguments are a deliberate "unused on purpose".
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unsafe-argument': 'error',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'error',
+      'react-hooks/exhaustive-deps': 'error',
+      'react-hooks/immutability': 'error',
+      'react-hooks/set-state-in-effect': 'error',
     },
   },
 
-  // Build config is TypeScript but is not part of the app's tsconfig project,
-  // so it gets the TS parser without the type-aware rules.
+  {
+    files: ['src/**/__tests__/**/*.{ts,tsx}'],
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    languageOptions: { ecmaVersion: 2022, globals: globals.browser },
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+    },
+  },
+
   {
     files: ['*.config.ts'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: { ecmaVersion: 2022, globals: globals.node },
   },
 
-  // Node tooling: plain JS, no type-aware rules to apply.
   {
     files: ['scripts/**/*.mjs', '*.config.js'],
     extends: [js.configs.recommended],

@@ -5,6 +5,7 @@ import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined'
 import CloudDoneIcon from '@mui/icons-material/CloudDone'
 import type { ReactElement } from 'react'
 import { BrandMark } from './BrandMark'
+import { BRAND } from '../brand'
 
 /**
  * Bumped only when there is something genuinely new to say. Seeing this once is
@@ -115,6 +116,9 @@ export function FirstRun() {
         </Stack>
 
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 3 }}>
+          City survey &amp; listings: Burning Man Project. {BRAND.disclaimer}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
           Your location is only ever read when you ask for it — navigating, sorting events by
           distance, or the map's own locate button — and it stays on this device.
         </Typography>

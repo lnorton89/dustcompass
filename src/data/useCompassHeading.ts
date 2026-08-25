@@ -23,7 +23,7 @@ export interface CompassHeading {
 }
 
 interface RequestPermissionCtor {
-  requestPermission?: () => Promise<'granted' | 'denied'>
+  requestPermission?: (absolute?: boolean) => Promise<'granted' | 'denied'>
 }
 
 interface IOSOrientationEvent extends DeviceOrientationEvent {
@@ -66,7 +66,11 @@ export function useCompassHeading(active: boolean): CompassHeading {
     const ctor = DeviceOrientationEvent as unknown as RequestPermissionCtor
     if (typeof ctor.requestPermission === 'function') {
       try {
-        const result = await ctor.requestPermission()
+        // The current Device Orientation permission API accepts `true` to
+        // request absolute (magnetometer-backed) orientation. Older Safari
+        // implementations ignore the extra argument and still return their
+        // iOS-specific webkitCompassHeading below.
+        const result = await ctor.requestPermission(true)
         setSupport(result === 'granted' ? 'active' : 'denied')
       } catch {
         // Denied, or asked outside a user gesture — either way, degrade to
@@ -97,8 +101,14 @@ export function useCompassHeading(active: boolean): CompassHeading {
         setAccuracy(typeof ios.webkitCompassAccuracy === 'number' && ios.webkitCompassAccuracy >= 0 ? ios.webkitCompassAccuracy : undefined)
         return
       }
-      if (event.alpha != null) {
+      // Plain deviceorientation may be relative to an arbitrary frame. It is
+      // not a compass unless the sample explicitly says it is Earth-relative.
+      if (event.alpha != null && (eventName === 'deviceorientationabsolute' || event.absolute === true)) {
         setHeading((360 - event.alpha) % 360)
+        setAccuracy(undefined)
+      } else {
+        setHeading(undefined)
+        setAccuracy(undefined)
       }
     }
 

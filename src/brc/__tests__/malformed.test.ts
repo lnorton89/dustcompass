@@ -23,6 +23,10 @@ describe('addresses that are not addresses', () => {
     'G & 0:99',
     '7:60 Portal & A',
     'D & 99:99',
+    '13:00 & Esplanade',
+    '25:30 & Esplanade',
+    '99:00 & Esplanade',
+    '00:30 & Esplanade',
     '::::',
     '   ',
     '3:',
@@ -33,6 +37,8 @@ describe('addresses that are not addresses', () => {
     for (const input of nonsense) {
       expect(() => parseAddress(input, layout), input).not.toThrow()
       expect(() => geocode(input, layout), input).not.toThrow()
+      expect(parseAddress(input, layout), input).toBeUndefined()
+      expect(geocode(input, layout), input).toBeUndefined()
     }
   })
 

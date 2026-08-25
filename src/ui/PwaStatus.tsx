@@ -38,6 +38,21 @@ interface PwaState {
 
 type Status = 'checking' | 'caching' | 'ready' | 'offline' | 'update' | 'incomplete' | 'updateFailed' | 'unsupported'
 
+/** Activate a waiting update, including the first uncontrolled tab after an
+ * older registration was restored. Such a tab receives no useful
+ * `controllerchange`, so reload when the worker itself reaches activated. */
+export function activateWaitingWorker(worker: ServiceWorker, controlled: boolean) {
+  if (!controlled) {
+    const reloadWhenActivated = () => {
+      if (worker.state !== 'activated') return
+      worker.removeEventListener('statechange', reloadWhenActivated)
+      window.location.reload()
+    }
+    worker.addEventListener('statechange', reloadWhenActivated)
+  }
+  worker.postMessage({ type: 'SKIP_WAITING' })
+}
+
 /** What the chip/status line shows, derived from every dimension at once. */
 function deriveStatus(state: PwaState): Status {
   if (state.support === 'checking') return 'checking'
@@ -175,7 +190,7 @@ export function PwaStatus({ compact }: { compact: boolean }) {
           aria-label={description}
           onClick={
             waiting
-              ? () => waiting.postMessage({ type: 'SKIP_WAITING' })
+              ? () => activateWaitingWorker(waiting, Boolean(navigator.serviceWorker.controller))
               : // A failed install leaves no worker to message; registering
                 // again on load is what starts a fresh attempt.
                 () => window.location.reload()

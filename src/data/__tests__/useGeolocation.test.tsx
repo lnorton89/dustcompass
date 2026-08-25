@@ -101,6 +101,17 @@ describe('useGeolocation', () => {
     expect(clearWatch).toHaveBeenCalledWith(1)
   })
 
+  it('seeds the shared watch from the map control\'s one-shot fix', () => {
+    const { result } = renderHook(() => useGeolocation())
+
+    act(() => result.current.start(fix(-119.2, 40.78)))
+
+    expect(result.current.position).toEqual([-119.2, 40.78])
+    expect(result.current.accuracy).toBe(5)
+    expect(result.current.status).toBe('tracking')
+    expect(watchPosition).toHaveBeenCalledTimes(1)
+  })
+
   /**
    * A transient (non-permission) error — POSITION_UNAVAILABLE or TIMEOUT —
    * used to clear the watch outright, silently ending tracking for good on
@@ -118,10 +129,12 @@ describe('useGeolocation', () => {
     act(() => calls[0].error(error(2)))
 
     expect(clearWatch).not.toHaveBeenCalled()
-    expect(result.current.status).toBe('locating')
-    // The last known fix is still the most recent real information available
-    // — a momentary blip should not make it look like tracking never started.
-    expect(result.current.position).toEqual([-119.2, 40.78])
+    expect(result.current.status).toBe('unavailable')
+    // The browser watch survives, but the old sample is no longer eligible
+    // for arrival, nearest-service math or a live "you are here" marker.
+    expect(result.current.position).toBeUndefined()
+    expect(result.current.accuracy).toBeUndefined()
+    expect(result.current.lastFixAt).toBeUndefined()
 
     // The same watch recovering on its own, as the real browser's would.
     act(() => calls[0].success(fix(-119.21, 40.79)))

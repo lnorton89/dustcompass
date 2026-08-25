@@ -70,7 +70,7 @@ function findPlaza(layout: CityLayout, name: string): PlazaCircle | undefined {
  * parameter of a shared link call straight through here, so a malformed
  * address took the render down rather than simply failing to match.
  */
-const CLOCK = String.raw`\d{1,2}[:.][0-5]\d`
+const CLOCK = String.raw`(?:[1-9]|1[0-2])[:.][0-5]\d`
 
 /**
  * Parse the address forms that appear in Burning Man's own data and on street

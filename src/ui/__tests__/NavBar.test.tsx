@@ -85,3 +85,11 @@ describe('NavBar retry-location control', () => {
     expect(mediaBlock).toMatch(/min-height:\s*44px/)
   })
 })
+
+describe('NavBar route semantics (#87)', () => {
+  it('labels its route and ETA as straight-line guidance', () => {
+    renderDenied()
+    expect(screen.getByText(/Straight-line estimate/i)).toBeDefined()
+    expect(screen.getByText(/occupied blocks/i)).toBeDefined()
+  })
+})

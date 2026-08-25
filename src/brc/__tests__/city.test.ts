@@ -85,6 +85,18 @@ describe('dmz', () => {
 })
 
 describe('entranceRoad', () => {
+  it('keeps previously generated distance/angle layouts usable', () => {
+    const layout: CityLayout = {
+      ...baseLayout(),
+      entrance_road: { distance: 9000, angle: 45 },
+    }
+    const road = buildCity(layout).entranceRoad.features
+
+    expect(road).toHaveLength(1)
+    expect(road[0].geometry.coordinates).toHaveLength(2)
+    expect(road[0].properties?.kind).toBe('entrance-road')
+  })
+
   it('renders the surveyed gate-road geometry verbatim, curves and all', () => {
     // A curved, two-segment gate road, as the real survey publishes it —
     // not a distance/angle pair that this function would have to synthesize

@@ -316,6 +316,20 @@ async function deleteStaleRevisions(keep) {
 }
 
 let refreshing = null;
+let lastLiveRefreshAt = 0;
+const LIVE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+async function sameResponseBytes(a, b) {
+  if (!a || !b) return false;
+  const [left, right] = await Promise.all([a.arrayBuffer(), b.arrayBuffer()]);
+  if (left.byteLength !== right.byteLength) return false;
+  const leftBytes = new Uint8Array(left);
+  const rightBytes = new Uint8Array(right);
+  for (let i = 0; i < leftBytes.length; i += 1) {
+    if (leftBytes[i] !== rightBytes[i]) return false;
+  }
+  return true;
+}
 
 /**
  * The listings keep moving after a build ships — most importantly, art
@@ -335,26 +349,43 @@ let refreshing = null;
  */
 function refreshLiveData() {
   if (refreshing) return refreshing;
+  if (Date.now() - lastLiveRefreshAt < LIVE_REFRESH_INTERVAL_MS) return Promise.resolve();
   refreshing = (async () => {
     const revisionName = LIVE_REVISION_PREFIX + Date.now();
     let built = false;
     try {
-      const revision = await caches.open(revisionName);
-      const results = await Promise.all(DATA_FILES.map(async (url) => {
+      const responses = await Promise.all(DATA_FILES.map(async (url) => {
         try {
           const response = await fetch(url, {
             cache: 'reload',
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
           });
           const type = response.headers.get('content-type') || '';
-          if (!response.ok || !type.includes('json')) return false;
-          await revision.put(url, response);
-          return true;
+          if (!response.ok || !type.includes('json')) return undefined;
+          return response;
         } catch {
-          return false;
+          return undefined;
         }
       }));
-      if (results.length > 0 && results.every(Boolean)) {
+
+      if (responses.length > 0 && responses.every(Boolean)) {
+        const current = await Promise.all(DATA_FILES.map((url) => fromLiveOrPrecache(url)));
+        const unchanged = current.every(Boolean) && (
+          await Promise.all(
+            responses.map((response, index) => sameResponseBytes(response.clone(), current[index])),
+          )
+        ).every(Boolean);
+        if (unchanged) {
+          // A React reload caused by DATA_REFRESHED reads these files again.
+          // Identical bytes are not a new revision and must not notify (or the
+          // read -> refresh -> notify -> read loop never ends).
+          lastLiveRefreshAt = Date.now();
+          refreshing = null;
+          return;
+        }
+
+        const revision = await caches.open(revisionName);
+        await Promise.all(responses.map((response, index) => revision.put(DATA_FILES[index], response)));
         const matches = await Promise.all(DATA_FILES.map((url) => revision.match(url)));
         built = matches.every(Boolean);
       }
@@ -382,6 +413,7 @@ function refreshLiveData() {
       await pointer.put(LIVE_POINTER_BUILD_URL, new Response(CACHE_NAME));
       await notify({ type: 'DATA_REFRESHED' });
       await deleteStaleRevisions(revisionName);
+      lastLiveRefreshAt = Date.now();
     } finally {
       refreshing = null;
     }

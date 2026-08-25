@@ -314,14 +314,23 @@ export function toPois(
    * it, it is a snapshot from before. Said plainly, it also tells the reader
    * the one thing that would fix it — a minute of signal.
    */
-  const placedArt = pois.filter((poi) => poi.kind === 'art').length
-  if (embargo.artReleased && art.length >= STALE_THRESHOLD && placedArt === 0) {
-    for (const listing of unplaced) {
-      if (listing.kind === 'art') listing.reason = 'stale'
-    }
-  }
+  markStaleSnapshot('camp', camps, embargo.campsReleased, pois, unplaced)
+  markStaleSnapshot('art', art, embargo.artReleased, pois, unplaced)
 
   return { pois, unplaced }
+}
+
+function markStaleSnapshot(
+  kind: 'camp' | 'art',
+  source: unknown[],
+  released: boolean,
+  pois: Poi[],
+  unplaced: UnplacedListing[],
+) {
+  if (!released || source.length < STALE_THRESHOLD || pois.some((poi) => poi.kind === kind)) return
+  for (const listing of unplaced) {
+    if (listing.kind === kind) listing.reason = 'stale'
+  }
 }
 
 function hasGps(location: { gps_latitude?: number; gps_longitude?: number } | undefined) {

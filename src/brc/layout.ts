@@ -63,7 +63,13 @@ export interface CityLayout {
    * rendered road follows the real curves and parallel edges Burning Man
    * surveys instead of a synthetic straight segment.
    */
-  entrance_road?: { lines: GeoJSON.Position[][] }
+  entrance_road?:
+    | { lines: GeoJSON.Position[][] }
+    | {
+        /** Legacy derived-layout shape retained so previously fetched data still opens. */
+        distance: Feet
+        angle: number
+      }
   dmz?: { distance: Feet; depth: Feet; segments: [string, string][] }
   center_camp?: {
     distance: Feet

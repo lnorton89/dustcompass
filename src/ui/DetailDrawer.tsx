@@ -216,7 +216,7 @@ export function DetailDrawer({
         </Stack>
       )}
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-        from {originLabel}
+        Straight-line estimate from {originLabel}; follow streets around occupied blocks
       </Typography>
 
       <Button

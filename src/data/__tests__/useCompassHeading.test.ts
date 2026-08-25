@@ -92,6 +92,30 @@ describe('useCompassHeading (#63)', () => {
     expect(result.current.heading).toBeUndefined()
   })
 
+  it('requests absolute orientation when the permission API supports it', async () => {
+    const requestPermission = vi.fn().mockResolvedValue('granted')
+    class GatedDeviceOrientationEvent {
+      static requestPermission = requestPermission
+    }
+    vi.stubGlobal('DeviceOrientationEvent', GatedDeviceOrientationEvent)
+
+    const { result } = renderHook(() => useCompassHeading(true))
+    await act(async () => result.current.requestPermission())
+
+    expect(requestPermission).toHaveBeenCalledWith(true)
+  })
+
+  it('never presents relative alpha as a compass heading', async () => {
+    class NoGateDeviceOrientationEvent {}
+    vi.stubGlobal('DeviceOrientationEvent', NoGateDeviceOrientationEvent)
+    const { result } = renderHook(() => useCompassHeading(true))
+    await act(async () => result.current.requestPermission())
+
+    act(() => dispatchOrientation('deviceorientation', { alpha: 90, absolute: false }))
+
+    expect(result.current.heading).toBeUndefined()
+  })
+
   it('degrades to denied, not a throw, if requestPermission itself rejects', async () => {
     class GatedDeviceOrientationEvent {
       static requestPermission = vi.fn().mockRejectedValue(new Error('not a user gesture'))
@@ -171,13 +195,13 @@ describe('useCompassHeading (#63)', () => {
       await result.current.requestPermission()
     })
     act(() => {
-      dispatchOrientation('deviceorientation', { alpha: 0 })
+      dispatchOrientation('deviceorientation', { alpha: 0, absolute: true })
     })
     expect(result.current.heading).toBeCloseTo(0)
 
     rerender({ active: false })
     act(() => {
-      dispatchOrientation('deviceorientation', { alpha: 180 })
+      dispatchOrientation('deviceorientation', { alpha: 180, absolute: true })
     })
     // The listener was removed, so the stale reading from before is what's
     // left — not a crash, and not a silently-still-live subscription.

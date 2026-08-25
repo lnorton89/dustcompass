@@ -992,7 +992,21 @@ await shared.close()
     await firstRun.first().click()
     await page.waitForTimeout(2000)
   }
-  // Asking to be taken somewhere is what starts the shared watch.
+  // #85: the built-in locate control may acquire/recenter, but its own
+  // one-shot dot and accuracy circle are disabled. The app-owned marker is
+  // the only current-location representation and follows the shared watch.
+  await page.getByRole('button', { name: /Find my location/ }).click()
+  await page.waitForTimeout(3000)
+  assert(
+    (await page.locator('.maplibregl-user-location-dot, .maplibregl-user-location-accuracy-circle').count()) === 0,
+    'Locate does not create MapLibre\'s second one-shot location marker (#85)',
+  )
+  assert(
+    (await page.getByTestId('user-location-marker').count()) === 1,
+    'Locate hands the fix to the single app-owned location marker (#85)',
+  )
+
+  // Asking to be taken somewhere reuses that same shared watch.
   await page.getByRole('button', { name: /Take me there/ }).first().click()
   await page.waitForTimeout(4000)
 

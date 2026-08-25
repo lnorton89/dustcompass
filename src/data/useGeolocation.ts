@@ -9,7 +9,7 @@ export interface Geolocation {
   lastFixAt?: number
   status: LocationStatus
   /** Begin watching. Safe to call repeatedly. */
-  start: () => void
+  start: (initialFix?: GeolocationPosition) => void
   stop: () => void
 }
 
@@ -46,7 +46,17 @@ export function useGeolocation(): Geolocation {
     setLastFixAt(undefined)
   }, [])
 
-  const start = useCallback(() => {
+  const start = useCallback((initialFix?: GeolocationPosition) => {
+    // The map control has already paid for a one-shot fix by the time its
+    // geolocate event fires. Seed the shared watch with that exact reading so
+    // hiding MapLibre's duplicate dot never creates a gap with no visible
+    // location while watchPosition obtains its first callback.
+    if (initialFix) {
+      setPosition([initialFix.coords.longitude, initialFix.coords.latitude])
+      setAccuracy(initialFix.coords.accuracy)
+      setLastFixAt(initialFix.timestamp)
+      setStatus('tracking')
+    }
     if (watchId.current !== undefined) return
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setStatus('unavailable')
@@ -57,10 +67,12 @@ export function useGeolocation(): Geolocation {
     // position while a fresh one is still being acquired. Clear it so
     // `position` stays undefined (and callers relying on `Boolean(position)`
     // correctly read "not located yet") until the new watch actually reports.
-    setPosition(undefined)
-    setAccuracy(undefined)
-    setLastFixAt(undefined)
-    setStatus('locating')
+    if (!initialFix) {
+      setPosition(undefined)
+      setAccuracy(undefined)
+      setLastFixAt(undefined)
+      setStatus('locating')
+    }
     watchId.current = navigator.geolocation.watchPosition(
       (fix) => {
         setPosition([fix.coords.longitude, fix.coords.latitude])
@@ -79,11 +91,14 @@ export function useGeolocation(): Geolocation {
         // updated position when a test moves the override. Clearing the
         // watch here used to end tracking permanently on that single blip,
         // with nothing left to restart it since `start()` no-ops while
-        // `watchId` looks already-active. Leaving the watch (and the last
-        // known position) alone lets it recover on its own, the same way a
-        // real GPS reacquisition does.
+        // `watchId` looks already-active. Keep the watch so it can recover,
+        // but withdraw the old fix immediately: navigation, arrival and
+        // nearest-service actions must never keep treating it as live.
         if (error.code !== error.PERMISSION_DENIED) {
-          setStatus('locating')
+          setPosition(undefined)
+          setAccuracy(undefined)
+          setLastFixAt(undefined)
+          setStatus('unavailable')
           return
         }
         if (watchId.current !== undefined) {

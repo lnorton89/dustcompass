@@ -29,9 +29,10 @@ export function travelBetween(from: Position, to: Position): Travel {
 
 export function formatMinutes(minutes: number): string {
   if (minutes < 1) return '<1 min'
-  if (minutes < 60) return `${Math.round(minutes)} min`
-  const hours = Math.floor(minutes / 60)
-  const rest = Math.round(minutes % 60)
+  const total = Math.round(minutes)
+  if (total < 60) return `${total} min`
+  const hours = Math.floor(total / 60)
+  const rest = total % 60
   return rest ? `${hours}h ${rest}m` : `${hours}h`
 }
 

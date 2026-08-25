@@ -41,6 +41,37 @@ describe.skipIf(!have)('when Gates open before the data catches up', () => {
     expect([...new Set(before.map((listing) => listing.reason))]).toEqual(['embargoed'])
   })
 
+  it('calls a pre-release camp catalogue stale after the camp boundary', () => {
+    const cachedCamps: CampItem[] = Array.from({ length: 25 }, (_, index) => ({
+      uid: `camp-${index}`,
+      name: `Camp ${index}`,
+      year: Number(DATA_YEAR),
+    }))
+    const { unplaced } = toPois(layout, [], cachedCamps, {
+      campsReleased: true,
+      artReleased: false,
+    } as never)
+
+    expect(unplaced).toHaveLength(25)
+    expect([...new Set(unplaced.map((listing) => listing.reason))]).toEqual(['stale'])
+  })
+
+  it('keeps an individual unlocated camp unpublished in a current placed catalogue', () => {
+    const campsWithLocations: CampItem[] = Array.from({ length: 25 }, (_, index) => ({
+      uid: `camp-${index}`,
+      name: `Camp ${index}`,
+      year: Number(DATA_YEAR),
+      ...(index === 0 ? { location_string: '3:00 & Esplanade' } : {}),
+    }))
+    const { unplaced } = toPois(layout, [], campsWithLocations, {
+      campsReleased: true,
+      artReleased: false,
+    } as never)
+
+    expect(unplaced.length).toBeGreaterThan(0)
+    expect(unplaced.every((listing) => listing.reason === 'unpublished')).toBe(true)
+  })
+
   it('does not cry stale over a catalogue that is genuinely small', () => {
     const few = art.slice(0, 3).map((item) => ({ ...item, location_string: undefined }))
     const { unplaced } = toPois(layout, few, [], {

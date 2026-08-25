@@ -1,12 +1,15 @@
 import type { CityLayout, Feet, RadiusRef } from './layout'
 import { resolveRadius } from './layout'
-import { arc, clockToMinutes, feetToMeters, polarToPosition, type Position } from './geo'
+import { arc, clockToMinutes, destination, feetToMeters, polarToPosition, type Position } from './geo'
 
 /**
  * The Man and the portals are generated here rather than fetched, so they need
  * an id minted the same way the survey's places do — see `SERVICE_UID`.
  */
 export const LANDMARK_UID = 'landmark:'
+
+/** Legacy layouts described only the gate-road midpoint; preserve their old 600 ft rendering. */
+const ENTRANCE_ROAD_HALF_LENGTH: Feet = 300
 
 export interface CityGeometry {
   streets: GeoJSON.FeatureCollection<GeoJSON.LineString>
@@ -140,9 +143,24 @@ function dmz(layout: CityLayout): GeoJSON.Feature<GeoJSON.Polygon>[] {
 function entranceRoad(layout: CityLayout): GeoJSON.Feature<GeoJSON.LineString>[] {
   const spec = layout.entrance_road
   if (!spec) return []
-  return spec.lines.map((coordinates, i) =>
-    line(coordinates as Position[], { kind: 'entrance-road', name: 'Entrance Road', id: `entrance-road-${i}` }),
+  if ('lines' in spec) {
+    return spec.lines.map((coordinates, i) =>
+      line(coordinates as Position[], { kind: 'entrance-road', name: 'Entrance Road', id: `entrance-road-${i}` }),
+    )
+  }
+
+  const center = layout.center.geometry.coordinates as Position
+  const from = destination(
+    center,
+    feetToMeters(spec.distance - ENTRANCE_ROAD_HALF_LENGTH),
+    spec.angle,
   )
+  const to = destination(
+    center,
+    feetToMeters(spec.distance + ENTRANCE_ROAD_HALF_LENGTH),
+    spec.angle,
+  )
+  return [line([from, to], { kind: 'entrance-road', name: 'Entrance Road', id: 'entrance-road-0' })]
 }
 
 function landmarks(layout: CityLayout): GeoJSON.Feature<GeoJSON.Point>[] {

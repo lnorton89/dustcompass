@@ -148,6 +148,9 @@ export function NavBar({
             </Typography>
           )}
         </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2, mt: 0.25 }}>
+          Straight-line estimate — follow streets around occupied blocks
+        </Typography>
         {approximate && (
           <Typography variant="caption" color="warning.main" sx={{ display: 'block', lineHeight: 1.2, mt: 0.25 }}>
             Approximate address area — nearby camps may share this pin

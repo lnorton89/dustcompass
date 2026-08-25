@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
 
@@ -226,7 +226,7 @@ describe('generated service worker', () => {
   })
 
   it('precaches every asset and reports OFFLINE_READY on a clean install', async () => {
-    const worker = loadWorker({ fetchImpl: async (req) => new Response('ok', { status: 200 }) })
+    const worker = loadWorker({ fetchImpl: async () => new Response('ok', { status: 200 }) })
     await expect(worker.fireInstall()).resolves.toBeUndefined()
     await worker.fireActivate()
     expect(worker.notifications.some((m) => m.type === 'OFFLINE_READY')).toBe(true)
@@ -271,16 +271,18 @@ describe('generated service worker', () => {
    * now separate and only ever replaced as a complete set.
    */
   it('promotes a live-data refresh only when every file in the revision succeeds', async () => {
+    let live = false
     const worker = loadWorker({
       fetchImpl: async (req) => {
         const url = typeof req === 'string' ? req : req.url
-        if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
-        if (url.endsWith('camp.json')) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('layout.json')) return new Response(live ? '{"ok":"live"}' : '{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response(live ? '[2]' : '[1]', { status: 200, headers: { 'content-type': 'application/json' } })
         // The install-time precache asset (the app shell at "/").
         return new Response('<html></html>', { status: 200 })
       },
     })
     await worker.fireInstall()
+    live = true
 
     const response = await worker.fireFetch(dataUrl('layout.json'))
     expect(response).toBeDefined()
@@ -323,16 +325,51 @@ describe('generated service worker', () => {
     expect(await currentLiveRevision(worker)).toBeUndefined()
   })
 
-  it('keeps the live pointer and its revision through activate\'s stale-cache cleanup', async () => {
+  it('does not promote, notify, or loop when live data is byte-for-byte unchanged (#78)', async () => {
+    let dataFetches = 0
     const worker = loadWorker({
       fetchImpl: async (req) => {
         const url = typeof req === 'string' ? req : req.url
-        if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
-        if (url.endsWith('camp.json')) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('layout.json')) {
+          dataFetches += 1
+          return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+        }
+        if (url.endsWith('camp.json')) {
+          dataFetches += 1
+          return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })
+        }
         return new Response('<html></html>', { status: 200 })
       },
     })
     await worker.fireInstall()
+    dataFetches = 0
+
+    await worker.fireFetch(dataUrl('layout.json'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(dataFetches).toBe(worker.dataFiles.length)
+    expect(worker.notifications.filter((message) => message.type === 'DATA_REFRESHED')).toEqual([])
+    expect(await currentLiveRevision(worker)).toBeUndefined()
+
+    // React-style reads after the completed check stay inside the throttle
+    // window and do not download the catalogue again.
+    await worker.fireFetch(dataUrl('camp.json'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(dataFetches).toBe(worker.dataFiles.length)
+    expect(worker.notifications.filter((message) => message.type === 'DATA_REFRESHED')).toEqual([])
+  })
+
+  it('keeps the live pointer and its revision through activate\'s stale-cache cleanup', async () => {
+    let live = false
+    const worker = loadWorker({
+      fetchImpl: async (req) => {
+        const url = typeof req === 'string' ? req : req.url
+        if (url.endsWith('layout.json')) return new Response(live ? '{"ok":"live"}' : '{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response(live ? '[2]' : '[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+        return new Response('<html></html>', { status: 200 })
+      },
+    })
+    await worker.fireInstall()
+    live = true
     await worker.fireFetch(dataUrl('layout.json'))
     await new Promise((resolve) => setTimeout(resolve, 20))
     const revisionName = await currentLiveRevision(worker)
@@ -367,12 +404,13 @@ describe('generated service worker', () => {
 
     it('promotes a live-data refresh and never even fetches the attribution file, despite it being precached', async () => {
       const fetched = []
+      let live = false
       const worker = loadWorker({
         fetchImpl: async (req) => {
           const url = typeof req === 'string' ? req : req.url
           fetched.push(url)
-          if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
-          if (url.endsWith('camp.json')) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+          if (url.endsWith('layout.json')) return new Response(live ? '{"ok":"live"}' : '{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+          if (url.endsWith('camp.json')) return new Response(live ? '[2]' : '[1]', { status: 200, headers: { 'content-type': 'application/json' } })
           // The install-time precache asset (the app shell, and — critically
           // — ATTRIBUTION.md itself, which install() still fetches to keep
           // the credit text available offline) responds with plain HTML,
@@ -383,6 +421,7 @@ describe('generated service worker', () => {
         },
       })
       await worker.fireInstall()
+      live = true
       expect(fetched.some((url) => url.endsWith('.md'))).toBe(true) // precached, so install() does fetch it once
 
       fetched.length = 0
@@ -410,18 +449,20 @@ describe('generated service worker', () => {
    */
   it('clears a live pointer left by a different build on activate, so a new build reads its own bundled data (#72)', async () => {
     const cacheStorage = new FakeCacheStorage()
+    let buildALive = false
     const buildA = loadWorker({
       source: generateWorker(),
       cacheStorage,
       fetchImpl: async (req) => {
         const url = typeof req === 'string' ? req : req.url
-        if (url.endsWith('layout.json')) return new Response('{"build":"A"}', { status: 200, headers: { 'content-type': 'application/json' } })
-        if (url.endsWith('camp.json')) return new Response('["A"]', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('layout.json')) return new Response(buildALive ? '{"build":"A-live"}' : '{"build":"A"}', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response(buildALive ? '["A-live"]' : '["A"]', { status: 200, headers: { 'content-type': 'application/json' } })
         return new Response('<html>A</html>', { status: 200 })
       },
     })
     await buildA.fireInstall()
     await buildA.fireActivate()
+    buildALive = true
     await buildA.fireFetch(dataUrl('layout.json'))
     await new Promise((resolve) => setTimeout(resolve, 20))
     const aRevision = await currentLiveRevision(buildA)
@@ -523,16 +564,18 @@ describe('generated service worker', () => {
    */
   it('leaves the previously promoted revision untouched when a cache.put fails partway through a later refresh', async () => {
     const cacheStorage = new FakeCacheStorage()
+    let generation = 0
     const worker = loadWorker({
       cacheStorage,
       fetchImpl: async (req) => {
         const url = typeof req === 'string' ? req : req.url
-        if (url.endsWith('layout.json')) return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
-        if (url.endsWith('camp.json')) return new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('layout.json')) return new Response(`{"generation":${generation}}`, { status: 200, headers: { 'content-type': 'application/json' } })
+        if (url.endsWith('camp.json')) return new Response(`[${generation}]`, { status: 200, headers: { 'content-type': 'application/json' } })
         return new Response('<html></html>', { status: 200 })
       },
     })
     await worker.fireInstall()
+    generation = 1
 
     // First refresh: nothing fails, this becomes the "previously promoted"
     // complete revision.
@@ -546,6 +589,8 @@ describe('generated service worker', () => {
     // Second refresh: both fetches succeed, but the *second* destination
     // cache.put() into the new revision cache throws (simulated quota).
     cacheStorage.failPut = (name) => (name.startsWith('dust-compass-live-data-rev-') && name !== firstRevision ? 1 : undefined)
+    generation = 2
+    fakeClock += 5 * 60 * 1000
     await worker.fireFetch(dataUrl('layout.json'))
     await new Promise((resolve) => setTimeout(resolve, 20))
 

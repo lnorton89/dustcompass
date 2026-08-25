@@ -3,7 +3,7 @@
  */
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { PwaStatus } from '../PwaStatus'
+import { activateWaitingWorker, PwaStatus } from '../PwaStatus'
 
 afterEach(() => {
   cleanup()
@@ -163,5 +163,39 @@ describe('PwaStatus · separated state dimensions', () => {
 
     expect(postMessage).toHaveBeenCalledWith({ type: 'CHECK_OFFLINE_READY' })
     expect(screen.queryByText('Ready offline')).toBeNull()
+  })
+})
+
+describe('activateWaitingWorker', () => {
+  it('watches an uncontrolled waiting worker for activation before reloading', () => {
+    const addEventListener = vi.fn()
+    const postMessage = vi.fn()
+    const worker = {
+      state: 'installed',
+      addEventListener,
+      removeEventListener: vi.fn(),
+      postMessage,
+    } as unknown as ServiceWorker
+
+    activateWaitingWorker(worker, false)
+
+    expect(addEventListener).toHaveBeenCalledWith('statechange', expect.any(Function))
+    expect(postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' })
+  })
+
+  it('relies on controllerchange when the current page is already controlled', () => {
+    const addEventListener = vi.fn()
+    const postMessage = vi.fn()
+    const worker = {
+      state: 'installed',
+      addEventListener,
+      removeEventListener: vi.fn(),
+      postMessage,
+    } as unknown as ServiceWorker
+
+    activateWaitingWorker(worker, true)
+
+    expect(addEventListener).not.toHaveBeenCalled()
+    expect(postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' })
   })
 })

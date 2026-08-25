@@ -43,6 +43,7 @@ import { FocusMarker } from './FocusMarker'
 import { UserLocationMarker } from './UserLocationMarker'
 import { PlayaScene } from './PlayaScene'
 import { assetUrl } from '../config'
+import { handleMapMarkerClick } from './markerClick'
 
 interface Props {
   data: PlayaData
@@ -75,7 +76,7 @@ interface Props {
   onSelectStack: (pois: Poi[]) => void
   onProbe: (address: string, position: Position) => void
   /** Fires when the map's locate control is pressed. */
-  onLocate: () => void
+  onLocate: (fix: GeolocationPosition) => void
   /**
    * The shared GPS watch's current fix (#59) — the same one navigation math
    * already uses, not a second independent tracker. `undefined` whenever the
@@ -468,7 +469,9 @@ export function MapView({
       <GeolocateControl
         position="bottom-right"
         positionOptions={{ enableHighAccuracy: true }}
-        onGeolocate={() => onLocate()}
+        showUserLocation={false}
+        showAccuracyCircle={false}
+        onGeolocate={(fix) => onLocate(fix)}
       />
       {pin && (
         <Marker longitude={pin.position[0]} latitude={pin.position[1]} anchor="bottom">
@@ -490,7 +493,11 @@ export function MapView({
             type="button"
             title={pin.address}
             aria-label={`Marked location: ${pin.address}. Reopen save and share options.`}
-            onClick={onPinClick}
+            onClick={(event) => {
+              // A DOM marker sits over the WebGL canvas. Without stopping the
+              // click here, MapLibre also selects whichever POI is underneath.
+              handleMapMarkerClick(event, onPinClick)
+            }}
             style={{
               width: 44,
               height: 44,

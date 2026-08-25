@@ -15,10 +15,9 @@ const EMPTY: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
 }
 
 /**
- * A straight line to where you are heading. Deliberately not a routed path:
- * the playa is an open plane crossed by a street grid, people cut across it
- * constantly, and pretending to know a route would be both wrong and slower to
- * read than the direction and the distance.
+ * A direct bearing to where you are heading, deliberately styled as dashed
+ * guidance rather than a routed path. It may cross occupied city blocks; the
+ * navigation UI labels that limitation instead of implying it is walkable.
  */
 export function RouteLayer({ from, to, palette }: Props) {
   const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.LineString>>(() => {
@@ -28,7 +27,7 @@ export function RouteLayer({ from, to, palette }: Props) {
       features: [
         {
           type: 'Feature',
-          properties: {},
+          properties: { guidance: 'straight-line' },
           geometry: { type: 'LineString', coordinates: [from, to] },
         },
       ],

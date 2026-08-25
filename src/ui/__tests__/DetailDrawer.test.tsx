@@ -74,6 +74,13 @@ describe('DetailDrawer · kind chip for CPNS categories (#45)', () => {
   })
 })
 
+describe('DetailDrawer · route semantics (#87)', () => {
+  it('labels travel figures as straight-line estimates', () => {
+    render(<DetailDrawer {...baseProps} poi={poi('a', 'Camp A')} />)
+    expect(screen.getByText(/Straight-line estimate from the Man/i)).toBeDefined()
+  })
+})
+
 /**
  * Issue #61: a camp/art record's API-published GPS is best-effort per
  * Burning Man's own documentation, not surveyed — but the detail view used

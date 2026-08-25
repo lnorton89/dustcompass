@@ -199,13 +199,9 @@ export function readStoredFilters(): Set<Filter> {
  * focused unit test rather than exercising it through the whole component.
  */
 /**
- * Whether a status transition means the shared geolocation watch has
- * terminally failed, so any recorded owner in `locationOwners` no longer
- * represents a real acquired fix — most importantly the map locate
- * control's owner, which by design has no explicit release action on
- * success and would otherwise stay recorded forever after a denied/
- * unavailable attempt, permanently blocking `locationOwners` from ever
- * returning to empty (#56). Exported for a focused unit test.
+ * Whether a location-dependent action should stop waiting. Unavailable is a
+ * failure for the current request even though the browser watch remains alive
+ * and may recover; denied is terminal for the watch itself.
  */
 export function locationWatchHasFailed(status: LocationStatus): boolean {
   return status === 'denied' || status === 'unavailable'
@@ -400,9 +396,9 @@ export default function App() {
    */
   const locationOwners = useRef<Set<'navigation' | 'events' | 'map' | 'nearest'>>(new Set())
   const acquireLocation = useCallback(
-    (owner: 'navigation' | 'events' | 'map' | 'nearest') => {
+    (owner: 'navigation' | 'events' | 'map' | 'nearest', initialFix?: GeolocationPosition) => {
       locationOwners.current.add(owner)
-      location.start()
+      location.start(initialFix)
     },
     [location.start],
   )
@@ -414,18 +410,12 @@ export default function App() {
     [location.stop],
   )
   /**
-   * `acquireLocation` records an owner before `watchPosition()` is known to
-   * have succeeded, so a denied/unavailable acquisition — most often the
-   * map's locate control, which by design has no explicit release action on
-   * success — otherwise leaves a phantom owner behind forever. With a
-   * phantom owner never removed, `locationOwners` never returns to empty, so
-   * `location.stop()` above stops firing for the rest of the session even
-   * once every real, successful consumer has released (#56). There is only
-   * ever one shared watch, so once it has terminally failed, nothing in
-   * `locationOwners` still represents a real acquired fix.
+   * Permission denial is terminal, so no recorded owner still represents a
+   * live watch. An unavailable/timeout report is deliberately not cleared:
+   * the browser may call the same watch back with a recovered fix (#82).
    */
   useEffect(() => {
-    if (locationWatchHasFailed(location.status)) locationOwners.current.clear()
+    if (location.status === 'denied') locationOwners.current.clear()
   }, [location.status])
   /**
    * `useGeolocation()` returns a fresh object every render, so an inline
@@ -1290,7 +1280,7 @@ export default function App() {
                 // explicitly released — matching the existing behaviour that
                 // a fix started this way keeps running for the rest of the
                 // session.
-                onLocate={() => acquireLocation('map')}
+                onLocate={(fix) => acquireLocation('map', fix)}
                 // The same usable fix navigation math and the distance
                 // readout already use — not `here` directly, so a fix
                 // `isNearCity()` has rejected never draws a marker

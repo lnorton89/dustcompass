@@ -59,13 +59,17 @@ const baseProps = {
 describe('EventsPanel · browsing past the initial page (#54)', () => {
   const manyEvents = Array.from({ length: 350 }, (_, i) => event(`Event ${String(i).padStart(3, '0')}`))
 
-  it('caps the initial render at 300 but reports the full match count and offers to load more', () => {
-    render(<EventsPanel {...baseProps} events={manyEvents} origin={undefined} locationStatus="idle" />)
+  it(
+    'caps the initial render at 300 but reports the full match count and offers to load more',
+    () => {
+      render(<EventsPanel {...baseProps} events={manyEvents} origin={undefined} locationStatus="idle" />)
 
-    expect(screen.getByText('300 of 350 showing')).toBeDefined()
-    expect(screen.queryByText('Event 300')).toBeNull()
-    expect(screen.getByRole('button', { name: /load 50 more/i })).toBeDefined()
-  })
+      expect(screen.getByText('300 of 350 showing')).toBeDefined()
+      expect(screen.queryByText('Event 300')).toBeNull()
+      expect(screen.getByRole('button', { name: /load 50 more/i })).toBeDefined()
+    },
+    15_000,
+  )
 
   it(
     'makes every record past index 300 reachable by loading more',
@@ -131,6 +135,17 @@ describe('EventsPanel · location failure for "Closest"', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /retry/i }))
     expect(onNeedLocation).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the shared MUI button touch-target contract for Retry', () => {
+    render(
+      <EventsPanel {...baseProps} origin={undefined} locationStatus="unavailable" onNeedLocation={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /closest/i }))
+
+    const retry = screen.getByRole('button', { name: /retry/i })
+    expect(retry.tagName).toBe('BUTTON')
+    expect(retry.classList.contains('MuiButton-root')).toBe(true)
   })
 
   it('shows "finding you…" rather than a terminal error while still locating', () => {

@@ -392,22 +392,24 @@ export function EventsPanel({
             {locationStatus === 'denied'
               ? 'Location access is off, so events are sorted by time instead.'
               : 'Could not get your location, so events are sorted by time instead.'}{' '}
-            <Box
-              component="button"
+            <Button
               type="button"
               onClick={retryLocation}
+              variant="text"
+              disableRipple
               sx={{
-                border: 0,
-                p: 0,
-                bgcolor: 'transparent',
+                minWidth: 44,
+                minHeight: 44,
+                p: 0.5,
+                my: -1.5,
                 color: 'primary.main',
-                cursor: 'pointer',
                 textDecoration: 'underline',
                 font: 'inherit',
+                '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' },
               }}
             >
               Retry
-            </Box>
+            </Button>
           </Typography>
         )}
       </Box>

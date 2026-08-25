@@ -38,12 +38,12 @@ function setViewportWidth(width: number) {
   window.dispatchEvent(new Event('resize'))
 }
 
-describe('NavBar retry-location control', () => {
-  afterEach(() => {
-    cleanup()
-    setViewportWidth(1024)
-  })
+afterEach(() => {
+  cleanup()
+  setViewportWidth(1024)
+})
 
+describe('NavBar retry-location control', () => {
   it('is a real button, not a bare styled span, so it takes native focus/keyboard behaviour', () => {
     renderDenied()
     const retry = screen.getByRole('button', { name: 'Retry device location' })
@@ -93,7 +93,6 @@ describe('NavBar route semantics (#87)', () => {
     expect(screen.getByText(/occupied blocks/i)).toBeDefined()
   })
 })
-
 
 describe('NavBar routed directions summary (#132)', () => {
   it('uses the selected bike ETA and names surveyed street routing', () => {

@@ -106,7 +106,15 @@ export function PwaStatus({ compact }: { compact: boolean }) {
     window.addEventListener('online', goOnline)
     window.addEventListener('offline', goOffline)
 
-    if (process.env.NODE_ENV !== 'production' || !('serviceWorker' in navigator)) {
+    if (process.env.NODE_ENV !== 'production') {
+      queueMicrotask(() => setSupport('supported'))
+      return () => {
+        window.removeEventListener('online', goOnline)
+        window.removeEventListener('offline', goOffline)
+      }
+    }
+    if (!('serviceWorker' in navigator)) {
+      queueMicrotask(() => setSupport('unsupported'))
       return () => {
         window.removeEventListener('online', goOnline)
         window.removeEventListener('offline', goOffline)

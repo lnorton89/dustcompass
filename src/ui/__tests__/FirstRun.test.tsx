@@ -18,13 +18,13 @@ describe('FirstRun', () => {
    * (dialog starts closed), silently deleting onboarding for anyone whose
    * storage is blocked. It must now open instead.
    */
-  it('opens when localStorage.getItem throws', () => {
+  it('opens when localStorage.getItem throws', async () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('blocked')
     })
 
     render(<FirstRun />)
-    expect(screen.getByText('Before you set off')).toBeDefined()
+    expect(await screen.findByText('Before you set off')).toBeDefined()
   })
 
   it('does not render open when the seen key is already set', () => {
@@ -48,7 +48,7 @@ describe('FirstRun', () => {
     })
 
     render(<FirstRun />)
-    expect(screen.getByText('Before you set off')).toBeDefined()
+    expect(await screen.findByText('Before you set off')).toBeDefined()
 
     expect(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Show me the map' }))

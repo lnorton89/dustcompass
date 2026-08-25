@@ -184,6 +184,13 @@ function EndpointPicker({
 
   return (
     <Autocomplete
+      // MUI keeps an internal text value separate from the selected option.
+      // When From/To are swapped programmatically that internal text can stay
+      // on the previous endpoint even though the controlled value changed.
+      // Remount only when the endpoint identity changes; typing keeps the same
+      // key, while swaps and external route restoration immediately render the
+      // new endpoint label instead of a stale field value.
+      key={value ? optionKey(value) : 'empty'}
       options={dynamicOptions}
       value={selected}
       onInputChange={(_, next, reason) => setQuery(reason === 'input' ? next : '')}

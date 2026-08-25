@@ -414,6 +414,13 @@ export function DetailDrawer({
       anchor="bottom"
       open={Boolean(poi)}
       onClose={onClose}
+      // When this temporary Drawer closes, MUI normally restores focus to the
+      // element that was focused before it opened. For a listing reached from
+      // Search that element is the search input, so pressing Take me there
+      // re-focused it and reopened the software keyboard over navigation.
+      // Navigation owns the next interaction instead; do not resurrect search
+      // focus as the sheet unmounts (#130).
+      ModalProps={{ disableRestoreFocus: true }}
       slotProps={{
         paper: {
           ref: paperRef,

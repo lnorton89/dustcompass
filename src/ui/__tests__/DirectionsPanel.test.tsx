@@ -89,6 +89,31 @@ describe('DirectionsPanel', () => {
     expect((screen.getByRole('combobox', { name: 'From' }) as HTMLInputElement).value).toBe('The Airship')
   })
 
+  it('refreshes visible endpoint labels when From and To are swapped programmatically', () => {
+    const destination = { kind: 'fixed' as const, label: 'The Airship', position: [-119.19, 40.785] as [number, number] }
+    const { rerender } = render(
+      <DirectionsPanel
+        {...baseProps}
+        from={{ kind: 'man' }}
+        to={destination}
+      />,
+    )
+
+    expect((screen.getByRole('combobox', { name: 'From' }) as HTMLInputElement).value).toBe('The Man')
+    expect((screen.getByRole('combobox', { name: 'To' }) as HTMLInputElement).value).toBe('The Airship')
+
+    rerender(
+      <DirectionsPanel
+        {...baseProps}
+        from={destination}
+        to={{ kind: 'man' }}
+      />,
+    )
+
+    expect((screen.getByRole('combobox', { name: 'From' }) as HTMLInputElement).value).toBe('The Airship')
+    expect((screen.getByRole('combobox', { name: 'To' }) as HTMLInputElement).value).toBe('The Man')
+  })
+
   it('makes the selected travel mode the primary ETA and explains routed semantics', () => {
     render(
       <DirectionsPanel

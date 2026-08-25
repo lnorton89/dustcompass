@@ -1,0 +1,29 @@
+name: Apply issues 103 and 106 patch
+
+on:
+  push:
+    branches:
+      - fix/issues-100-102-106
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/issues-100-102-106
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node scripts/apply-issues-103-106.mjs
+      - name: Commit generated fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Fix location retry ownership and durable saves (#103, #106)'
+          git push origin HEAD:fix/issues-100-102-106

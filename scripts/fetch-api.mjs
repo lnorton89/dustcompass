@@ -71,11 +71,14 @@ try {
   let refused = false
   for (const kind of ENDPOINTS) {
     const fetched = await fetchKind(kind)
-    const { records, dropped } = sanitizeEventOccurrences(kind, fetched)
+    const { records, dropped, droppedEvents } = sanitizeEventOccurrences(kind, fetched)
     for (const occurrence of dropped) {
       console.warn(
         `  · dropped one bad occurrence (${occurrence.start} – ${occurrence.end}) from "${occurrence.title ?? occurrence.uid}"`,
       )
+    }
+    for (const event of droppedEvents) {
+      console.warn(`  · dropped event with no valid occurrences: "${event.title ?? event.uid}"`)
     }
     const result = validateDataset(kind, records)
 
@@ -149,4 +152,4 @@ try {
   console.error(error instanceof Error ? error.message : String(error))
   process.exit(1)
 }
-console.log(`\nWrote public/data/${YEAR}. Set VITE_DATA_YEAR=${YEAR} to use it.`)
+console.log(`\nWrote public/data/${YEAR}. Set NEXT_PUBLIC_DATA_YEAR=${YEAR} to use it.`)

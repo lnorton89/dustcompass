@@ -52,10 +52,15 @@ const isFiniteInRange = (v, min, max) => typeof v === 'number' && Number.isFinit
  * unchanged.
  */
 export function sanitizeEventOccurrences(kind, records) {
-  if (kind !== 'event') return { records, dropped: [] }
+  if (kind !== 'event') return { records, dropped: [], droppedEvents: [] }
   const dropped = []
-  const sanitized = records.map((record) => {
-    if (!Array.isArray(record?.occurrence_set)) return record
+  const droppedEvents = []
+  const sanitized = []
+  for (const record of records) {
+    if (!Array.isArray(record?.occurrence_set)) {
+      sanitized.push(record)
+      continue
+    }
     const kept = record.occurrence_set.filter((occurrence) => {
       const start = Date.parse(occurrence?.start_time)
       const end = Date.parse(occurrence?.end_time)
@@ -70,10 +75,13 @@ export function sanitizeEventOccurrences(kind, records) {
       }
       return ok
     })
-    if (kept.length === record.occurrence_set.length) return record
-    return { ...record, occurrence_set: kept }
-  })
-  return { records: sanitized, dropped }
+    if (record.occurrence_set.length > 0 && kept.length === 0) {
+      droppedEvents.push({ uid: record.uid, title: record.title })
+      continue
+    }
+    sanitized.push(kept.length === record.occurrence_set.length ? record : { ...record, occurrence_set: kept })
+  }
+  return { records: sanitized, dropped, droppedEvents }
 }
 
 export function validateDataset(kind, records) {

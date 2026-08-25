@@ -194,7 +194,7 @@ npm run test:offline -- http://127.0.0.1:4173/dustcompass/
 
 ## Deployment
 
-Pushing to `master` runs the GitHub Pages workflow in `.github/workflows/deploy.yml`. The workflow fetches data, runs the quality gates against an E2E-instrumented production build, rebuilds without test instrumentation, retests the artifact that will actually ship, and publishes `out/`.
+Pushing to `master` runs the GitHub Pages workflow in `.github/workflows/deploy.yml`. The workflow fetches current data, builds one production `out/` artifact, runs smoke, accessibility, UI-invariant, and offline browser suites against that exact artifact using the runtime-only test hook, and uploads the same unchanged `out/` to Pages.
 
 To deploy at a root domain on another static host:
 

@@ -11,7 +11,7 @@
  * all, so any failure — network, validation, a downstream derivation — walks
  * away with `discardStaged` and leaves the previous snapshot exactly as it was.
  */
-import { mkdir, readdir, rename, rm } from 'node:fs/promises'
+import { cp, mkdir, readdir, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
@@ -48,7 +48,7 @@ export async function stageTempDir(targetDir) {
 export async function commitAtomically(tempDir, targetDir, { replaceAll = false } = {}) {
   await mkdir(dirname(targetDir), { recursive: true })
 
-  if (replaceAll) {
+  const swapDirectory = async (readyDir) => {
     const displaced = `${targetDir}.prev-${randomBytes(4).toString('hex')}`
     let hadPrevious = false
     try {
@@ -58,22 +58,37 @@ export async function commitAtomically(tempDir, targetDir, { replaceAll = false 
       if (error.code !== 'ENOENT') throw error
     }
     try {
-      await rename(tempDir, targetDir)
+      await rename(readyDir, targetDir)
     } catch (error) {
-      // The swap itself failed (e.g. cross-device); put the previous snapshot
-      // straight back rather than leaving the target directory missing.
       if (hadPrevious) await rename(displaced, targetDir)
       throw error
     }
     if (hadPrevious) await rm(displaced, { recursive: true, force: true })
+  }
+
+  if (replaceAll) {
+    await swapDirectory(tempDir)
     return
   }
 
-  await mkdir(targetDir, { recursive: true })
-  for (const entry of await readdir(tempDir)) {
-    await rename(join(tempDir, entry), join(targetDir, entry))
+  // Merge mode prepares a complete candidate snapshot before the one observable swap (#112).
+  const merged = `${targetDir}.merged-${randomBytes(4).toString('hex')}`
+  try {
+    try {
+      await cp(targetDir, merged, { recursive: true })
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+      await mkdir(merged, { recursive: true })
+    }
+    for (const entry of await readdir(tempDir)) {
+      await cp(join(tempDir, entry), join(merged, entry), { recursive: true, force: true })
+    }
+    await swapDirectory(merged)
+    await rm(tempDir, { recursive: true, force: true })
+  } catch (error) {
+    await rm(merged, { recursive: true, force: true })
+    throw error
   }
-  await rm(tempDir, { recursive: true, force: true })
 }
 
 /** Remove a staged directory after a failed refresh. Never touches the target. */

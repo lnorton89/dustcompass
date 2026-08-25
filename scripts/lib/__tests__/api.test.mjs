@@ -251,8 +251,8 @@ describe('dropping bad occurrences instead of refusing the whole fetch', () => {
     ])
   })
 
-  it('drops an occurrence whose end is not after its start', () => {
-    const { records, dropped } = sanitizeEventOccurrences('event', [
+  it('drops an event when its only occurrence is invalid', () => {
+    const { records, dropped, droppedEvents } = sanitizeEventOccurrences('event', [
       {
         uid: 'e1',
         title: 'Fire Talk',
@@ -261,8 +261,9 @@ describe('dropping bad occurrences instead of refusing the whole fetch', () => {
         ],
       },
     ])
-    expect(records[0].occurrence_set).toEqual([])
+    expect(records).toEqual([])
     expect(dropped).toHaveLength(1)
+    expect(droppedEvents).toEqual([{ uid: 'e1', title: 'Fire Talk' }])
   })
 
   it('leaves a well-formed event untouched', () => {
@@ -283,16 +284,16 @@ describe('dropping bad occurrences instead of refusing the whole fetch', () => {
     expect(dropped).toEqual([])
   })
 
-  it('keeps the event even when every one of its occurrences is bad', () => {
-    const { records } = sanitizeEventOccurrences('event', [
+  it('does not retain an empty shell when every occurrence is bad', () => {
+    const { records, droppedEvents } = sanitizeEventOccurrences('event', [
       {
         uid: 'e1',
         title: 'Fire Talk',
         occurrence_set: [{ start_time: 'not-a-date', end_time: 'also-not-a-date' }],
       },
     ])
-    expect(records).toHaveLength(1)
-    expect(records[0].occurrence_set).toEqual([])
+    expect(records).toEqual([])
+    expect(droppedEvents).toEqual([{ uid: 'e1', title: 'Fire Talk' }])
   })
 })
 

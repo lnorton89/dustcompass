@@ -14,44 +14,27 @@ const MAX_TITLE_LENGTH = 300
 
 function isValidSavedEvent(candidate: Partial<SavedEvent>): candidate is SavedEvent {
   if (typeof candidate.uid !== 'string' || candidate.uid.trim().length === 0) return false
-  if (
-    typeof candidate.title !== 'string' ||
-    candidate.title.trim().length === 0 ||
-    candidate.title.length > MAX_TITLE_LENGTH
-  ) {
-    return false
-  }
-  if (typeof candidate.savedAt !== 'number' || !Number.isFinite(candidate.savedAt)) return false
-  return true
+  if (typeof candidate.title !== 'string' || candidate.title.trim().length === 0 || candidate.title.length > MAX_TITLE_LENGTH) return false
+  return typeof candidate.savedAt === 'number' && Number.isFinite(candidate.savedAt)
 }
 
 export function parseSavedEvents(raw: string | null): SavedEvent[] {
   if (!raw) return []
   let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return []
-  }
+  try { parsed = JSON.parse(raw) } catch { return [] }
   if (!Array.isArray(parsed)) return []
-
   const seenUids = new Set<string>()
   return parsed.filter((entry): entry is SavedEvent => {
     if (typeof entry !== 'object' || entry === null) return false
     const candidate = entry as Partial<SavedEvent>
-    if (!isValidSavedEvent(candidate)) return false
-    if (seenUids.has(candidate.uid)) return false
+    if (!isValidSavedEvent(candidate) || seenUids.has(candidate.uid)) return false
     seenUids.add(candidate.uid)
     return true
   })
 }
 
 function read(): SavedEvent[] {
-  try {
-    return parseSavedEvents(localStorage.getItem(KEY))
-  } catch {
-    return []
-  }
+  try { return parseSavedEvents(localStorage.getItem(KEY)) } catch { return [] }
 }
 
 function persist(events: SavedEvent[]): boolean {
@@ -63,6 +46,7 @@ function persist(events: SavedEvent[]): boolean {
   }
 }
 
+/** Keep the in-memory mutation even when durable storage fails, but report it. */
 export function useSavedEvents() {
   const [savedEvents, setSavedEvents] = useState<SavedEvent[]>(read)
   const savedEventsRef = useRef(savedEvents)
@@ -85,10 +69,6 @@ export function useSavedEvents() {
     return commit(savedEventsRef.current.filter((item) => item.uid !== uid))
   }, [commit])
 
-  const isSaved = useCallback(
-    (uid: string) => savedEvents.some((item) => item.uid === uid),
-    [savedEvents],
-  )
-
+  const isSaved = useCallback((uid: string) => savedEvents.some((item) => item.uid === uid), [savedEvents])
   return { savedEvents, isSaved, save, remove }
 }

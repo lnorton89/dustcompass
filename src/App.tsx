@@ -30,6 +30,7 @@ import NightlightIcon from '@mui/icons-material/Nightlight'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import ExploreIcon from '@mui/icons-material/Explore'
 import EventIcon from '@mui/icons-material/Event'
+import DirectionsIcon from '@mui/icons-material/Directions'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import GroupsIcon from '@mui/icons-material/Groups'
 import WcIcon from '@mui/icons-material/Wc'
@@ -77,6 +78,15 @@ import { ControlButton, ControlDivider, ControlGroup } from './ui/ControlGroup'
 import { BottomBar } from './ui/BottomBar'
 import { FirstRun } from './ui/FirstRun'
 import { haptic } from './ui/haptics'
+import { DirectionsPanel } from './ui/DirectionsPanel'
+import {
+  defaultDirectionsOrigin,
+  directionsUrl,
+  readDirectionsIntent,
+  type DirectionsEndpoint,
+  type DirectionsMode,
+} from './data/directions'
+import { resolveDirectionsRoute } from './data/directionsRuntime'
 
 type Filter = PoiKind | 'toilets' | 'services' | 'favorites'
 
@@ -553,7 +563,22 @@ export default function App() {
     approximate?: boolean
     /** Present when heading to a listed camp/art piece, so the URL can name it. */
     uid?: string
+    /** Fixed planning origins stay fixed; live origins continue following GPS. */
+    origin?: Position
+    originLabel?: string
+    liveOrigin?: boolean
   }>()
+  const [initialDirections] = useState(() => readDirectionsIntent())
+  const [directionsOpen, setDirectionsOpen] = useState(() => Boolean(initialDirections))
+  const [directionsFrom, setDirectionsFrom] = useState<DirectionsEndpoint>(
+    () => initialDirections?.from ?? { kind: 'man' },
+  )
+  const [directionsTo, setDirectionsTo] = useState<DirectionsEndpoint | undefined>(
+    () => initialDirections?.to,
+  )
+  const [directionsMode, setDirectionsMode] = useState<DirectionsMode>(
+    () => initialDirections?.mode ?? 'walk',
+  )
 
   // "On now" has to stay true as time passes, or the panel quietly lies.
   useEffect(() => {
@@ -691,6 +716,11 @@ export default function App() {
     // the reader has done anything with it. Dismissing the notice clears
     // `staleLink` and lets this effect resume normally on the next run.
     if (staleLink) return
+    // Directions owns the query string while its editor is open. A separate
+    // effect below mirrors the complete versioned route intent; letting the
+    // legacy POI/pin publisher run here would erase `dir/from/to/mode` from a
+    // cold shared route before the reader could act on it.
+    if (directionsOpen) return
     if (selected) publish({ poi: selected.uid })
     else if (unplaced) publish({ poi: unplaced.uid })
     // The active navigation destination outranks a leftover dropped pin —
@@ -708,7 +738,29 @@ export default function App() {
       )
     else if (pin) publish({ at: pin.address, ll: pin.position })
     else publish({})
-  }, [data, selected, unplaced, heading, pin, publish, linkKey, restoredLink, staleLink])
+  }, [
+    data,
+    selected,
+    unplaced,
+    heading,
+    pin,
+    publish,
+    linkKey,
+    restoredLink,
+    staleLink,
+    directionsOpen,
+  ])
+
+  useEffect(() => {
+    if (!directionsOpen || !directionsTo) return
+    const next = directionsUrl({
+      version: 1,
+      from: directionsFrom,
+      to: directionsTo,
+      mode: directionsMode,
+    })
+    if (next !== window.location.href) window.history.replaceState(null, '', next)
+  }, [directionsOpen, directionsFrom, directionsTo, directionsMode])
 
   const visiblePois = useMemo(() => {
     if (!data) return []
@@ -732,6 +784,10 @@ export default function App() {
    * what the readout already says it is doing when there is no fix at all.
    */
   const usableFix = here && data && isNearCity(data.layout, here) ? here : undefined
+  const openDirections = useCallback(() => {
+    setDirectionsFrom(defaultDirectionsOrigin(Boolean(usableFix)))
+    setDirectionsOpen(true)
+  }, [usableFix])
   /**
    * What the map owes the reader about art, if anything.
    *
@@ -761,12 +817,16 @@ export default function App() {
     return undefined
   }, [data, dismissEmbargoNotice, dismissStaleNotice, embargoNoticeSeen, staleNoticeSeen])
 
-  const origin = usableFix ?? (data?.layout.center.geometry.coordinates as Position | undefined)
-  const originLabel = usableFix
-    ? data
-      ? `you (${reverseGeocode(usableFix, data.layout).label})`
-      : 'you'
-    : 'the Man'
+  const manPosition = data?.layout.center.geometry.coordinates as Position | undefined
+  const origin = heading?.liveOrigin
+    ? (usableFix ?? manPosition)
+    : (heading?.origin ?? usableFix ?? manPosition)
+  const originLabel = heading?.originLabel
+    ?? (usableFix
+      ? data
+        ? `you (${reverseGeocode(usableFix, data.layout).label})`
+        : 'you'
+      : 'the Man')
   // #62: the same reverse-geocode call originLabel already makes, exposed on
   // its own so the live-address snackbar can say "You are near ..." without
   // the "you (...)" framing that reads fine inline in a sentence but not as
@@ -824,10 +884,16 @@ export default function App() {
     // own reported accuracy, the true position could still be inside the
     // arrival radius. Missing accuracy (not guaranteed by the Geolocation
     // API, though effectively always present) is treated as unbounded.
-    if (!canConfirmArrival(navigation.travel.meters, Boolean(usableFix), location.accuracy)) return
+    if (
+      !canConfirmArrival(
+        navigation.travel.meters,
+        Boolean(heading?.liveOrigin && usableFix),
+        location.accuracy,
+      )
+    ) return
     arrived.current = true
     haptic('arrive')
-  }, [navigation, usableFix, location.accuracy])
+  }, [navigation, heading?.liveOrigin, usableFix, location.accuracy])
 
 
   /**
@@ -858,6 +924,71 @@ export default function App() {
     [compact],
   )
 
+  const startDirections = useCallback(() => {
+    if (!data || !directionsTo) return
+    const route = resolveDirectionsRoute(directionsFrom, directionsTo, {
+      layout: data.layout,
+      pois: data.pois,
+      livePosition: usableFix,
+    })
+    if (!route) {
+      setProbe(
+        directionsFrom.kind === 'live'
+          ? 'Could not get a usable on-playa location. Choose The Man or another start.'
+          : 'Could not resolve one of those directions endpoints.',
+      )
+      return
+    }
+
+    setHeading({
+      name: route.to.label,
+      position: route.to.position,
+      address: route.to.detail,
+      approximate: route.to.endpoint.kind === 'address',
+      uid: route.to.endpoint.kind === 'poi' ? route.to.endpoint.uid : undefined,
+      origin: route.from.dynamic ? undefined : route.from.position,
+      originLabel: route.from.label,
+      liveOrigin: route.from.dynamic,
+    })
+    arrived.current = false
+    setSelected(undefined)
+    setPin(undefined)
+    setDirectionsOpen(false)
+    mapRef.current?.fitBounds([route.from.position, route.to.position], {
+      padding: navigationPadding(),
+      duration: 900,
+      maxZoom: 16.5,
+    })
+    framedNavigationFor.current = `${route.to.position[0]},${route.to.position[1]}`
+    if (route.from.dynamic) acquireLocation('navigation')
+    else releaseLocation('navigation')
+  }, [
+    acquireLocation,
+    data,
+    directionsFrom,
+    directionsTo,
+    navigationPadding,
+    releaseLocation,
+    usableFix,
+  ])
+
+  const shareDirections = useCallback(async () => {
+    if (!directionsTo) return
+    const result = await shareLink(
+      directionsUrl({ version: 1, from: directionsFrom, to: directionsTo, mode: directionsMode }),
+      'Dust Compass directions',
+    )
+    if (result === 'copied') setProbe('Route link copied')
+    else if (result === 'unavailable') setProbe('Could not copy the route link')
+  }, [directionsFrom, directionsMode, directionsTo])
+
+  const swapDirections = useCallback(() => {
+    if (!directionsTo) return
+    const previousFrom = directionsFrom
+    setDirectionsFrom(directionsTo)
+    setDirectionsTo(previousFrom)
+  }, [directionsFrom, directionsTo])
+
   const framedNavigationFor = useRef<string | undefined>(undefined)
   const navigateTo = useCallback(
     (target: {
@@ -867,12 +998,22 @@ export default function App() {
       positionSource?: 'gps' | 'address'
       uid?: string
     }) => {
+      setDirectionsFrom(defaultDirectionsOrigin(Boolean(usableFix)))
+      setDirectionsTo(
+        target.uid
+          ? { kind: 'poi', uid: target.uid }
+          : target.address
+            ? { kind: 'address', address: target.address, position: target.position }
+            : { kind: 'fixed', label: target.name, position: target.position },
+      )
+      setDirectionsOpen(false)
       setHeading({
         name: target.name,
         position: target.position,
         address: target.address,
         approximate: target.positionSource === 'address',
         uid: target.uid,
+        liveOrigin: true,
       })
       arrived.current = false
       setSelected(undefined)
@@ -1222,6 +1363,14 @@ export default function App() {
                     />
                   </ControlGroup>
                   <ControlGroup>
+                    <ControlButton
+                      icon={<DirectionsIcon />}
+                      title="Directions"
+                      tooltip="Directions"
+                      selected={directionsOpen}
+                      pressed={directionsOpen}
+                      onClick={openDirections}
+                    />
                     <ControlButton
                       icon={<EventIcon />}
                       title="Show events"
@@ -1658,6 +1807,15 @@ export default function App() {
                 onClick: () => setFiltersOpen((open) => !open),
               },
               {
+                key: 'directions',
+                label: 'Directions',
+                title: 'Directions',
+                icon: <DirectionsIcon />,
+                selected: directionsOpen,
+                pressed: directionsOpen,
+                onClick: openDirections,
+              },
+              {
                 key: 'events',
                 label: 'Events',
                 title: 'Show events',
@@ -1857,6 +2015,28 @@ export default function App() {
           ) : undefined
         }
       />
+
+      {data && (
+        <DirectionsPanel
+          open={directionsOpen}
+          compact={compact}
+          layout={data.layout}
+          pois={data.pois}
+          places={places}
+          from={directionsFrom}
+          to={directionsTo}
+          mode={directionsMode}
+          hasUsableLiveFix={Boolean(usableFix)}
+          findingLocation={location.status === 'locating'}
+          onFromChange={setDirectionsFrom}
+          onToChange={setDirectionsTo}
+          onModeChange={setDirectionsMode}
+          onSwap={swapDirections}
+          onStart={startDirections}
+          onShare={() => void shareDirections()}
+          onClose={() => setDirectionsOpen(false)}
+        />
+      )}
 
       <FirstRun />
     </ThemeProvider>

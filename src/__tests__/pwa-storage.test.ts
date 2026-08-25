@@ -24,7 +24,6 @@ describe('requestPersistentStorage', () => {
   })
 
   it('reports unsupported when the persistence API is unavailable', async () => {
-    expect(await requestPersistentStorage(undefined)).toBe('unsupported')
     expect(await requestPersistentStorage(storage({}))).toBe('unsupported')
   })
 

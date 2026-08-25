@@ -10,6 +10,8 @@ import { formatDistance, formatMinutes, type Travel } from '../brc/travel'
 import { needleAngle } from '../brc/geo'
 import type { CompassHeading } from '../data/useCompassHeading'
 import type { PlayaPalette } from '../map/style'
+import type { PlayaRoute } from '../brc/routing'
+import type { DirectionsMode } from '../data/directions'
 import { CompassNeedle } from './CompassNeedle'
 
 interface Props {
@@ -37,6 +39,12 @@ interface Props {
    * — the two are unrelated and this never touches the map camera. */
   compass?: CompassHeading
   palette?: PlayaPalette
+  fromLabel?: string
+  mode?: DirectionsMode
+  routeKind?: PlayaRoute['kind']
+  liveOrigin?: boolean
+  onEdit?: () => void
+  onShowRoute?: () => void
 }
 
 /**
@@ -60,6 +68,12 @@ export function NavBar({
   bearing,
   compass,
   palette,
+  fromLabel,
+  mode = 'walk',
+  routeKind = 'direct',
+  liveOrigin = true,
+  onEdit,
+  onShowRoute,
 }: Props) {
   // Dismissing the denial note is purely local UI state — it says nothing
   // about the sensor itself, so it does not live in useCompassHeading.
@@ -125,44 +139,39 @@ export function NavBar({
             {formatDistance(travel)}
           </Typography>
           <Stack direction="row" spacing={0.4} sx={{ alignItems: 'center' }}>
-            <DirectionsWalkIcon fontSize="inherit" />
-            <Typography variant="body2">{formatMinutes(travel.walkMinutes)}</Typography>
-          </Stack>
-          <Stack direction="row" spacing={0.4} sx={{ alignItems: 'center' }}>
-            <DirectionsBikeIcon fontSize="inherit" />
-            <Typography variant="body2">{formatMinutes(travel.bikeMinutes)}</Typography>
-          </Stack>
-          {located ? (
-            // "Head toward 4:30" is the one instruction you can follow without
-            // looking at the screen again, which is the whole reason the heading
-            // is given as a clock position. It should not be the quietest thing
-            // in the row.
-            <Typography
-              variant="body2"
-              noWrap
-              sx={{ fontWeight: 700, color: 'primary.main' }}
-            >
-              toward {heading}
+            {mode === 'walk' ? <DirectionsWalkIcon fontSize="inherit" /> : <DirectionsBikeIcon fontSize="inherit" />}
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+              {formatMinutes(mode === 'walk' ? travel.walkMinutes : travel.bikeMinutes)}
             </Typography>
-          ) : (
-            <Typography variant="body2" noWrap>
-              {status === 'locating'
-                ? 'finding you…'
-                : status === 'denied'
-                  ? `${address ?? heading} · from the Man (location off)`
-                  : `${address ?? heading} · from the Man`}
-            </Typography>
-          )}
+          </Stack>
+          <Typography variant="body2" noWrap sx={{ fontWeight: 700, color: 'primary.main' }}>
+            toward {heading}
+          </Typography>
         </Stack>
+        {fromLabel && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2, mt: 0.25 }}>
+            From {fromLabel}
+          </Typography>
+        )}
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2, mt: 0.25 }}>
-          Straight-line estimate — follow streets around occupied blocks
+          {routeKind === 'street'
+            ? 'Surveyed street route around occupied blocks'
+            : routeKind === 'hybrid'
+              ? 'Surveyed streets plus a direct open-playa leg'
+              : 'Straight-line estimate — verify a walkable path around occupied blocks'}
         </Typography>
+        {(onEdit || onShowRoute) && (
+          <Stack direction="row" spacing={0.5} sx={{ mt: 0.25 }}>
+            {onEdit && <Button size="small" variant="text" onClick={onEdit}>Edit route</Button>}
+            {onShowRoute && <Button size="small" variant="text" onClick={onShowRoute}>Show full route</Button>}
+          </Stack>
+        )}
         {approximate && (
           <Typography variant="caption" color="warning.main" sx={{ display: 'block', lineHeight: 1.2, mt: 0.25 }}>
             Approximate address area — nearby camps may share this pin
           </Typography>
         )}
-        {located && accuracy != null && (
+        {liveOrigin && located && accuracy != null && (
           <Typography variant="caption" color="text.secondary">
             GPS accuracy ±{Math.round(accuracy)} m
           </Typography>
@@ -182,7 +191,7 @@ export function NavBar({
             </IconButton>
           </Stack>
         )}
-        {(status === 'denied' || status === 'unavailable') && (
+        {liveOrigin && (status === 'denied' || status === 'unavailable') && (
           // A real MuiButton rather than a bare `<Typography component="button">`
           // so it picks up theme.ts's 44px touch floor (MuiButton styleOverrides,
           // below `md`) the same way every other control in the app does, instead

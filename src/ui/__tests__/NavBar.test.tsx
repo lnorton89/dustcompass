@@ -93,3 +93,22 @@ describe('NavBar route semantics (#87)', () => {
     expect(screen.getByText(/occupied blocks/i)).toBeDefined()
   })
 })
+
+
+describe('NavBar routed directions summary (#132)', () => {
+  it('uses the selected bike ETA and names surveyed street routing', () => {
+    render(
+      <ThemeProvider theme={playaTheme('dark')}>
+        <NavBar
+          name="Center Camp" travel={travel} heading="6:00" located={false} status="idle"
+          fromLabel="7:30 & B" mode="bike" routeKind="street" liveOrigin={false}
+          onRetryLocation={vi.fn()} onClear={vi.fn()}
+        />
+      </ThemeProvider>,
+    )
+    expect(screen.getByText(/Surveyed street route/i)).toBeDefined()
+    expect(screen.getByText(/From 7:30 & B/i)).toBeDefined()
+    expect(screen.getByText('2 min')).toBeDefined()
+    expect(screen.queryByText('4 min')).toBeNull()
+  })
+})

@@ -425,6 +425,47 @@ const browser = await chromium.launch({
     assert((await page.locator('audio').count()) === 0, 'removing cached art audio left its player active')
   })
 
+  await journey(page, 'directions plans edits swaps shares and restarts as one human task', async () => {
+    await page.getByRole('button', { name: 'Directions', exact: true }).first().click()
+    await page.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+    const from = page.getByRole('combobox', { name: 'From' })
+    const to = page.getByRole('combobox', { name: 'To' })
+    assert((await from.inputValue()).length > 0, 'Directions opened without a visible start')
+    await to.fill(fixture.name)
+    await page.getByRole('option').filter({ hasText: fixture.name }).first().click()
+    const summary = page.getByTestId('directions-summary')
+    await summary.waitFor({ timeout: 10000 })
+    assert(/surveyed|open-playa|straight-line/i.test(await summary.innerText()), 'route semantics are missing')
+    await page.getByRole('button', { name: /Bike/i }).click()
+    await page.getByLabel('Swap directions endpoints').click()
+    assert((await page.getByRole('combobox', { name: 'From' }).inputValue()).includes(fixture.name), 'swap did not move destination into From')
+    await page.getByLabel('Swap directions endpoints').click()
+    await page.getByRole('button', { name: /Share link/i }).click()
+    await page.getByText(/Route link copied|Could not copy the route link/).waitFor({ timeout: 5000 })
+    const params = new URL(page.url()).searchParams
+    assert(params.get('dir') === '1' && params.get('mode') === 'bike', 'route link did not preserve Directions intent')
+    assert(!(params.get('from') ?? '').includes('-119.'), 'live start leaked a raw longitude into the shared URL')
+    await page.getByRole('button', { name: /Start navigation/i }).click()
+    await page.getByTestId('navigation-bar').waitFor({ timeout: 10000 })
+    await page.getByRole('button', { name: /Edit route/i }).click()
+    await page.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+    await page.getByRole('button', { name: /Close directions/i }).click()
+    await page.getByRole('button', { name: /Show full route/i }).click()
+    await page.getByLabel('Stop navigating').click()
+  })
+
+  await journey(page, 'shared fixed directions reopen while offline after preparation', async () => {
+    const fixed = `${BASE_URL}?dir=1&from=man&to=at%3A7%253A30%2520%2526%2520Esplanade&mode=walk`
+    await page.goto(fixed, { waitUntil: 'load' })
+    await waitForMap(page)
+    await page.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+    await context.setOffline(true)
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 })
+    await waitForMap(page)
+    await page.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+    await context.setOffline(false)
+  })
+
   await context.close()
 }
 

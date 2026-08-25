@@ -1169,6 +1169,26 @@ await shared.close()
 }
 
 console.log(problems.length ? `\n${problems.length} problem(s):\n` + problems.join('\n') : '\nno console or network errors')
+// First-class Directions: dedicated entry, editable endpoints, mode, URL round-trip.
+await page.getByRole('button', { name: 'Directions', exact: true }).first().click()
+await page.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+const toField = page.getByRole('combobox', { name: 'To' })
+await toField.fill('7:30 & Esplanade')
+await page.getByRole('option').filter({ hasText: /7:30.*Esplanade|Esplanade.*7:30/ }).first().click()
+await page.getByTestId('directions-summary').waitFor({ timeout: 5000 })
+await page.getByRole('button', { name: /Bike/i }).click()
+await page.getByRole('button', { name: /Share link/i }).click()
+await page.waitForTimeout(250)
+const routeUrl = page.url()
+assert(new URL(routeUrl).searchParams.get('dir') === '1', 'Directions share URL carries schema version')
+assert(new URL(routeUrl).searchParams.get('mode') === 'bike', 'Directions share URL carries selected mode')
+const sharedRoute = await context.newPage()
+await sharedRoute.goto(routeUrl, { waitUntil: 'load' })
+await sharedRoute.waitForFunction(() => window.__map, null, { timeout: 30000 })
+await sharedRoute.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+assert((await sharedRoute.getByTestId('directions-summary').count()) === 1, 'shared Directions URL restores route summary')
+await sharedRoute.close()
+
 await browser.close()
 process.exit(problems.length || process.exitCode ? 1 : 0)
 

@@ -5,22 +5,11 @@ import { isNearCity, type Position } from '../brc/geo'
 import { BASE_PATH } from '../config'
 
 export interface DeepLink {
-  /** A selected listing, by its Burning Man uid. */
   poi?: string
-  /** A dropped pin, carried as a playa address rather than raw coordinates. */
   at?: string
-  /**
-   * The exact coordinate behind `at`, for the cases an address alone would
-   * lose: a dropped pin keeps the tapped spot, but `at` only ever carries what
-   * `reverseGeocode` rounds it to (nearest 15 minutes of clock, nearest 50 ft
-   * of open-playa radius, or snapped onto a nearby street). Always paired with
-   * `at` — there is no separate exact point for an ordinary camp-intersection
-   * address, which already names an exact place.
-   */
   ll?: Position
 }
 
-/** `?ll=<lng>,<lat>`, or undefined if it is missing, malformed, or out of range. */
 function parsePosition(raw: string): Position | undefined {
   const [lngRaw, latRaw] = raw.split(',')
   if (lngRaw === undefined || latRaw === undefined) return undefined
@@ -31,21 +20,11 @@ function parsePosition(raw: string): Position | undefined {
   return [lng, lat]
 }
 
-// 6 decimal places is sub-meter precision — plenty for a tapped point, and far
-// short of the coordinate's own float noise, so it doesn't bloat the URL.
 const roundCoord = (n: number) => Math.round(n * 1e6) / 1e6
 function formatPosition([lng, lat]: Position): string {
   return `${roundCoord(lng)},${roundCoord(lat)}`
 }
 
-/**
- * Locations travel between people as addresses, not coordinates — "meet us at
- * 7:30 & Esplanade" is what gets said out loud. Keeping the URL in that form
- * means the link is still useful when it is pasted into a message and read by a
- * human, or typed off someone else's screen. `ll`, when present, rides along
- * silently for the app itself to prefer — it is never the only thing in the
- * link, and a human reading the URL still has the address to go on.
- */
 export function readDeepLink(
   search = typeof window === 'undefined' ? '' : window.location.search,
 ): DeepLink {
@@ -92,23 +71,25 @@ export type DeepLinkResolution =
   | { status: 'unresolvable' }
   | { status: 'none' }
 
+function normalizedAddress(address: string): string {
+  return address.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
 /**
- * Resolve a deep link to a position. An exact `ll` is trusted only when the
- * app's own address model says that coordinate means the same normalized
- * address as `at`. This is deliberately stricter than a fixed distance radius:
- * adjacent 15-minute clock intersections can be well inside 250 m, so distance
- * alone can accept a coordinate at one named intersection while displaying the
- * label of another (#105).
+ * `ll` is only an exact refinement of `at`; it must describe the same address
+ * under the app's own reverse-geocoding model. A broad metric tolerance can
+ * span adjacent 15-minute intersections, so round-trip semantics are the
+ * consistency boundary instead (#105).
  */
 export function resolveDeepLink(link: DeepLink, layout: CityLayout): DeepLinkResolution {
   if (link.ll && link.at && isNearCity(layout, link.ll)) {
     const geocoded = geocode(link.at, layout)
-    if (geocoded) {
-      const expectedAddress = reverseGeocode(geocoded.position, layout).label
-      const exactAddress = reverseGeocode(link.ll, layout).label
-      if (exactAddress === expectedAddress) {
-        return { status: 'resolved', position: link.ll }
-      }
+    const roundTripped = reverseGeocode(link.ll, layout)
+    if (
+      geocoded &&
+      normalizedAddress(roundTripped.label) === normalizedAddress(link.at)
+    ) {
+      return { status: 'resolved', position: link.ll }
     }
   }
   if (!link.at) return { status: 'none' }

@@ -2,9 +2,6 @@ import { useCallback, useRef, useState } from 'react'
 import type { Position } from '../brc/geo'
 import { DATA_YEAR } from '../config'
 
-// Storage is scoped per data year: each year's survey moves the city centre,
-// bearing, and street geometry by enough that a prior year's coordinates are
-// not safe to draw as current.
 const KEY_PREFIX = 'playa-map.places.v1'
 const KEY = `${KEY_PREFIX}.${DATA_YEAR}`
 const LEGACY_ARCHIVE_KEY = `${KEY_PREFIX}.legacy-unversioned`
@@ -39,9 +36,7 @@ function isValidPlace(candidate: Partial<SavedPlace>): candidate is SavedPlace {
     typeof candidate.name !== 'string' ||
     candidate.name.trim().length === 0 ||
     candidate.name.length > MAX_NAME_LENGTH
-  ) {
-    return false
-  }
+  ) return false
   if (typeof candidate.address !== 'string') return false
   if (typeof candidate.savedAt !== 'number' || !Number.isFinite(candidate.savedAt)) return false
   if (!Array.isArray(candidate.position) || candidate.position.length !== 2) return false
@@ -54,19 +49,13 @@ function isValidPlace(candidate: Partial<SavedPlace>): candidate is SavedPlace {
 export function parsePlaces(raw: string | null): SavedPlace[] {
   if (!raw) return []
   let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return []
-  }
+  try { parsed = JSON.parse(raw) } catch { return [] }
   if (!Array.isArray(parsed)) return []
-
   const seenIds = new Set<string>()
   return parsed.filter((place): place is SavedPlace => {
     if (typeof place !== 'object' || place === null) return false
     const candidate = place as Partial<SavedPlace>
-    if (!isValidPlace(candidate)) return false
-    if (seenIds.has(candidate.id)) return false
+    if (!isValidPlace(candidate) || seenIds.has(candidate.id)) return false
     seenIds.add(candidate.id)
     return true
   })
@@ -90,11 +79,6 @@ function persist(places: SavedPlace[]): boolean {
   }
 }
 
-/**
- * Saved-place mutations keep their in-memory fallback, but now report whether
- * the same state actually made it to durable browser storage. UI code can
- * therefore distinguish a real offline save from a session-only fallback.
- */
 export function useSavedPlaces() {
   const [places, setPlaces] = useState<SavedPlace[]>(read)
   const placesRef = useRef(places)

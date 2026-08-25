@@ -109,6 +109,11 @@ describe('address parsing', () => {
     expect(at?.clock).toBe('12:00')
   })
 
+  it('does not geocode arbitrary text after a valid open-playa prefix', () => {
+    expect(geocode('7:30 2000 feet near the Temple', layout)).toBeUndefined()
+    expect(geocode("7:30 2000' / then 8:00 & B", layout)).toBeUndefined()
+  })
+
   it('resolves named plazas and portals', () => {
     expect(geocode('9:00 B Plaza', layout)?.clock).toBe('9:00')
     // The survey marks the portals on the Esplanade, at the mouth of the radial.

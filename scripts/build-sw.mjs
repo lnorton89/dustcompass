@@ -87,6 +87,9 @@ const DATA_FILES = PRECACHE.filter((url) => url.indexOf(DATA_PREFIX) === 0 && /\
 const LIVE_POINTER_CACHE = 'dust-compass-live-pointer';
 const LIVE_REVISION_PREFIX = 'dust-compass-live-data-rev-';
 const LIVE_POINTER_URL = self.location.origin + '/__dust-compass-live-revision';
+// User-selected audio is application data, not a build cache. It is managed
+// explicitly by the Audio Guide UI and must survive worker activation (#96).
+const AUDIO_CACHE = 'dust-compass-audio-guide-2026';
 // Which build's CACHE_NAME promoted the revision the pointer currently
 // names. The pointer and every revision cache are deliberately preserved
 // across worker activations (see above) — but a revision was fetched and
@@ -208,7 +211,7 @@ self.addEventListener('activate', (event) => {
     const names = await caches.keys();
     await Promise.all(
       names
-        .filter((name) => name.startsWith('dust-compass-') && name !== CACHE_NAME && name !== LIVE_POINTER_CACHE && !name.startsWith(LIVE_REVISION_PREFIX))
+        .filter((name) => name.startsWith('dust-compass-') && name !== CACHE_NAME && name !== LIVE_POINTER_CACHE && name !== AUDIO_CACHE && !name.startsWith(LIVE_REVISION_PREFIX))
         .map((name) => caches.delete(name)),
     );
 

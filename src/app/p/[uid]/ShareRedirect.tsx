@@ -9,6 +9,12 @@ import { assetUrl } from '../../../config'
  * with the place selected. The link stays visible and real so that a browser
  * with no JavaScript — or a reader who lands here mid-redirect — still has a
  * way through rather than a blank page.
+ *
+ * `data-dust-compass-share-page` is also a deliberately stable authenticity
+ * marker for the service worker. A captive portal can return arbitrary 200 OK
+ * HTML for this URL; the worker only accepts network HTML that contains this
+ * marker, otherwise it falls back to the cached app with the UID preserved
+ * (#94).
  */
 export function ShareRedirect({
   uid,
@@ -27,6 +33,7 @@ export function ShareRedirect({
 
   return (
     <main
+      data-dust-compass-share-page="1"
       style={{
         minHeight: '100dvh',
         display: 'grid',

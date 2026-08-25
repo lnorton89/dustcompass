@@ -8,10 +8,35 @@ async function edit(path, fn) {
 }
 
 await edit('src/App.tsx', (s) => {
-  const needle = `  useEffect(() => {\n    if (!pendingNearest || !locationWatchHasFailed(location.status)) return\n    const id = requestAnimationFrame(() => {\n      setPendingNearest(undefined)\n      releaseLocation('nearest')\n      setProbe('Could not get your location')\n    })\n    return () => cancelAnimationFrame(id)\n  }, [pendingNearest, location.status, releaseLocation])\n`
-  const insert = needle + `  useEffect(() => {\n    // A successful browser fix can still be unusable for a BRC-only lookup.\n    // Treat that as a completed request rather than waiting forever with a\n    // high-accuracy watch owned by \\`nearest\\` (#107).\n    if (!pendingNearest || location.status !== 'tracking' || !here || usableFix) return\n    const id = requestAnimationFrame(() => {\n      setPendingNearest(undefined)\n      releaseLocation('nearest')\n      setProbe('Your current location is too far from Black Rock City for nearest-service lookup')\n    })\n    return () => cancelAnimationFrame(id)\n  }, [pendingNearest, location.status, here, usableFix, releaseLocation])\n`
+  const needle = [
+    '  useEffect(() => {',
+    '    if (!pendingNearest || !locationWatchHasFailed(location.status)) return',
+    '    const id = requestAnimationFrame(() => {',
+    '      setPendingNearest(undefined)',
+    "      releaseLocation('nearest')",
+    "      setProbe('Could not get your location')",
+    '    })',
+    '    return () => cancelAnimationFrame(id)',
+    '  }, [pendingNearest, location.status, releaseLocation])',
+    '',
+  ].join('\n')
+  const extra = [
+    '  useEffect(() => {',
+    '    // A successful browser fix can still be unusable for a BRC-only lookup.',
+    '    // Treat that as a completed request rather than waiting forever with a',
+    '    // high-accuracy watch owned by nearest (#107).',
+    "    if (!pendingNearest || location.status !== 'tracking' || !here || usableFix) return",
+    '    const id = requestAnimationFrame(() => {',
+    '      setPendingNearest(undefined)',
+    "      releaseLocation('nearest')",
+    "      setProbe('Your current location is too far from Black Rock City for nearest-service lookup')",
+    '    })',
+    '    return () => cancelAnimationFrame(id)',
+    '  }, [pendingNearest, location.status, here, usableFix, releaseLocation])',
+    '',
+  ].join('\n')
   if (!s.includes(needle)) throw new Error('App nearest block not found')
-  return s.replace(needle, insert)
+  return s.replace(needle, needle + extra)
 })
 
 await edit('src/brc/geocode.ts', (s) => {
@@ -32,19 +57,56 @@ await edit('scripts/lib/api.mjs', (s) => {
   const start = s.indexOf('export function sanitizeEventOccurrences(kind, records) {')
   const end = s.indexOf('\n\nexport function validateDataset', start)
   if (start < 0 || end < 0) throw new Error('sanitize function not found')
-  const replacement = `export function sanitizeEventOccurrences(kind, records) {\n  if (kind !== 'event') return { records, dropped: [], droppedEvents: [] }\n  const dropped = []\n  const droppedEvents = []\n  const sanitized = []\n  for (const record of records) {\n    if (!Array.isArray(record?.occurrence_set)) {\n      sanitized.push(record)\n      continue\n    }\n    const kept = record.occurrence_set.filter((occurrence) => {\n      const start = Date.parse(occurrence?.start_time)\n      const end = Date.parse(occurrence?.end_time)\n      const ok = Number.isFinite(start) && Number.isFinite(end) && end > start\n      if (!ok) {\n        dropped.push({\n          uid: record.uid,\n          title: record.title,\n          start: occurrence?.start_time,\n          end: occurrence?.end_time,\n        })\n      }\n      return ok\n    })\n    if (record.occurrence_set.length > 0 && kept.length === 0) {\n      droppedEvents.push({ uid: record.uid, title: record.title })\n      continue\n    }\n    sanitized.push(kept.length === record.occurrence_set.length ? record : { ...record, occurrence_set: kept })\n  }\n  return { records: sanitized, dropped, droppedEvents }\n}`
+  const replacement = [
+    'export function sanitizeEventOccurrences(kind, records) {',
+    "  if (kind !== 'event') return { records, dropped: [], droppedEvents: [] }",
+    '  const dropped = []',
+    '  const droppedEvents = []',
+    '  const sanitized = []',
+    '  for (const record of records) {',
+    '    if (!Array.isArray(record?.occurrence_set)) {',
+    '      sanitized.push(record)',
+    '      continue',
+    '    }',
+    '    const kept = record.occurrence_set.filter((occurrence) => {',
+    '      const start = Date.parse(occurrence?.start_time)',
+    '      const end = Date.parse(occurrence?.end_time)',
+    '      const ok = Number.isFinite(start) && Number.isFinite(end) && end > start',
+    '      if (!ok) {',
+    '        dropped.push({',
+    '          uid: record.uid,',
+    '          title: record.title,',
+    '          start: occurrence?.start_time,',
+    '          end: occurrence?.end_time,',
+    '        })',
+    '      }',
+    '      return ok',
+    '    })',
+    '    if (record.occurrence_set.length > 0 && kept.length === 0) {',
+    '      droppedEvents.push({ uid: record.uid, title: record.title })',
+    '      continue',
+    '    }',
+    '    sanitized.push(kept.length === record.occurrence_set.length ? record : { ...record, occurrence_set: kept })',
+    '  }',
+    '  return { records: sanitized, dropped, droppedEvents }',
+    '}',
+  ].join('\n')
   return s.slice(0, start) + replacement + s.slice(end)
 })
 
 await edit('scripts/fetch-api.mjs', (s) => {
-  s = s.replace(
-    '    const { records, dropped } = sanitizeEventOccurrences(kind, fetched)',
-    '    const { records, dropped, droppedEvents } = sanitizeEventOccurrences(kind, fetched)',
-  )
-  const needle = `    for (const occurrence of dropped) {\n      console.warn(\n        \`  · dropped one bad occurrence (\${occurrence.start} – \${occurrence.end}) from "\${occurrence.title ?? occurrence.uid}"\`,\n      )\n    }\n`
-  const insert = needle + `    for (const event of droppedEvents) {\n      console.warn(\`  · dropped event with no valid occurrences: "\${event.title ?? event.uid}"\`)\n    }\n`
-  if (!s.includes(needle)) throw new Error('fetch-api dropped loop not found')
-  s = s.replace(needle, insert)
+  const beforeDecl = '    const { records, dropped } = sanitizeEventOccurrences(kind, fetched)'
+  const afterDecl = '    const { records, dropped, droppedEvents } = sanitizeEventOccurrences(kind, fetched)'
+  if (!s.includes(beforeDecl)) throw new Error('fetch-api sanitize declaration not found')
+  s = s.replace(beforeDecl, afterDecl)
+  const marker = '    const result = validateDataset(kind, records)'
+  if (!s.includes(marker)) throw new Error('fetch-api validation marker not found')
+  s = s.replace(marker, [
+    '    for (const event of droppedEvents) {',
+    '      console.warn(`  · dropped event with no valid occurrences: "${event.title ?? event.uid}"`)',
+    '    }',
+    marker,
+  ].join('\n'))
   s = s.replace('Set VITE_DATA_YEAR=${YEAR} to use it.', 'Set NEXT_PUBLIC_DATA_YEAR=${YEAR} to use it.')
   return s
 })
@@ -54,14 +116,108 @@ await edit('scripts/lib/atomic-write.mjs', (s) => {
   const start = s.indexOf('export async function commitAtomically(')
   const end = s.indexOf('\n\n/** Remove a staged directory', start)
   if (start < 0 || end < 0) throw new Error('commitAtomically not found')
-  const replacement = `export async function commitAtomically(tempDir, targetDir, { replaceAll = false } = {}) {\n  await mkdir(dirname(targetDir), { recursive: true })\n\n  const swapDirectory = async (readyDir) => {\n    const displaced = \`\${targetDir}.prev-\${randomBytes(4).toString('hex')}\`\n    let hadPrevious = false\n    try {\n      await rename(targetDir, displaced)\n      hadPrevious = true\n    } catch (error) {\n      if (error.code !== 'ENOENT') throw error\n    }\n    try {\n      await rename(readyDir, targetDir)\n    } catch (error) {\n      if (hadPrevious) await rename(displaced, targetDir)\n      throw error\n    }\n    if (hadPrevious) await rm(displaced, { recursive: true, force: true })\n  }\n\n  if (replaceAll) {\n    await swapDirectory(tempDir)\n    return\n  }\n\n  // Merge mode still commits with one observable directory swap. Build a\n  // complete candidate snapshot beside the target first, overlay the files\n  // owned by this caller, then swap that whole directory in. A failure while\n  // preparing the candidate cannot mutate the live target (#112).\n  const merged = \`\${targetDir}.merged-\${randomBytes(4).toString('hex')}\`\n  try {\n    try {\n      await cp(targetDir, merged, { recursive: true })\n    } catch (error) {\n      if (error.code !== 'ENOENT') throw error\n      await mkdir(merged, { recursive: true })\n    }\n    for (const entry of await readdir(tempDir)) {\n      await cp(join(tempDir, entry), join(merged, entry), { recursive: true, force: true })\n    }\n    await swapDirectory(merged)\n    await rm(tempDir, { recursive: true, force: true })\n  } catch (error) {\n    await rm(merged, { recursive: true, force: true })\n    throw error\n  }\n}`
+  const replacement = [
+    'export async function commitAtomically(tempDir, targetDir, { replaceAll = false } = {}) {',
+    '  await mkdir(dirname(targetDir), { recursive: true })',
+    '',
+    '  const swapDirectory = async (readyDir) => {',
+    "    const displaced = `${targetDir}.prev-${randomBytes(4).toString('hex')}`",
+    '    let hadPrevious = false',
+    '    try {',
+    '      await rename(targetDir, displaced)',
+    '      hadPrevious = true',
+    '    } catch (error) {',
+    "      if (error.code !== 'ENOENT') throw error",
+    '    }',
+    '    try {',
+    '      await rename(readyDir, targetDir)',
+    '    } catch (error) {',
+    '      if (hadPrevious) await rename(displaced, targetDir)',
+    '      throw error',
+    '    }',
+    '    if (hadPrevious) await rm(displaced, { recursive: true, force: true })',
+    '  }',
+    '',
+    '  if (replaceAll) {',
+    '    await swapDirectory(tempDir)',
+    '    return',
+    '  }',
+    '',
+    '  // Merge mode prepares a complete candidate snapshot before the one observable swap (#112).',
+    "  const merged = `${targetDir}.merged-${randomBytes(4).toString('hex')}`",
+    '  try {',
+    '    try {',
+    '      await cp(targetDir, merged, { recursive: true })',
+    '    } catch (error) {',
+    "      if (error.code !== 'ENOENT') throw error",
+    '      await mkdir(merged, { recursive: true })',
+    '    }',
+    '    for (const entry of await readdir(tempDir)) {',
+    '      await cp(join(tempDir, entry), join(merged, entry), { recursive: true, force: true })',
+    '    }',
+    '    await swapDirectory(merged)',
+    '    await rm(tempDir, { recursive: true, force: true })',
+    '  } catch (error) {',
+    '    await rm(merged, { recursive: true, force: true })',
+    '    throw error',
+    '  }',
+    '}',
+  ].join('\n')
   return s.slice(0, start) + replacement + s.slice(end)
 })
 
 await edit('scripts/lib/event-range.mjs', (s) => {
   const start = s.indexOf('export function deriveEventRange(events) {')
   if (start < 0) throw new Error('deriveEventRange not found')
-  const replacement = `export function deriveEventRange(events) {\n  const occurrences = events\n    .flatMap((event) => (event.occurrence_set ?? []).map((occurrence) => ({ event, occurrence })))\n    .map(({ event, occurrence }) => ({\n      event,\n      start: Date.parse(occurrence.start_time ?? ''),\n      end: Date.parse(occurrence.end_time ?? ''),\n    }))\n    .filter(({ start, end }) => Number.isFinite(start) && Number.isFinite(end))\n    .sort((a, b) => a.start - b.start)\n\n  if (occurrences.length === 0) return undefined\n\n  // Find the densest 14-day cluster by actual timestamps, not calendar month.\n  // This keeps one contiguous burn together across Aug/Sep and cannot be\n  // distorted by UTC month boundaries (#114).\n  let bestStartIndex = 0\n  let bestEndIndex = 0\n  let right = 0\n  for (let left = 0; left < occurrences.length; left += 1) {\n    if (right < left) right = left\n    const limit = occurrences[left].start + WINDOW_MS\n    while (right + 1 < occurrences.length && occurrences[right + 1].start <= limit) right += 1\n    if (right - left > bestEndIndex - bestStartIndex) {\n      bestStartIndex = left\n      bestEndIndex = right\n    }\n  }\n\n  const start = occurrences[bestStartIndex].start\n  const windowEnd = start + WINDOW_MS\n  const inWindow = occurrences.filter((o) => o.start >= start && o.start <= windowEnd && o.end <= windowEnd)\n  const end = Math.max(...inWindow.map((o) => o.end))\n  const inWindowSet = new Set(inWindow)\n\n  const outliers = occurrences\n    .filter((o) => !inWindowSet.has(o))\n    .map((o) => ({\n      uid: o.event.uid ?? o.event.event_id,\n      title: o.event.title,\n      start: new Date(o.start).toISOString(),\n      end: new Date(o.end).toISOString(),\n    }))\n\n  return {\n    rangeInfo: { startDate: new Date(start).toISOString(), endDate: new Date(end).toISOString() },\n    outliers,\n  }\n}\n`
+  const replacement = [
+    'export function deriveEventRange(events) {',
+    '  const occurrences = events',
+    '    .flatMap((event) => (event.occurrence_set ?? []).map((occurrence) => ({ event, occurrence })))',
+    '    .map(({ event, occurrence }) => ({',
+    '      event,',
+    "      start: Date.parse(occurrence.start_time ?? ''),",
+    "      end: Date.parse(occurrence.end_time ?? ''),",
+    '    }))',
+    '    .filter(({ start, end }) => Number.isFinite(start) && Number.isFinite(end))',
+    '    .sort((a, b) => a.start - b.start)',
+    '',
+    '  if (occurrences.length === 0) return undefined',
+    '',
+    '  let bestStartIndex = 0',
+    '  let bestEndIndex = 0',
+    '  let right = 0',
+    '  for (let left = 0; left < occurrences.length; left += 1) {',
+    '    if (right < left) right = left',
+    '    const limit = occurrences[left].start + WINDOW_MS',
+    '    while (right + 1 < occurrences.length && occurrences[right + 1].start <= limit) right += 1',
+    '    if (right - left > bestEndIndex - bestStartIndex) {',
+    '      bestStartIndex = left',
+    '      bestEndIndex = right',
+    '    }',
+    '  }',
+    '',
+    '  const start = occurrences[bestStartIndex].start',
+    '  const windowEnd = start + WINDOW_MS',
+    '  const inWindow = occurrences.filter((o) => o.start >= start && o.start <= windowEnd && o.end <= windowEnd)',
+    '  const end = Math.max(...inWindow.map((o) => o.end))',
+    '  const inWindowSet = new Set(inWindow)',
+    '',
+    '  const outliers = occurrences',
+    '    .filter((o) => !inWindowSet.has(o))',
+    '    .map((o) => ({',
+    '      uid: o.event.uid ?? o.event.event_id,',
+    '      title: o.event.title,',
+    '      start: new Date(o.start).toISOString(),',
+    '      end: new Date(o.end).toISOString(),',
+    '    }))',
+    '',
+    '  return {',
+    '    rangeInfo: { startDate: new Date(start).toISOString(), endDate: new Date(end).toISOString() },',
+    '    outliers,',
+    '  }',
+    '}',
+    '',
+  ].join('\n')
   return s.slice(0, start) + replacement
 })
 

@@ -60,7 +60,7 @@ import { SavePlaceDialog } from './ui/SavePlaceDialog'
 import { addressFor, deepLinkUrl, resolveDeepLink, shareUrl, useDeepLink } from './data/useDeepLink'
 import { travelForMeters } from './brc/travel'
 import { routeBetween, type PlayaRoute } from './brc/routing'
-import { bearingToClock, bearingBetween, bearingsMatch, isNearCity } from './brc/geo'
+import { bearingToClock, bearingBetween, bearingsMatch, distanceBetween, isNearCity } from './brc/geo'
 import { shareLink } from './ui/share'
 import type { EventItem, Poi, PoiKind, UnplacedListing } from './data/types'
 import { reverseGeocode } from './brc/geocode'
@@ -829,6 +829,10 @@ export default function App() {
 
   useEffect(() => {
     if (!directionsOpen || directionsFrom.kind !== 'live' || usableFix) return
+    if (location.status === 'idle') {
+      acquireLocation('directions')
+      return
+    }
     const outsideCity = location.status === 'tracking' && Boolean(here)
     if (location.status === 'denied' || location.status === 'unavailable' || outsideCity) {
       queueMicrotask(() => {
@@ -836,7 +840,7 @@ export default function App() {
         releaseLocation('directions')
       })
     }
-  }, [directionsFrom.kind, directionsOpen, here, location.status, releaseLocation, usableFix])
+  }, [acquireLocation, directionsFrom.kind, directionsOpen, here, location.status, releaseLocation, usableFix])
   /**
    * What the map owes the reader about art, if anything.
    *
@@ -952,16 +956,19 @@ export default function App() {
     // own reported accuracy, the true position could still be inside the
     // arrival radius. Missing accuracy (not guaranteed by the Geolocation
     // API, though effectively always present) is treated as unbounded.
+    const arrivalMeters = heading?.liveOrigin && usableFix
+      ? distanceBetween(usableFix, heading.position)
+      : Infinity
     if (
       !canConfirmArrival(
-        navigation.travel.meters,
+        arrivalMeters,
         Boolean(heading?.liveOrigin && usableFix),
         location.accuracy,
       )
     ) return
     arrived.current = true
     haptic('arrive')
-  }, [navigation, heading?.liveOrigin, usableFix, location.accuracy])
+  }, [navigation, heading, usableFix, location.accuracy])
 
 
   /**
@@ -1039,6 +1046,7 @@ export default function App() {
     acquireLocation,
     data,
     directionsFrom,
+    directionsMode,
     directionsTo,
     navigationPadding,
     releaseLocation,

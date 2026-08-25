@@ -1181,7 +1181,16 @@ await page.getByRole('button', { name: /Share link/i }).click()
 await page.waitForTimeout(250)
 const routeUrl = page.url()
 assert(new URL(routeUrl).searchParams.get('dir') === '1', 'Directions share URL carries schema version')
+assert(new URL(routeUrl).searchParams.get('year') === '2026', 'Directions share URL carries annual data version')
 assert(new URL(routeUrl).searchParams.get('mode') === 'bike', 'Directions share URL carries selected mode')
+const routeCardDownload = page.waitForEvent('download', { timeout: 6000 }).catch(() => undefined)
+await page.getByRole('button', { name: /Route card/i }).click()
+const routeDownload = await routeCardDownload
+if (routeDownload) {
+  assert(routeDownload.suggestedFilename().endsWith('.png'), 'route card fallback downloads a PNG')
+} else {
+  await page.getByText(/Route card (shared|copied)/).waitFor({ timeout: 6000 })
+}
 const sharedRoute = await context.newPage()
 await sharedRoute.goto(routeUrl, { waitUntil: 'load' })
 await sharedRoute.waitForFunction(() => window.__map, null, { timeout: 30000 })

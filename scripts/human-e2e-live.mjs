@@ -443,7 +443,7 @@ const browser = await chromium.launch({
     await page.getByRole('button', { name: /Share link/i }).click()
     await page.getByText(/Route link copied|Could not copy the route link/).waitFor({ timeout: 5000 })
     const params = new URL(page.url()).searchParams
-    assert(params.get('dir') === '1' && params.get('mode') === 'bike', 'route link did not preserve Directions intent')
+    assert(params.get('dir') === '1' && params.get('year') === '2026' && params.get('mode') === 'bike', 'route link did not preserve Directions intent')
     assert(!(params.get('from') ?? '').includes('-119.'), 'live start leaked a raw longitude into the shared URL')
     await page.getByRole('button', { name: /Start navigation/i }).click()
     await page.getByTestId('navigation-bar').waitFor({ timeout: 10000 })
@@ -455,7 +455,7 @@ const browser = await chromium.launch({
   })
 
   await journey(page, 'shared fixed directions reopen while offline after preparation', async () => {
-    const fixed = `${BASE_URL}?dir=1&from=man&to=at%3A7%253A30%2520%2526%2520Esplanade&mode=walk`
+    const fixed = `${BASE_URL}?dir=1&year=2026&from=man&to=at%3A7%3A30%20%26%20Esplanade&mode=walk`
     await page.goto(fixed, { waitUntil: 'load' })
     await waitForMap(page)
     await page.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })

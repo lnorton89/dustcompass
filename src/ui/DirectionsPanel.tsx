@@ -184,8 +184,7 @@ function EndpointPicker({
     <Autocomplete
       options={dynamicOptions}
       value={selected}
-      inputValue={query}
-      onInputChange={(_, next) => setQuery(next)}
+      onInputChange={(_, next, reason) => setQuery(reason === 'input' ? next : '')}
       getOptionLabel={(option) => option.label}
       getOptionDisabled={(option) => disableLive && option.endpoint.kind === 'live'}
       isOptionEqualToValue={(a, b) => a.key === b.key}
@@ -196,10 +195,7 @@ function EndpointPicker({
           .filter((option) => `${option.label} ${option.detail}`.toLowerCase().includes(term))
           .slice(0, 40)
       }}
-      onChange={(_, option) => {
-        onChange(option?.endpoint)
-        setQuery('')
-      }}
+      onChange={(_, option) => onChange(option?.endpoint)}
       renderInput={(params) => <TextField {...params} label={label} size="small" />}
       renderOption={(props, option) => (
         <Box component="li" {...props} key={option.key}>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, CircularProgress, Divider, Stack, Typography } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import DownloadIcon from '@mui/icons-material/Download'
@@ -178,30 +178,35 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
   const [savedSize, setSavedSize] = useState<number>()
   const [busy, setBusy] = useState(false)
   const [audioUrl, setAudioUrl] = useState<string>()
+  const audioUrlRef = useRef<string>()
   const [error, setError] = useState<string>()
 
   useEffect(() => {
     let cancelled = false
-    let objectUrl: string | undefined
+
+    // Every bit of media state is UID-scoped. In particular, revoke and clear
+    // the previous art piece's object URL synchronously when this effect starts
+    // so a persistent detail drawer can never retain A's player while B is
+    // being resolved (#100).
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+    audioUrlRef.current = undefined
+    setAudioUrl(undefined)
     setEntry(undefined)
     setChecking(true)
     setDownloaded(false)
     setSavedSize(undefined)
-    setAudioUrl(undefined)
+    setBusy(false)
     setError(undefined)
 
     void (async () => {
       try {
-        // A saved track is self-sufficient. Do not make playback depend on
-        // re-fetching the remote ZIP directory: a fresh launch on playa must
-        // be able to render and play the bytes already stored on this device
-        // even when there is no network at all (#99).
         const cached = await cachedTrack(uid)
         if (cancelled) return
         if (cached) {
           const blob = await cached.blob()
           if (cancelled) return
-          objectUrl = URL.createObjectURL(blob)
+          const objectUrl = URL.createObjectURL(blob)
+          audioUrlRef.current = objectUrl
           setAudioUrl(objectUrl)
           setSavedSize(Number(cached.headers.get('content-length')) || blob.size)
           setDownloaded(true)
@@ -209,7 +214,6 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
           return
         }
 
-        // Only unsaved tracks need the official remote index for discovery.
         const index = await loadGuideIndex()
         if (cancelled) return
         setEntry(index.get(uid.toLowerCase()))
@@ -224,7 +228,8 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
 
     return () => {
       cancelled = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = undefined
     }
   }, [uid])
 
@@ -239,10 +244,9 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
       const response = await downloadTrack(uid, entry)
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
-      setAudioUrl((previous) => {
-        if (previous) URL.revokeObjectURL(previous)
-        return url
-      })
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = url
+      setAudioUrl(url)
       setSavedSize(Number(response.headers.get('content-length')) || blob.size)
       setDownloaded(true)
     } catch (reason) {
@@ -258,10 +262,9 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
       await removeTrack(uid)
       setDownloaded(false)
       setSavedSize(undefined)
-      setAudioUrl((previous) => {
-        if (previous) URL.revokeObjectURL(previous)
-        return undefined
-      })
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = undefined
+      setAudioUrl(undefined)
     } finally {
       setBusy(false)
     }

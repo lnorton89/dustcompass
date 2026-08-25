@@ -175,6 +175,7 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
   const [entry, setEntry] = useState<ZipEntry>()
   const [checking, setChecking] = useState(true)
   const [downloaded, setDownloaded] = useState(false)
+  const [savedSize, setSavedSize] = useState<number>()
   const [busy, setBusy] = useState(false)
   const [audioUrl, setAudioUrl] = useState<string>()
   const [error, setError] = useState<string>()
@@ -185,24 +186,41 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
     setEntry(undefined)
     setChecking(true)
     setDownloaded(false)
+    setSavedSize(undefined)
+    setAudioUrl(undefined)
     setError(undefined)
 
-    void Promise.all([loadGuideIndex(), cachedTrack(uid)]).then(async ([index, cached]) => {
-      if (cancelled) return
-      const match = index.get(uid.toLowerCase())
-      setEntry(match)
-      setChecking(false)
-      setDownloaded(Boolean(cached))
-      if (cached) {
-        objectUrl = URL.createObjectURL(await cached.blob())
-        if (!cancelled) setAudioUrl(objectUrl)
-      }
-    }).catch((reason) => {
-      if (!cancelled) {
+    void (async () => {
+      try {
+        // A saved track is self-sufficient. Do not make playback depend on
+        // re-fetching the remote ZIP directory: a fresh launch on playa must
+        // be able to render and play the bytes already stored on this device
+        // even when there is no network at all (#99).
+        const cached = await cachedTrack(uid)
+        if (cancelled) return
+        if (cached) {
+          const blob = await cached.blob()
+          if (cancelled) return
+          objectUrl = URL.createObjectURL(blob)
+          setAudioUrl(objectUrl)
+          setSavedSize(Number(cached.headers.get('content-length')) || blob.size)
+          setDownloaded(true)
+          setChecking(false)
+          return
+        }
+
+        // Only unsaved tracks need the official remote index for discovery.
+        const index = await loadGuideIndex()
+        if (cancelled) return
+        setEntry(index.get(uid.toLowerCase()))
         setChecking(false)
-        setError(reason instanceof Error ? reason.message : 'Audio guide is unavailable')
+      } catch (reason) {
+        if (!cancelled) {
+          setChecking(false)
+          setError(reason instanceof Error ? reason.message : 'Audio guide is unavailable')
+        }
       }
-    })
+    })()
 
     return () => {
       cancelled = true
@@ -211,18 +229,21 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
   }, [uid])
 
   if (checking) return null
-  if (!entry) return null
+  if (!entry && !downloaded) return null
 
   const save = async () => {
+    if (!entry) return
     setBusy(true)
     setError(undefined)
     try {
       const response = await downloadTrack(uid, entry)
-      const url = URL.createObjectURL(await response.blob())
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
       setAudioUrl((previous) => {
         if (previous) URL.revokeObjectURL(previous)
         return url
       })
+      setSavedSize(Number(response.headers.get('content-length')) || blob.size)
       setDownloaded(true)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Audio download failed')
@@ -236,6 +257,7 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
     try {
       await removeTrack(uid)
       setDownloaded(false)
+      setSavedSize(undefined)
       setAudioUrl((previous) => {
         if (previous) URL.revokeObjectURL(previous)
         return undefined
@@ -245,6 +267,8 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
     }
   }
 
+  const size = entry?.uncompressedSize ?? savedSize ?? 0
+
   return (
     <>
       <Divider sx={{ my: 2 }} />
@@ -252,7 +276,7 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
         <Box>
           <Typography variant="subtitle2">Official Art Discovery Audio Guide</Typography>
           <Typography variant="caption" color="text.secondary">
-            2026 Burning Man guide · {formatBytes(entry.uncompressedSize)}
+            2026 Burning Man guide · {formatBytes(size)}
             {downloaded ? ' · saved offline' : ' · optional download'}
           </Typography>
         </Box>

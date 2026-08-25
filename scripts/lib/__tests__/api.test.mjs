@@ -5,6 +5,7 @@ import {
   redactEmbargoedLocations,
   RELEASE_2026,
   releaseForYear,
+  sanitizeEventOccurrences,
   summarize,
   validateDataset,
 } from '../api.mjs'
@@ -176,6 +177,21 @@ describe('refusing malformed-but-present values', () => {
     expect(problems).toContain('event: 1 occurrence(s) have an unparseable or non-positive start/end time')
   })
 
+  it('accepts an event whose bad occurrence has already been sanitized away', () => {
+    const { records } = sanitizeEventOccurrences('event', [
+      {
+        uid: 'e1',
+        title: 'Fire Talk',
+        occurrence_set: [
+          { start_time: 'not-a-date', end_time: '2026-08-30T12:00:00-07:00' },
+          { start_time: '2026-08-30T12:00:00-07:00', end_time: '2026-08-30T13:00:00-07:00' },
+        ],
+      },
+    ])
+    const problems = validateDataset('event', records).problems
+    expect(problems.some((p) => p.includes('occurrence'))).toBe(false)
+  })
+
   it('accepts a well-formed occurrence', () => {
     const problems = validateDataset('event', [
       {
@@ -213,6 +229,70 @@ describe('refusing malformed-but-present values', () => {
     // Not toEqual([]): a single record legitimately trips the unrelated
     // "no record has location_string" EXPECTED-field warning.
     expect(problems.some((p) => p.includes('GPS'))).toBe(false)
+  })
+})
+
+describe('dropping bad occurrences instead of refusing the whole fetch', () => {
+  it('drops an occurrence with an unparseable start, keeping a good one from the same event', () => {
+    const { records, dropped } = sanitizeEventOccurrences('event', [
+      {
+        uid: 'e1',
+        title: 'Fire Talk',
+        occurrence_set: [
+          { start_time: 'not-a-date', end_time: '2026-08-30T12:00:00-07:00' },
+          { start_time: '2026-08-30T12:00:00-07:00', end_time: '2026-08-30T13:00:00-07:00' },
+        ],
+      },
+    ])
+    expect(records[0].occurrence_set).toHaveLength(1)
+    expect(records[0].occurrence_set[0].start_time).toBe('2026-08-30T12:00:00-07:00')
+    expect(dropped).toEqual([
+      { uid: 'e1', title: 'Fire Talk', start: 'not-a-date', end: '2026-08-30T12:00:00-07:00' },
+    ])
+  })
+
+  it('drops an occurrence whose end is not after its start', () => {
+    const { records, dropped } = sanitizeEventOccurrences('event', [
+      {
+        uid: 'e1',
+        title: 'Fire Talk',
+        occurrence_set: [
+          { start_time: '2026-08-30T12:00:00-07:00', end_time: '2026-08-30T12:00:00-07:00' },
+        ],
+      },
+    ])
+    expect(records[0].occurrence_set).toEqual([])
+    expect(dropped).toHaveLength(1)
+  })
+
+  it('leaves a well-formed event untouched', () => {
+    const good = {
+      uid: 'e1',
+      title: 'Fire Talk',
+      occurrence_set: [{ start_time: '2026-08-30T12:00:00-07:00', end_time: '2026-08-30T13:00:00-07:00' }],
+    }
+    const { records, dropped } = sanitizeEventOccurrences('event', [good])
+    expect(records[0]).toBe(good)
+    expect(dropped).toEqual([])
+  })
+
+  it('leaves every other kind of record untouched', () => {
+    const camps = [{ uid: 'a', name: 'Well Placed' }]
+    const { records, dropped } = sanitizeEventOccurrences('camp', camps)
+    expect(records).toBe(camps)
+    expect(dropped).toEqual([])
+  })
+
+  it('keeps the event even when every one of its occurrences is bad', () => {
+    const { records } = sanitizeEventOccurrences('event', [
+      {
+        uid: 'e1',
+        title: 'Fire Talk',
+        occurrence_set: [{ start_time: 'not-a-date', end_time: 'also-not-a-date' }],
+      },
+    ])
+    expect(records).toHaveLength(1)
+    expect(records[0].occurrence_set).toEqual([])
   })
 })
 

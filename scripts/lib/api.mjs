@@ -35,6 +35,47 @@ const isPlainRecord = (v) => typeof v === 'object' && v !== null && !Array.isArr
 const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0
 const isFiniteInRange = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max
 
+/**
+ * A single occurrence with an unparseable or non-positive start/end time is
+ * a data-entry mistake in one showing of one event, not evidence the whole
+ * fetch is untrustworthy — the same shape of problem `deriveEventRange`
+ * already excludes individual outlier occurrences for rather than discard
+ * the range they were computed from. The app's own occurrence-consuming
+ * code (`occurrencesInWindow`, `relevantOccurrence`) already skips a NaN
+ * start outright, but not a parseable-yet-backwards pair, so this is real
+ * protection, not a redundant check — dropping just the bad occurrence and
+ * keeping the event's other showings (and every other event) is what lets
+ * this be *fixed* rather than refused outright, so one bad upstream record
+ * cannot block every scheduled refresh until whoever filed it notices.
+ *
+ * Only `event` records carry `occurrence_set`; anything else passes through
+ * unchanged.
+ */
+export function sanitizeEventOccurrences(kind, records) {
+  if (kind !== 'event') return { records, dropped: [] }
+  const dropped = []
+  const sanitized = records.map((record) => {
+    if (!Array.isArray(record?.occurrence_set)) return record
+    const kept = record.occurrence_set.filter((occurrence) => {
+      const start = Date.parse(occurrence?.start_time)
+      const end = Date.parse(occurrence?.end_time)
+      const ok = Number.isFinite(start) && Number.isFinite(end) && end > start
+      if (!ok) {
+        dropped.push({
+          uid: record.uid,
+          title: record.title,
+          start: occurrence?.start_time,
+          end: occurrence?.end_time,
+        })
+      }
+      return ok
+    })
+    if (kept.length === record.occurrence_set.length) return record
+    return { ...record, occurrence_set: kept }
+  })
+  return { records: sanitized, dropped }
+}
+
 export function validateDataset(kind, records) {
   const problems = []
 

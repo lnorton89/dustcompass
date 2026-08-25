@@ -21,6 +21,7 @@ import {
   ENDPOINTS,
   redactEmbargoedLocations,
   releaseForYear,
+  sanitizeEventOccurrences,
   summarize,
   validateDataset,
 } from './lib/api.mjs'
@@ -69,7 +70,13 @@ const stage = await stageTempDir(OUT)
 try {
   let refused = false
   for (const kind of ENDPOINTS) {
-    const records = await fetchKind(kind)
+    const fetched = await fetchKind(kind)
+    const { records, dropped } = sanitizeEventOccurrences(kind, fetched)
+    for (const occurrence of dropped) {
+      console.warn(
+        `  · dropped one bad occurrence (${occurrence.start} – ${occurrence.end}) from "${occurrence.title ?? occurrence.uid}"`,
+      )
+    }
     const result = validateDataset(kind, records)
 
     for (const problem of result.problems) {

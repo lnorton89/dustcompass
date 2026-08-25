@@ -9,7 +9,7 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { commitAtomically, discardStaged, stageTempDir } from './lib/atomic-write.mjs'
-import { summarize, validateDataset } from './lib/api.mjs'
+import { sanitizeEventOccurrences, summarize, validateDataset } from './lib/api.mjs'
 import { deriveEventRange } from './lib/event-range.mjs'
 
 const YEAR = process.argv[2] ?? '2025'
@@ -38,7 +38,13 @@ try {
     const url = `https://bm-innovate.s3.amazonaws.com/archive/${YEAR}/${filename}`
     const response = await fetch(url)
     if (!response.ok) throw new Error(`${url}: ${response.status} ${response.statusText}`)
-    const records = await response.json()
+    const fetched = await response.json()
+    const { records, dropped } = sanitizeEventOccurrences(kind, fetched)
+    for (const occurrence of dropped) {
+      console.warn(
+        `  · dropped one bad occurrence (${occurrence.start} – ${occurrence.end}) from "${occurrence.title ?? occurrence.uid}"`,
+      )
+    }
     const result = validateDataset(kind, records)
     if (result.problems.length) throw new Error(result.problems.join('\n'))
     await writeFile(resolve(stage, `${kind}.json`), JSON.stringify(records))

@@ -31,6 +31,12 @@ describe('route card layout', () => {
     }
   })
 
+  it('preserves distinct start and destination points for the A/B markers', () => {
+    const layout = routeCardLayout(route)
+    expect(layout.routePoints).toHaveLength(route.coordinates.length)
+    expect(layout.routePoints[0]).not.toEqual(layout.routePoints.at(-1))
+  })
+
   it('keeps map and text summary in separate non-overlapping regions', () => {
     const layout = routeCardLayout(route)
     expect(layout.map.x + layout.map.width).toBeLessThan(layout.summary.x)

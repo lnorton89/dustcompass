@@ -51,6 +51,7 @@ describe('DirectionsPanel', () => {
   it('shows the selected From endpoint instead of a blank controlled autocomplete', () => {
     render(<DirectionsPanel {...baseProps} />)
     expect((screen.getByRole('combobox', { name: 'From' }) as HTMLInputElement).value).toBe('The Man')
+    expect((screen.getByRole('button', { name: 'Start navigation' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('makes the selected travel mode the primary ETA and explains routed semantics', () => {
@@ -73,5 +74,6 @@ describe('DirectionsPanel', () => {
     expect(summary.textContent).not.toContain('4 min')
     expect(summary.textContent).toMatch(/Surveyed street route around occupied blocks/i)
     expect(summary.textContent).toContain('head toward 4:30')
+    expect((screen.getByRole('button', { name: 'Start navigation' }) as HTMLButtonElement).disabled).toBe(false)
   })
 })

@@ -178,7 +178,7 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
   const [savedSize, setSavedSize] = useState<number>()
   const [busy, setBusy] = useState(false)
   const [audioUrl, setAudioUrl] = useState<string>()
-  const audioUrlRef = useRef<string>()
+  const audioUrlRef = useRef<string | undefined>(undefined)
   const [error, setError] = useState<string>()
 
   useEffect(() => {

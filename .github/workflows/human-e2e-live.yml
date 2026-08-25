@@ -16,8 +16,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - name: Run human-style journeys against deployed Pages site
-        run: node scripts/human-e2e-live-v2.mjs
+      - name: Run first-time phone journeys against deployed Pages site
+        run: node scripts/human-e2e-phone-v3.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:

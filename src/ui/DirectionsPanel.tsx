@@ -200,7 +200,7 @@ export function DirectionsPanel({
 
   const content = (
     <Stack spacing={1.5} sx={{ p: 2, width: compact ? 'auto' : 390, maxWidth: '100vw' }}>
-      <Stack direction="row" alignItems="center" spacing={1}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h6">Directions</Typography>
           <Typography variant="caption" color="text.secondary">
@@ -212,7 +212,7 @@ export function DirectionsPanel({
         </IconButton>
       </Stack>
 
-      <Stack direction="row" spacing={1} alignItems="center">
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
         <Stack spacing={1} sx={{ flex: 1, minWidth: 0 }}>
           <EndpointPicker
             label="From"
@@ -240,7 +240,7 @@ export function DirectionsPanel({
 
       {from.kind === 'live' && (
         <Paper variant="outlined" sx={{ px: 1.25, py: 1 }}>
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <MyLocationIcon fontSize="small" color={hasUsableLiveFix ? 'primary' : 'disabled'} />
             <Typography variant="body2" color="text.secondary">
               {hasUsableLiveFix

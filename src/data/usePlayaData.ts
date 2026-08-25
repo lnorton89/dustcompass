@@ -89,44 +89,45 @@ export function usePlayaData() {
    */
   const scheduleEmbargoTransition = useCallback(
     (cancelled: { current: boolean }) => {
-      clearScheduledTransition()
-      const raw = rawRef.current
-      if (!raw) return
       const embargoWindow = embargoWindowForYear(DATA_YEAR)
-      const current = embargoState(embargoWindow)
-      const nextBoundary = !current.campsReleased
-        ? embargoWindow.campRelease
-        : !current.artReleased
-          ? embargoWindow.gatesOpen
-          : undefined
-      if (!nextBoundary) return
 
-      const fire = () => {
-        if (cancelled.current) return
-        // A fake/host-clamped timer can fire a tick early; recheck the wall
-        // clock rather than trust the callback, and reschedule the remainder
-        // instead of ever revealing data ahead of the configured instant.
-        if (Date.now() < nextBoundary.getTime()) {
-          scheduleEmbargoTransition(cancelled)
-          return
-        }
-        const embargo = embargoState(embargoWindow)
-        const art = applyEmbargo(raw.art, embargo.artReleased)
-        const camps = applyEmbargo(raw.camps, embargo.campsReleased)
-        const listed = toPois(raw.layout, art, camps, embargo)
-        setData((prev) =>
-          prev && {
-            ...prev,
-            art,
-            camps,
-            pois: [...listed.pois, ...raw.civic],
-            unplaced: listed.unplaced,
-            embargo,
-          },
-        )
-        scheduleEmbargoTransition(cancelled)
+      function armNextBoundary() {
+        clearScheduledTransition()
+        const raw = rawRef.current
+        if (!raw || cancelled.current) return
+        const current = embargoState(embargoWindow)
+        const nextBoundary = !current.campsReleased
+          ? embargoWindow.campRelease
+          : !current.artReleased
+            ? embargoWindow.gatesOpen
+            : undefined
+        if (!nextBoundary) return
+
+        timerRef.current = setTimeout(() => {
+          if (cancelled.current) return
+          if (Date.now() < nextBoundary.getTime()) {
+            armNextBoundary()
+            return
+          }
+          const embargo = embargoState(embargoWindow)
+          const art = applyEmbargo(raw.art, embargo.artReleased)
+          const camps = applyEmbargo(raw.camps, embargo.campsReleased)
+          const listed = toPois(raw.layout, art, camps, embargo)
+          setData((prev) =>
+            prev && {
+              ...prev,
+              art,
+              camps,
+              pois: [...listed.pois, ...raw.civic],
+              unplaced: listed.unplaced,
+              embargo,
+            },
+          )
+          armNextBoundary()
+        }, Math.max(0, nextBoundary.getTime() - Date.now()))
       }
-      timerRef.current = setTimeout(fire, Math.max(0, nextBoundary.getTime() - Date.now()))
+
+      armNextBoundary()
     },
     [clearScheduledTransition],
   )
@@ -138,16 +139,12 @@ export function usePlayaData() {
    * for a background refresh, which should keep showing the still-good data
    * already on screen until (and unless) the new fetch actually succeeds.
    */
-  const load = useCallback((clear: boolean) => {
+  const load = useCallback(() => {
     const cancelled = { current: false }
     // A new load — retry or background refresh — makes whatever boundary
     // was pending from the previous load's dataset moot; it'll be re-armed
     // below once this load's fetch succeeds.
     clearScheduledTransition()
-    if (clear) {
-      setError(undefined)
-      setData(undefined)
-    }
     const base = assetUrl(`data/${DATA_YEAR}`)
     // Populated by `optional()` below as each safety/schedule-relevant fetch
     // settles; read once every promise in the Promise.all has resolved.
@@ -169,7 +166,7 @@ export function usePlayaData() {
       optional(
         'dates',
         loadJson<{ rangeInfo?: EventRange }>(`${base}/dates_info.json`),
-        {} as { rangeInfo?: EventRange },
+        {},
       ),
       // Cosmetic geometry only — no warning tracked for this one.
       loadJson<GeoJSON.FeatureCollection>(`${base}/city_blocks.geojson`).catch(() => empty()),
@@ -207,7 +204,11 @@ export function usePlayaData() {
         setError(undefined)
         scheduleEmbargoTransition(cancelled)
       })
-      .catch((cause) => !cancelled.current && setError(cause as Error))
+      .catch((cause: unknown) => {
+        if (!cancelled.current) {
+          setError(cause instanceof Error ? cause : new Error(String(cause)))
+        }
+      })
 
     return () => {
       cancelled.current = true
@@ -215,7 +216,7 @@ export function usePlayaData() {
     }
   }, [clearScheduledTransition, scheduleEmbargoTransition])
 
-  useEffect(() => load(true), [attempt, load])
+  useEffect(() => load(), [attempt, load])
 
   // The service worker refreshes camp/event/listing data in the background
   // and, once a complete revision has fetched cleanly, tells every open tab
@@ -227,7 +228,7 @@ export function usePlayaData() {
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
     const onMessage = (event: MessageEvent) => {
-      if ((event.data as { type?: string } | null)?.type === 'DATA_REFRESHED') load(false)
+      if ((event.data as { type?: string } | null)?.type === 'DATA_REFRESHED') load()
     }
     navigator.serviceWorker.addEventListener('message', onMessage)
     return () => navigator.serviceWorker.removeEventListener('message', onMessage)

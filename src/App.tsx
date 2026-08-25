@@ -141,7 +141,7 @@ export const MODE_KEY = 'dust-compass:mode'
 export const CITY_UP_KEY = 'dust-compass:city-up'
 export const ACTIVE_FILTERS_KEY = 'dust-compass:active-filters'
 const DEFAULT_FILTERS: Filter[] = ['art', 'camp', 'toilets', 'services']
-const VALID_FILTER_KEYS = new Set<Filter>(FILTERS.map((f) => f.key))
+const VALID_FILTER_KEYS: ReadonlySet<string> = new Set(FILTERS.map((f) => f.key))
 
 export function isThemeMode(value: unknown): value is ThemeMode {
   return value === 'dark' || value === 'light' || value === 'night'
@@ -179,7 +179,9 @@ export function readStoredFilters(): Set<Filter> {
     if (raw === null) return new Set(DEFAULT_FILTERS)
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return new Set(DEFAULT_FILTERS)
-    const valid = parsed.filter((key): key is Filter => VALID_FILTER_KEYS.has(key))
+    const valid = parsed.filter(
+      (key: unknown): key is Filter => typeof key === 'string' && VALID_FILTER_KEYS.has(key),
+    )
     // An array that was never empty but produced zero valid entries is
     // corruption, not someone deliberately switching every filter off —
     // only the latter should be allowed to persist as an empty set.
@@ -388,6 +390,8 @@ export default function App() {
   // stops it.
   const location = useGeolocation()
   const here = location.position
+  const startLocation = location.start
+  const stopLocation = location.stop
   /**
    * More than one feature can want a live fix at once — navigation and the
    * Events panel's "Closest" sort, at minimum — and the watch has to keep
@@ -401,16 +405,16 @@ export default function App() {
   const acquireLocation = useCallback(
     (owner: 'navigation' | 'events' | 'map' | 'nearest', initialFix?: GeolocationPosition) => {
       locationOwners.current.add(owner)
-      location.start(initialFix)
+      startLocation(initialFix)
     },
-    [location.start],
+    [startLocation],
   )
   const releaseLocation = useCallback(
     (owner: 'navigation' | 'events' | 'map' | 'nearest') => {
       locationOwners.current.delete(owner)
-      if (locationOwners.current.size === 0) location.stop()
+      if (locationOwners.current.size === 0) stopLocation()
     },
-    [location.stop],
+    [stopLocation],
   )
   /**
    * Permission denial is terminal, so no recorded owner still represents a
@@ -449,7 +453,7 @@ export default function App() {
   useEffect(() => {
     try {
       if (localStorage.getItem(DISCLAIMER_SURFACE_KEY) === 'dismissed') {
-        setDisclaimerSurfaceDismissed(true)
+        queueMicrotask(() => setDisclaimerSurfaceDismissed(true))
       }
     } catch {
       /* blocked storage means the disclosure remains visible */
@@ -480,7 +484,9 @@ export default function App() {
   const [embargoNoticeSeen, setEmbargoNoticeSeen] = useState(false)
   useEffect(() => {
     try {
-      if (localStorage.getItem(EMBARGO_NOTICE_KEY) === 'seen') setEmbargoNoticeSeen(true)
+      if (localStorage.getItem(EMBARGO_NOTICE_KEY) === 'seen') {
+        queueMicrotask(() => setEmbargoNoticeSeen(true))
+      }
     } catch {
       // Private windows and blocked site data both throw. The notice showing
       // twice is a far smaller problem than the map not opening.
@@ -504,7 +510,9 @@ export default function App() {
   const [staleNoticeSeen, setStaleNoticeSeen] = useState(false)
   useEffect(() => {
     try {
-      if (localStorage.getItem(STALE_NOTICE_KEY) === 'seen') setStaleNoticeSeen(true)
+      if (localStorage.getItem(STALE_NOTICE_KEY) === 'seen') {
+        queueMicrotask(() => setStaleNoticeSeen(true))
+      }
     } catch {
       /* nothing to do — see above */
     }
@@ -850,6 +858,7 @@ export default function App() {
     [compact],
   )
 
+  const framedNavigationFor = useRef<string | undefined>(undefined)
   const navigateTo = useCallback(
     (target: {
       name: string
@@ -908,7 +917,6 @@ export default function App() {
     [acquireLocation, navigationPadding, usableFix],
   )
 
-  const framedNavigationFor = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!heading) {
       framedNavigationFor.current = undefined

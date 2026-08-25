@@ -134,12 +134,14 @@ export function EventsPanel({
     // sorting explicitly, and say why, rather than leaving it indefinitely
     // on "finding you…".
     if (sort === 'distance' && locationFailed) {
-      setSort('time')
-      setLocationIssue(true)
+      queueMicrotask(() => {
+        setSort('time')
+        setLocationIssue(true)
+      })
     }
     // A fix arriving by any route (navigation, the map's own locate button)
     // resolves the notice; it is not scoped to this panel's own request.
-    if (locationStatus === 'tracking') setLocationIssue(false)
+    if (locationStatus === 'tracking') queueMicrotask(() => setLocationIssue(false))
   }, [sort, locationFailed, locationStatus])
   const retryLocation = () => {
     setLocationIssue(false)

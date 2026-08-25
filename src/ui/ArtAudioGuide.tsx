@@ -190,13 +190,16 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
     // being resolved (#100).
     if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
     audioUrlRef.current = undefined
-    setAudioUrl(undefined)
-    setEntry(undefined)
-    setChecking(true)
-    setDownloaded(false)
-    setSavedSize(undefined)
-    setBusy(false)
-    setError(undefined)
+    queueMicrotask(() => {
+      if (cancelled) return
+      setAudioUrl(undefined)
+      setEntry(undefined)
+      setChecking(true)
+      setDownloaded(false)
+      setSavedSize(undefined)
+      setBusy(false)
+      setError(undefined)
+    })
 
     void (async () => {
       try {

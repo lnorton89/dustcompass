@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, CircularProgress, Divider, Stack, Typography } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import DownloadIcon from '@mui/icons-material/Download'
@@ -175,54 +175,79 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
   const [entry, setEntry] = useState<ZipEntry>()
   const [checking, setChecking] = useState(true)
   const [downloaded, setDownloaded] = useState(false)
+  const [savedSize, setSavedSize] = useState<number>()
   const [busy, setBusy] = useState(false)
   const [audioUrl, setAudioUrl] = useState<string>()
+  const audioUrlRef = useRef<string | undefined>(undefined)
   const [error, setError] = useState<string>()
 
   useEffect(() => {
     let cancelled = false
-    let objectUrl: string | undefined
+
+    // Every bit of media state is UID-scoped. In particular, revoke and clear
+    // the previous art piece's object URL synchronously when this effect starts
+    // so a persistent detail drawer can never retain A's player while B is
+    // being resolved (#100).
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+    audioUrlRef.current = undefined
+    setAudioUrl(undefined)
     setEntry(undefined)
     setChecking(true)
     setDownloaded(false)
+    setSavedSize(undefined)
+    setBusy(false)
     setError(undefined)
 
-    void Promise.all([loadGuideIndex(), cachedTrack(uid)]).then(async ([index, cached]) => {
-      if (cancelled) return
-      const match = index.get(uid.toLowerCase())
-      setEntry(match)
-      setChecking(false)
-      setDownloaded(Boolean(cached))
-      if (cached) {
-        objectUrl = URL.createObjectURL(await cached.blob())
-        if (!cancelled) setAudioUrl(objectUrl)
-      }
-    }).catch((reason) => {
-      if (!cancelled) {
+    void (async () => {
+      try {
+        const cached = await cachedTrack(uid)
+        if (cancelled) return
+        if (cached) {
+          const blob = await cached.blob()
+          if (cancelled) return
+          const objectUrl = URL.createObjectURL(blob)
+          audioUrlRef.current = objectUrl
+          setAudioUrl(objectUrl)
+          setSavedSize(Number(cached.headers.get('content-length')) || blob.size)
+          setDownloaded(true)
+          setChecking(false)
+          return
+        }
+
+        const index = await loadGuideIndex()
+        if (cancelled) return
+        setEntry(index.get(uid.toLowerCase()))
         setChecking(false)
-        setError(reason instanceof Error ? reason.message : 'Audio guide is unavailable')
+      } catch (reason) {
+        if (!cancelled) {
+          setChecking(false)
+          setError(reason instanceof Error ? reason.message : 'Audio guide is unavailable')
+        }
       }
-    })
+    })()
 
     return () => {
       cancelled = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = undefined
     }
   }, [uid])
 
   if (checking) return null
-  if (!entry) return null
+  if (!entry && !downloaded) return null
 
   const save = async () => {
+    if (!entry) return
     setBusy(true)
     setError(undefined)
     try {
       const response = await downloadTrack(uid, entry)
-      const url = URL.createObjectURL(await response.blob())
-      setAudioUrl((previous) => {
-        if (previous) URL.revokeObjectURL(previous)
-        return url
-      })
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = url
+      setAudioUrl(url)
+      setSavedSize(Number(response.headers.get('content-length')) || blob.size)
       setDownloaded(true)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Audio download failed')
@@ -236,14 +261,16 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
     try {
       await removeTrack(uid)
       setDownloaded(false)
-      setAudioUrl((previous) => {
-        if (previous) URL.revokeObjectURL(previous)
-        return undefined
-      })
+      setSavedSize(undefined)
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = undefined
+      setAudioUrl(undefined)
     } finally {
       setBusy(false)
     }
   }
+
+  const size = entry?.uncompressedSize ?? savedSize ?? 0
 
   return (
     <>
@@ -252,7 +279,7 @@ export function ArtAudioGuide({ uid }: { uid: string }) {
         <Box>
           <Typography variant="subtitle2">Official Art Discovery Audio Guide</Typography>
           <Typography variant="caption" color="text.secondary">
-            2026 Burning Man guide · {formatBytes(entry.uncompressedSize)}
+            2026 Burning Man guide · {formatBytes(size)}
             {downloaded ? ' · saved offline' : ' · optional download'}
           </Typography>
         </Box>

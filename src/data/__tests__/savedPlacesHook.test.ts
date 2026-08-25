@@ -5,11 +5,6 @@ import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSavedPlaces, type SavedPlace } from '../useSavedPlaces'
 
-/**
- * Deleting a saved spot is the one destructive thing this app lets you do, and
- * the thing being deleted is where your tent is. The undo behind it has to be
- * exact: it puts the same spot back, and pressing it twice does not leave two.
- */
 describe('losing and recovering a saved spot', () => {
   beforeEach(() => localStorage.clear())
 
@@ -19,7 +14,7 @@ describe('losing and recovering a saved spot', () => {
   ): SavedPlace => {
     let saved: SavedPlace | undefined
     act(() => {
-      saved = result.current.save(name, [-119.2, 40.78], 'D & 3:15')
+      saved = result.current.save(name, [-119.2, 40.78], 'D & 3:15').place
     })
     if (!saved) throw new Error('save did not return the place it created')
     return saved
@@ -52,6 +47,40 @@ describe('losing and recovering a saved spot', () => {
     act(() => result.current.restore(place))
 
     expect(result.current.places).toHaveLength(1)
+  })
+})
+
+describe('saved-place persistence status', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('reports a failed durable save while retaining the session copy', () => {
+    const { result } = renderHook(() => useSavedPlaces())
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError')
+    })
+
+    let persisted: boolean | undefined
+    act(() => {
+      persisted = result.current.save('Session tent', [-119.2, 40.78], 'D & 3:15').persisted
+    })
+
+    expect(persisted).toBe(false)
+    expect(result.current.places).toHaveLength(1)
+    expect(result.current.places[0].name).toBe('Session tent')
+  })
+
+  it('reports successful durable writes normally', () => {
+    const { result } = renderHook(() => useSavedPlaces())
+    let persisted: boolean | undefined
+    act(() => {
+      persisted = result.current.save('Durable tent', [-119.2, 40.78], 'D & 3:15').persisted
+    })
+
+    expect(persisted).toBe(true)
+    expect(localStorage.length).toBeGreaterThan(0)
   })
 })
 

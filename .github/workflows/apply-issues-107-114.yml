@@ -1,0 +1,26 @@
+name: Apply issues 107-114
+on:
+  push:
+    branches: [fix/issues-107-114]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[issues-107-114-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/issues-107-114
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node scripts/patch-issues-107-114.mjs
+      - run: |
+          rm scripts/patch-issues-107-114.mjs
+          rm .github/workflows/apply-issues-107-114.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix: address issues 107-114 [issues-107-114-applied]"
+          git push origin HEAD:fix/issues-107-114

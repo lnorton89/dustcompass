@@ -86,7 +86,13 @@ export function NavBar({
         gap: { xs: 0.75, sm: 1.5 },
         maxWidth: { sm: 520 },
         mx: { sm: 'auto' },
+        // Foreground navigation chrome must stay above MapLibre markers and
+        // labels. FocusMarker deliberately has its own map-local z-index;
+        // without an app-level stack here its destination card can paint over
+        // the distance/heading strip on a phone (#129).
+        zIndex: (theme) => theme.zIndex.appBar + 1,
       }}
+      data-testid="navigation-bar"
     >
       <NearMeIcon color="primary" />
       <Box sx={{ minWidth: 0, flex: 1 }}>

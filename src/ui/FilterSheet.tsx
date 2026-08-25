@@ -23,6 +23,7 @@ import type { ReactElement } from 'react'
 import type { ServiceCategory } from '../brc/services'
 import type { SavedPlace } from '../data/useSavedPlaces'
 import type { PlayaPalette, ReadingSize } from '../map/style'
+import { BRAND } from '../brand'
 
 /** The three categories worth a one-tap "nearest" lookup (#66) — the ones someone actually needs in a hurry. */
 const NEARBY: { category: ServiceCategory; label: string; icon: ReactElement }[] = [
@@ -90,15 +91,9 @@ export function FilterSheet<T extends string>({
             maxHeight: '90dvh',
             borderTopLeftRadius: 16,
             borderTopRightRadius: 16,
-            // Five chips and a switch stranded in the corner of a 1440px band
-            // is not a sheet, it is a stripe. On a wide screen it keeps to a
-            // readable column in the middle.
             maxWidth: { sm: 560 },
             mx: 'auto',
             p: 2,
-            // Padding set here beats the theme's inset on the same element, so
-            // this one carries both — 16px of its own, plus whatever the
-            // screen's bottom furniture needs.
             pb: 'calc(16px + var(--safe-bottom))',
           },
         },
@@ -110,8 +105,6 @@ export function FilterSheet<T extends string>({
           <CloseIcon fontSize="small" />
         </IconButton>
       </Stack>
-      {/* The colour is the one the layer is drawn in on the map, and it is lit
-          only while that layer is shown - so this row is also the legend. */}
       <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mb: 1 }}>
         {options.map((option) => {
           const on = active.has(option.key)
@@ -124,9 +117,6 @@ export function FilterSheet<T extends string>({
               variant="outlined"
               onClick={() => onToggle(option.key)}
               sx={{
-                // Bigger than a default chip on purpose: this is the filter UI
-                // on a phone, used one-handed, in gloves, in the dark. 44px is
-                // the touch floor the rest of the app now holds to.
                 height: 44,
                 borderRadius: '12px',
                 px: 0.5,
@@ -147,22 +137,10 @@ export function FilterSheet<T extends string>({
         })}
       </Stack>
       <Box sx={{ mt: 1 }}>
-        <FormControlLabel
-          control={<Switch checked={cityUp} onChange={onToggleCityUp} />}
-          label="12:00 points up"
-        />
+        <FormControlLabel control={<Switch checked={cityUp} onChange={onToggleCityUp} />} label="12:00 points up" />
       </Box>
-      {/*
-       * The app is used in full sun, through dust, by people whose reading
-       * glasses are back at camp. This moves the whole type scale and the map's
-       * labels together — the interface is no use bigger if the city it is
-       * describing is still 13px.
-       */}
       <Box>
-        <FormControlLabel
-          control={<Switch checked={reading === 'large'} onChange={onToggleReading} />}
-          label="Bigger text and labels"
-        />
+        <FormControlLabel control={<Switch checked={reading === 'large'} onChange={onToggleReading} />} label="Bigger text and labels" />
       </Box>
 
       <Divider sx={{ my: 1.5 }} />
@@ -205,12 +183,7 @@ export function FilterSheet<T extends string>({
               key={place.id}
               disablePadding
               secondaryAction={
-                <IconButton
-                  edge="end"
-                  size="small"
-                  aria-label={`Delete ${place.name}`}
-                  onClick={() => onRemovePlace(place.id)}
-                >
+                <IconButton edge="end" size="small" aria-label={`Delete ${place.name}`} onClick={() => onRemovePlace(place.id)}>
                   <DeleteIcon fontSize="small" />
                 </IconButton>
               }
@@ -222,6 +195,15 @@ export function FilterSheet<T extends string>({
           ))}
         </List>
       )}
+
+      <Divider sx={{ my: 1.5 }} />
+      <Typography variant="subtitle2">About this map</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
+        City survey &amp; listings: Burning Man Project.
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+        {BRAND.disclaimer}
+      </Typography>
     </Drawer>
   )
 }

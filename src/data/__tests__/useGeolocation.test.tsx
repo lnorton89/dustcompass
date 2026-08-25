@@ -121,6 +121,14 @@ describe('useGeolocation', () => {
    * the browser's own watch keeps running and calls back again once a fix
    * is available, exactly like Chromium's mocked geolocation does when a
    * test moves the override mid-watch. The watch must survive it.
+   *
+   * Status must land on 'locating', not 'unavailable': the latter drives
+   * NavBar's "Retry device location" button, whose handler is `start()`
+   * with no args — a guaranteed no-op here since `watchId` is deliberately
+   * left set so this same watch can recover. Reporting 'unavailable' left
+   * real phones stuck on an unresponsive Retry button on every routine GPS
+   * blip; 'locating' shows "finding you…" instead, which matches what's
+   * actually happening.
    */
   it('keeps the same watch alive through a transient error rather than ending tracking', () => {
     const { result } = renderHook(() => useGeolocation())
@@ -129,7 +137,7 @@ describe('useGeolocation', () => {
     act(() => calls[0].error(error(2)))
 
     expect(clearWatch).not.toHaveBeenCalled()
-    expect(result.current.status).toBe('unavailable')
+    expect(result.current.status).toBe('locating')
     // The browser watch survives, but the old sample is no longer eligible
     // for arrival, nearest-service math or a live "you are here" marker.
     expect(result.current.position).toBeUndefined()

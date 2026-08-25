@@ -94,11 +94,21 @@ export function useGeolocation(): Geolocation {
         // `watchId` looks already-active. Keep the watch so it can recover,
         // but withdraw the old fix immediately: navigation, arrival and
         // nearest-service actions must never keep treating it as live.
+        //
+        // Status stays 'locating', not 'unavailable': the latter surfaces
+        // NavBar's "Retry device location" button, whose handler is `start()`
+        // with no args — a no-op here since `watchId` is deliberately left
+        // set so the same watch can recover. On a real phone these blips are
+        // routine (a moment of lost signal, a slow cold-start fix), so
+        // reporting them as 'unavailable' left users staring at a Retry
+        // button that did nothing. 'locating' shows "finding you…" instead,
+        // which is what's actually happening while the watch waits to
+        // recover on its own.
         if (error.code !== error.PERMISSION_DENIED) {
           setPosition(undefined)
           setAccuracy(undefined)
           setLastFixAt(undefined)
-          setStatus('unavailable')
+          setStatus('locating')
           return
         }
         if (watchId.current !== undefined) {

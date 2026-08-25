@@ -8,6 +8,7 @@ import SyncProblemIcon from '@mui/icons-material/SyncProblem'
 import { BASE_PATH, DATA_YEAR, assetUrl } from '../config'
 
 type Support = 'checking' | 'supported' | 'unsupported'
+export type StoragePersistence = 'checking' | 'protected' | 'best-effort' | 'unsupported'
 type WorkerMessage =
   | { type: 'CACHE_PROGRESS'; completed: number; total: number }
   | { type: 'OFFLINE_READY'; total: number }
@@ -53,6 +54,21 @@ export function activateWaitingWorker(worker: ServiceWorker, controlled: boolean
   worker.postMessage({ type: 'SKIP_WAITING' })
 }
 
+/**
+ * Offline readiness and storage persistence are deliberately separate. A
+ * browser denying persistence still has a useful offline cache; it just must
+ * not be described as protected from storage-pressure eviction (#93).
+ */
+export async function requestPersistentStorage(storage: StorageManager | undefined = navigator.storage): Promise<StoragePersistence> {
+  if (!storage || typeof storage.persisted !== 'function' || typeof storage.persist !== 'function') return 'unsupported'
+  try {
+    if (await storage.persisted()) return 'protected'
+    return (await storage.persist()) ? 'protected' : 'best-effort'
+  } catch {
+    return 'best-effort'
+  }
+}
+
 /** What the chip/status line shows, derived from every dimension at once. */
 function deriveStatus(state: PwaState): Status {
   if (state.support === 'checking') return 'checking'
@@ -76,6 +92,9 @@ export function PwaStatus({ compact }: { compact: boolean }) {
   const [installFailed, setInstallFailed] = useState(false)
   const [progress, setProgress] = useState<{ completed: number; total: number }>()
   const [waiting, setWaiting] = useState<ServiceWorker>()
+  const [persistence, setPersistence] = useState<StoragePersistence>(() =>
+    typeof navigator === 'undefined' || !navigator.storage ? 'unsupported' : 'checking',
+  )
 
   useEffect(() => {
     // Network events change connectivity only. They must never manufacture
@@ -96,6 +115,12 @@ export function PwaStatus({ compact }: { compact: boolean }) {
 
     const hadController = Boolean(navigator.serviceWorker.controller)
     let refreshing = false
+    let persistenceRequested = false
+    const protectOfflineStorage = () => {
+      if (persistenceRequested) return
+      persistenceRequested = true
+      void requestPersistentStorage().then(setPersistence)
+    }
     const controllerChanged = () => {
       if (!hadController || refreshing) return
       refreshing = true
@@ -122,6 +147,10 @@ export function PwaStatus({ compact }: { compact: boolean }) {
         setInstalling(false)
         setInstallFailed(false)
         setProgress(undefined)
+        // Persistence is requested only after the core offline map is known
+        // complete. Denial/rejection can therefore never downgrade readiness
+        // or turn a browser-specific optimization into an install failure.
+        protectOfflineStorage()
       }
     }
     navigator.serviceWorker.addEventListener('controllerchange', controllerChanged)
@@ -170,7 +199,7 @@ export function PwaStatus({ compact }: { compact: boolean }) {
     [online, support, cacheReady, installing, installFailed, progress, waiting],
   )
 
-  const view = statusView(status, progress)
+  const view = statusView(status, progress, persistence)
   const title = `${view.detail} · ${DATA_YEAR} map`
   const description = `${view.label}. ${view.detail}. ${DATA_YEAR} map data.`
 
@@ -257,13 +286,26 @@ function isWorkerMessage(value: unknown): value is WorkerMessage {
   return typeof candidate.completed === 'number' && typeof candidate.total === 'number'
 }
 
+function persistenceDetail(persistence: StoragePersistence): string {
+  switch (persistence) {
+    case 'protected':
+      return 'storage protected'
+    case 'best-effort':
+      return 'browser may reclaim storage'
+    case 'unsupported':
+      return 'storage protection unavailable'
+    default:
+      return 'checking storage protection'
+  }
+}
+
 /**
  * `color` is the MUI palette slot for the states that render as a button.
  * `tone` is what the quiet states tint their icon with — deliberately not
  * `success.main`, which was the only green in an app that is otherwise entirely
  * amber, teal and, at night, a single low red.
  */
-function statusView(status: Status, progress?: { completed: number; total: number }) {
+function statusView(status: Status, progress?: { completed: number; total: number }, persistence: StoragePersistence = 'checking') {
   switch (status) {
     case 'caching':
     case 'checking':
@@ -275,7 +317,13 @@ function statusView(status: Status, progress?: { completed: number; total: numbe
         icon: <DownloadingIcon />,
       }
     case 'offline':
-      return { label: 'Offline map', detail: 'Using the saved map', color: 'warning' as const, tone: 'warning.main', icon: <CloudOffIcon /> }
+      return {
+        label: 'Offline map',
+        detail: `Using the saved map · ${persistenceDetail(persistence)}`,
+        color: 'warning' as const,
+        tone: 'warning.main',
+        icon: <CloudOffIcon />,
+      }
     case 'update':
       return { label: 'Update ready', detail: 'Tap to load the newest map', color: 'primary' as const, tone: 'primary.main', icon: <NewReleasesIcon /> }
     case 'incomplete':
@@ -301,6 +349,12 @@ function statusView(status: Status, progress?: { completed: number; total: numbe
     case 'unsupported':
       return { label: 'Online only', detail: 'Offline saving is unavailable', color: 'warning' as const, tone: 'warning.main', icon: <CloudOffIcon /> }
     default:
-      return { label: 'Ready offline', detail: 'Map saved on this device', color: 'success' as const, tone: 'text.secondary', icon: <CloudDoneIcon /> }
+      return {
+        label: 'Ready offline',
+        detail: `Map saved on this device · ${persistenceDetail(persistence)}`,
+        color: 'success' as const,
+        tone: 'text.secondary',
+        icon: <CloudDoneIcon />,
+      }
   }
 }

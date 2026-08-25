@@ -97,6 +97,12 @@ const LIVE_POINTER_URL = self.location.origin + '/__dust-compass-live-revision';
 // bundled, by-definition-current precache — forever, since nothing here
 // ever re-examined the pointer once past activation (#72).
 const LIVE_POINTER_BUILD_URL = self.location.origin + '/__dust-compass-live-revision-build';
+// Refresh throttling must survive service-worker process teardown. Browsers
+// are free to terminate an idle worker and later start a fresh global scope,
+// so an in-memory timestamp is not a real minimum interval (#92). Keep the
+// attempt timestamp beside the live pointer, stamped with this build so a
+// new worker version never inherits an old build's backoff accidentally.
+const LIVE_REFRESH_META_URL = self.location.origin + '/__dust-compass-live-refresh-meta';
 
 async function notify(message) {
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
@@ -217,7 +223,20 @@ self.addEventListener('activate', (event) => {
       const pointer = await caches.open(LIVE_POINTER_CACHE);
       const buildMarker = await pointer.match(LIVE_POINTER_BUILD_URL);
       const promotedBy = buildMarker ? await buildMarker.text() : null;
-      if (promotedBy !== CACHE_NAME) {
+      const refreshMarker = await pointer.match(LIVE_REFRESH_META_URL);
+      let refreshedBy = null;
+      if (refreshMarker) {
+        try {
+          refreshedBy = JSON.parse(await refreshMarker.text()).build || null;
+        } catch {
+          refreshedBy = null;
+        }
+      }
+      // A failed refresh may have written only refresh metadata, with no live
+      // pointer/build marker yet. Treat either marker as ownership evidence so
+      // same-build metadata survives, while a genuinely new build starts fresh.
+      const ownedByThisBuild = promotedBy === CACHE_NAME || refreshedBy === CACHE_NAME;
+      if (!ownedByThisBuild) {
         await caches.delete(LIVE_POINTER_CACHE);
         const staleRevisions = names.filter((name) => name.startsWith(LIVE_REVISION_PREFIX));
         await Promise.all(staleRevisions.map((name) => caches.delete(name)));
@@ -316,8 +335,36 @@ async function deleteStaleRevisions(keep) {
 }
 
 let refreshing = null;
-let lastLiveRefreshAt = 0;
+let lastLiveRefreshAttemptAtMemory = 0;
 const LIVE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+async function persistedLiveRefreshAttemptAt() {
+  try {
+    const pointer = await caches.open(LIVE_POINTER_CACHE);
+    const record = await pointer.match(LIVE_REFRESH_META_URL);
+    if (!record) return 0;
+    const metadata = JSON.parse(await record.text());
+    if (metadata.build !== CACHE_NAME || !Number.isFinite(metadata.attemptedAt)) return 0;
+    return metadata.attemptedAt;
+  } catch {
+    return 0;
+  }
+}
+
+async function recordLiveRefreshAttempt(attemptedAt) {
+  lastLiveRefreshAttemptAtMemory = attemptedAt;
+  try {
+    const pointer = await caches.open(LIVE_POINTER_CACHE);
+    await pointer.put(
+      LIVE_REFRESH_META_URL,
+      new Response(JSON.stringify({ build: CACHE_NAME, attemptedAt })),
+    );
+  } catch {
+    // Cache Storage itself can be unavailable/full. The in-memory timestamp
+    // still prevents a hot loop for this worker lifetime; persistence resumes
+    // automatically once the metadata write succeeds on a later attempt.
+  }
+}
 
 async function sameResponseBytes(a, b) {
   if (!a || !b) return false;
@@ -349,9 +396,20 @@ async function sameResponseBytes(a, b) {
  */
 function refreshLiveData() {
   if (refreshing) return refreshing;
-  if (Date.now() - lastLiveRefreshAt < LIVE_REFRESH_INTERVAL_MS) return Promise.resolve();
   refreshing = (async () => {
-    const revisionName = LIVE_REVISION_PREFIX + Date.now();
+    const now = Date.now();
+    const persistedAttemptAt = await persistedLiveRefreshAttemptAt();
+    const lastAttemptAt = Math.max(lastLiveRefreshAttemptAtMemory, persistedAttemptAt);
+    if (now - lastAttemptAt < LIVE_REFRESH_INTERVAL_MS) return;
+
+    // Throttle attempts, not successes. Record before touching the network so
+    // a captive portal, timeout, bad JSON response, or revision cache failure
+    // cannot make the very next data read immediately download the full set
+    // again (#90). Cache-backed metadata keeps the same interval after the
+    // browser terminates and recreates this worker global (#92).
+    await recordLiveRefreshAttempt(now);
+
+    const revisionName = LIVE_REVISION_PREFIX + now;
     let built = false;
     try {
       const responses = await Promise.all(DATA_FILES.map(async (url) => {
@@ -379,8 +437,6 @@ function refreshLiveData() {
           // A React reload caused by DATA_REFRESHED reads these files again.
           // Identical bytes are not a new revision and must not notify (or the
           // read -> refresh -> notify -> read loop never ends).
-          lastLiveRefreshAt = Date.now();
-          refreshing = null;
           return;
         }
 
@@ -396,28 +452,25 @@ function refreshLiveData() {
     if (!built) {
       // Nothing pointed at this revision yet, so discarding it changes
       // nothing a reader can observe — the previous pointer (if any) is
-      // untouched and still names a complete revision.
+      // untouched and still names a complete revision. The attempt timestamp
+      // deliberately remains, providing failure backoff until the interval.
       await caches.delete(revisionName);
-      refreshing = null;
       return;
     }
 
     // The revision is complete and immutable from here on; nothing below
     // this point may delete it. The pointer write is the one atomic moment
     // a reader can start seeing it.
-    try {
-      const pointer = await caches.open(LIVE_POINTER_CACHE);
-      await pointer.put(LIVE_POINTER_URL, new Response(revisionName));
-      // Stamped alongside the pointer itself so a later activation can tell
-      // whether this pointer is still this build's own to trust (#72).
-      await pointer.put(LIVE_POINTER_BUILD_URL, new Response(CACHE_NAME));
-      await notify({ type: 'DATA_REFRESHED' });
-      await deleteStaleRevisions(revisionName);
-      lastLiveRefreshAt = Date.now();
-    } finally {
-      refreshing = null;
-    }
-  })();
+    const pointer = await caches.open(LIVE_POINTER_CACHE);
+    await pointer.put(LIVE_POINTER_URL, new Response(revisionName));
+    // Stamped alongside the pointer itself so a later activation can tell
+    // whether this pointer is still this build's own to trust (#72).
+    await pointer.put(LIVE_POINTER_BUILD_URL, new Response(CACHE_NAME));
+    await notify({ type: 'DATA_REFRESHED' });
+    await deleteStaleRevisions(revisionName);
+  })().finally(() => {
+    refreshing = null;
+  });
   return refreshing;
 }
 
@@ -466,23 +519,29 @@ self.addEventListener('fetch', (event) => {
       const exact = await cache.match(request);
       if (exact) return exact;
 
-      // A listing page is a real page on the server and is deliberately not
-      // precached, so it has to be fetched — but never written back, which is
-      // what was poisoning the shell. Falling straight through to SHELL here
-      // served the app at /p/<uid>/ with no listing in the URL, so every
-      // shared link opened the bare city once a cache existed. Bounded by
-      // REQUEST_TIMEOUT_MS so a captive portal or dead hotspot that never
-      // answers can't hold up the eventual fallback to the cached shell.
+      const listing = /[/]p[/]([^/]+)[/]?$/.exec(url.pathname);
+
+      // A listing page exists for crawlers and is deliberately not precached,
+      // so an online request may still fetch it. Do not trust HTTP success as
+      // proof that the response is ours, though: captive portals routinely
+      // answer arbitrary navigation URLs with their own 200 OK HTML. The
+      // generated share page carries a stable marker in its server-rendered
+      // body; only a response containing that marker is accepted for /p/<uid>.
+      // Any unrelated 2xx response falls through to the same cached-shell
+      // restoration used by timeout/offline failures (#94).
       try {
         const network = await fetch(request, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-        if (network.ok) return network;
+        if (network.ok) {
+          if (!listing) return network;
+          const body = await network.clone().text();
+          if (body.includes('data-dust-compass-share-page="1"')) return network;
+        }
       } catch {
-        /* offline, timed out, or the page has gone; fall through */
+        /* offline, timed out, unreadable response, or the page has gone; fall through */
       }
 
-      // Offline, a shared listing link still has somewhere to go: the app is
-      // cached, and the listing travels as a query parameter instead of a path.
-      const listing = /[/]p[/]([^/]+)[/]?$/.exec(url.pathname);
+      // Offline or intercepted, a shared listing link still has somewhere to
+      // go: the app is cached, and the listing travels as a query parameter.
       if (listing) {
         // Response.redirect() requires an absolute URL. SHELL is
         // root-relative on a project-subpath deployment (e.g.

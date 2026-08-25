@@ -27,6 +27,7 @@ import { formatDistance, formatMinutes, travelBetween } from '../brc/travel'
 import { CATEGORY_LABEL, NON_SERVICE_CATEGORIES } from '../brc/services'
 import { PLAYA_TIME_ZONE, relevantOccurrence } from '../data/events'
 import type { EventItem, Poi } from '../data/types'
+import { ArtAudioGuide } from './ArtAudioGuide'
 
 interface Props {
   poi: Poi | undefined
@@ -308,6 +309,8 @@ export function DetailDrawer({
           {missingDescription(poi.kind)}
         </Typography>
       )}
+
+      {poi.kind === 'art' && <ArtAudioGuide uid={poi.uid} />}
 
       {events.length > 0 && (
         <>

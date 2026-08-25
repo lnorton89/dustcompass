@@ -1,3 +1,4 @@
+import { DATA_YEAR } from '../config'
 import type { Position } from '../brc/geo'
 
 export type DirectionsMode = 'walk' | 'bike'
@@ -97,6 +98,7 @@ export function directionsUrl(
   url.search = ''
   url.hash = ''
   url.searchParams.set('dir', VERSION)
+  url.searchParams.set('year', String(DATA_YEAR))
   url.searchParams.set('from', encodeEndpoint(intent.from))
   url.searchParams.set('to', encodeEndpoint(intent.to))
   url.searchParams.set('mode', intent.mode)
@@ -108,6 +110,10 @@ export function readDirectionsIntent(
 ): DirectionsIntent | undefined {
   const params = new URLSearchParams(search)
   if (params.get('dir') !== VERSION) return undefined
+  // Annual POI identities and street geometry are not portable between BRC
+  // surveys. Refuse a route for another data year instead of silently opening
+  // its names/coordinates against the wrong city plan.
+  if (params.get('year') !== String(DATA_YEAR)) return undefined
 
   const from = decodeEndpoint(params.get('from'))
   const to = decodeEndpoint(params.get('to'))

@@ -1,0 +1,25 @@
+name: Apply geocoder 108 fix
+on:
+  push:
+    branches: [fix/issues-107-114]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[geocode-108-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/issues-107-114
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node scripts/patch-geocode-108.mjs
+      - run: |
+          rm scripts/patch-geocode-108.mjs
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix: repair open-playa parser guard [geocode-108-applied]"
+          git push origin HEAD:fix/issues-107-114

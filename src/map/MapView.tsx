@@ -260,7 +260,10 @@ export function MapView({
       // listener on the container. The original target is authoritative: a
       // click on the dropped marker belongs to that marker, never to a POI
       // rendered under the same pixel.
-      if (isInteractiveMapMarkerTarget(event.originalEvent.target)) return
+      if (isInteractiveMapMarkerTarget(event.originalEvent.target)) {
+        onPinClick?.()
+        return
+      }
       if (pin && isDroppedMarkerHit(event.point, event.target.project(pin.position))) {
         onPinClick?.()
         return

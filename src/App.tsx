@@ -429,6 +429,12 @@ export default function App() {
    */
   const acquireEventsLocation = useCallback(() => acquireLocation('events'), [acquireLocation])
   const releaseEventsLocation = useCallback(() => releaseLocation('events'), [releaseLocation])
+  // A terminal denial clears the owner set. Navigation remains logically active,
+  // so Retry must re-establish its claim instead of bypassing owner accounting.
+  const retryNavigationLocation = useCallback(
+    () => acquireLocation('navigation'),
+    [acquireLocation],
+  )
   const [eventsOpen, setEventsOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   /**
@@ -1383,7 +1389,7 @@ export default function App() {
                   accuracy={location.accuracy}
                   approximate={heading.approximate}
                   screenAwake={wakeLock === 'active'}
-                  onRetryLocation={location.start}
+                  onRetryLocation={retryNavigationLocation}
                   onClear={() => {
                     setHeading(undefined)
                     releaseLocation('navigation')
@@ -1626,11 +1632,16 @@ export default function App() {
         open={Boolean(saving)}
         address={saving?.address ?? ''}
         onSave={(name) => {
-          if (saving) savePlace(name, saving.position, saving.address)
+          if (!saving) return
+          const result = savePlace(name, saving.position, saving.address)
           setSaving(undefined)
-          setProbe(`Saved "${name}"`)
-          // Usually done while already moving away from the thing being marked.
-          haptic('confirm')
+          if (result.persisted) {
+            setProbe(`Saved "${name}"`)
+            // Usually done while already moving away from the thing being marked.
+            haptic('confirm')
+          } else {
+            setProbe(`Saved "${name}" for this session only — browser storage is unavailable`)
+          }
         }}
         onClose={() => setSaving(undefined)}
       />
@@ -1653,9 +1664,13 @@ export default function App() {
         onRemovePlace={(id) => {
           const place = places.find((item) => item.id === id)
           if (!place) return
-          removePlace(id)
+          const persisted = removePlace(id)
           setDeletedPlace(place)
-          setProbe(`Removed “${place.name}”`)
+          setProbe(
+            persisted
+              ? `Removed “${place.name}”`
+              : `Removed “${place.name}” for this session only — browser storage is unavailable`,
+          )
         }}
         onFindNearest={findNearest}
         onClose={() => setFiltersOpen(false)}
@@ -1678,9 +1693,14 @@ export default function App() {
           compact={compact}
           savedEvents={savedEvents}
           isEventSaved={isEventSaved}
-          onToggleSaveEvent={(event) =>
-            isEventSaved(event.uid) ? removeSavedEvent(event.uid) : saveEvent(event)
-          }
+          onToggleSaveEvent={(event) => {
+            const persisted = isEventSaved(event.uid)
+              ? removeSavedEvent(event.uid)
+              : saveEvent(event)
+            if (!persisted) {
+              setProbe('Saved-event change is for this session only — browser storage is unavailable')
+            }
+          }}
           onRemoveSavedEvent={removeSavedEvent}
         />
       )}
@@ -1697,8 +1717,12 @@ export default function App() {
           isSaved={Boolean(selectedEvent && isEventSaved(selectedEvent.uid))}
           onToggleSave={() => {
             if (!selectedEvent) return
-            if (isEventSaved(selectedEvent.uid)) removeSavedEvent(selectedEvent.uid)
-            else saveEvent(selectedEvent)
+            const persisted = isEventSaved(selectedEvent.uid)
+              ? removeSavedEvent(selectedEvent.uid)
+              : saveEvent(selectedEvent)
+            if (!persisted) {
+              setProbe('Saved-event change is for this session only — browser storage is unavailable')
+            }
           }}
           onClose={() => setSelectedEvent(undefined)}
           onNavigate={(target) => {
@@ -1722,13 +1746,17 @@ export default function App() {
         message={showingLiveAddress ? liveAddressMessage(liveAddressLabel) : probe}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         action={
-          deletedPlace && probe === `Removed “${deletedPlace.name}”` ? (
+          deletedPlace && probe?.startsWith(`Removed “${deletedPlace.name}”`) ? (
             <Button
               color="secondary"
               size="small"
               onClick={() => {
-                restorePlace(deletedPlace)
-                setProbe(`Restored “${deletedPlace.name}”`)
+                const persisted = restorePlace(deletedPlace)
+                setProbe(
+                  persisted
+                    ? `Restored “${deletedPlace.name}”`
+                    : `Restored “${deletedPlace.name}” for this session only — browser storage is unavailable`,
+                )
                 setDeletedPlace(undefined)
               }}
             >

@@ -5,6 +5,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CityLayout } from '../../brc/layout'
 import type { PlayaRoute } from '../../brc/routing'
+import type { EventItem, Poi } from '../../data/types'
 import { DirectionsPanel } from '../DirectionsPanel'
 
 const layout: CityLayout = {
@@ -55,6 +56,37 @@ describe('DirectionsPanel', () => {
     expect((screen.getByRole('button', { name: 'Share link' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Route card' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Start navigation' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('keeps a selected POI labelled as the POI when event aliases target the same camp', () => {
+    const camp: Poi = {
+      uid: 'camp-1',
+      kind: 'camp',
+      name: 'The Airship',
+      address: '4:30 & D',
+      position: [-119.19, 40.785],
+      positionSource: 'address',
+      accuracyClass: 'derived',
+    }
+    const event: EventItem = {
+      uid: 'event-1',
+      title: 'Taco Tuesday with Microphones',
+      event_id: 1,
+      year: 2026,
+      hosted_by_camp: camp.uid,
+      occurrence_set: [{ start_time: '2026-09-01T12:00:00-07:00', end_time: '2026-09-01T13:00:00-07:00' }],
+    }
+
+    render(
+      <DirectionsPanel
+        {...baseProps}
+        pois={[camp]}
+        events={[event]}
+        from={{ kind: 'poi', uid: camp.uid }}
+      />,
+    )
+
+    expect((screen.getByRole('combobox', { name: 'From' }) as HTMLInputElement).value).toBe('The Airship')
   })
 
   it('makes the selected travel mode the primary ETA and explains routed semantics', () => {

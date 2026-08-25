@@ -51,6 +51,7 @@ describe('DirectionsPanel', () => {
   it('shows the selected From endpoint and keeps incomplete-route actions disabled', () => {
     render(<DirectionsPanel {...baseProps} />)
     expect((screen.getByRole('combobox', { name: 'From' }) as HTMLInputElement).value).toBe('The Man')
+    expect((screen.getByRole('button', { name: 'Swap directions endpoints' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Share link' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Route card' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Start navigation' }) as HTMLButtonElement).disabled).toBe(true)
@@ -76,6 +77,7 @@ describe('DirectionsPanel', () => {
     expect(summary.textContent).not.toContain('4 min')
     expect(summary.textContent).toMatch(/Surveyed street route around occupied blocks/i)
     expect(summary.textContent).toContain('head toward 4:30')
+    expect((screen.getByRole('button', { name: 'Swap directions endpoints' }) as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByRole('button', { name: 'Share link' }) as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByRole('button', { name: 'Route card' }) as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByRole('button', { name: 'Start navigation' }) as HTMLButtonElement).disabled).toBe(false)

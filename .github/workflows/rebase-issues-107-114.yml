@@ -1,0 +1,36 @@
+name: Reapply issues 107-114
+on:
+  push:
+    branches: [fix/issues-107-114-v2]
+permissions:
+  contents: write
+jobs:
+  reapply:
+    if: ${{ !contains(github.event.head_commit.message, '[107-114-rebased]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/issues-107-114-v2
+          fetch-depth: 0
+      - name: Apply final diff from reviewed branch
+        run: |
+          git fetch origin fix/issues-107-114
+          git diff c1e2694f4353d01c3eb895a5ca16387c653561e0 origin/fix/issues-107-114 -- \
+            README.md \
+            scripts/fetch-api.mjs \
+            scripts/lib/__tests__/api.test.mjs \
+            scripts/lib/api.mjs \
+            scripts/lib/atomic-write.mjs \
+            scripts/lib/event-range.mjs \
+            src/App.tsx \
+            src/brc/__tests__/geocode.test.ts \
+            src/brc/geocode.ts > /tmp/issues.patch
+          git apply --3way /tmp/issues.patch
+      - name: Commit rebased fixes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix: address remaining issues 107-114 [107-114-rebased]"
+          git push origin HEAD:fix/issues-107-114-v2

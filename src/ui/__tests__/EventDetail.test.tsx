@@ -178,6 +178,7 @@ if (existsSync(layoutPath)) {
       expect(target.name).toBe('Sunrise Yoga')
       expect(target.address).toBe('D & 3:15')
       expect(target.position).toBeDefined()
+      expect(target.accuracyClass).toBe('surveyed')
     })
 
     it('closes when the close button is pressed', () => {

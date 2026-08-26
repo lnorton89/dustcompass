@@ -724,12 +724,10 @@ assert(
   'saved-spot destination is named on the map',
 )
 
-// #14: the orientation control has to track the map's actual bearing, not
-// just whichever toggle last requested a rotation — a gesture or MapLibre's
-// own compass control can change it independently of that toggle. Driven at
-// a phone-width viewport, since the visible "12:00 up"/"North up" label only
-// renders in the compact bottom bar; the desktop toolbar shows the same
-// state as a hover tooltip, which isn't practical to assert here.
+// #14/#141: the orientation control has to track both the map's actual bearing
+// and the action it will perform next. A gesture or MapLibre's own compass can
+// change bearing independently of React, so current-state text and accessible
+// action text are asserted together at a phone-width viewport.
 {
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 } })
   const orient = await mobile.newPage()
@@ -745,10 +743,14 @@ assert(
   await orient.waitForFunction(() => window.__map, null, { timeout: 30000 })
   await orient.waitForTimeout(3000)
 
-  const orientButton = orient.getByRole('button', { name: 'Orient the map so 12:00 points up' })
+  const orientButton = orient.getByRole('button', {
+    name: /Switch map to North up|Switch map to 12:00 up|Orient map to 12:00 up/,
+  })
   const orientLabel = () => orientButton.innerText()
+  const orientAction = () => orientButton.getAttribute('aria-label')
 
   assert((await orientLabel()).includes('12:00 up'), 'orientation control starts city-up on a fresh load')
+  assert((await orientAction()) === 'Switch map to North up', 'city-up control advertises switching to North up (#141)')
 
   // Rotate the map directly through MapLibre, bypassing every React state
   // setter — this is exactly what the built-in compass control and a
@@ -759,13 +761,15 @@ assert(
     (await orientLabel()).includes('North up'),
     'rotating to north outside React updates the control to North up',
   )
+  assert((await orientAction()) === 'Switch map to 12:00 up', 'north-up control advertises switching to 12:00 up (#141)')
 
   await orient.evaluate(() => window.__map.setBearing(200))
   await orient.waitForTimeout(300)
   assert(
-    !(await orientLabel()).includes('12:00 up') && !(await orientLabel()).includes('North up'),
-    'a manual rotation to neither canonical bearing leaves neither orientation selected',
+    (await orientLabel()).includes('Free rotation'),
+    'a manual rotation to neither canonical bearing reports Free rotation',
   )
+  assert((await orientAction()) === 'Orient map to 12:00 up', 'free-rotation control advertises restoring 12:00 up (#141)')
 
   await orientButton.click()
   await orient.waitForTimeout(700)
@@ -773,23 +777,29 @@ assert(
     (await orientLabel()).includes('12:00 up'),
     'tapping the orientation control still snaps to city-up from a free rotation',
   )
+  assert((await orientAction()) === 'Switch map to North up', 'restored city-up control advertises its next action (#141)')
 
   await mobile.close()
 }
 
-// That URL, opened cold, must restore the same place.
+// #153: active navigation keeps the complete point-to-point intent in the
+// address bar. Opening that URL cold should restore the route itself, not force
+// a single-destination zoom threshold that stopped being the product semantics.
+const activeRouteUrl = page.url()
+assert(new URL(activeRouteUrl).searchParams.get('dir') === '1', 'active navigation keeps a versioned Directions URL (#153)')
 const shared = await context.newPage()
-await shared.goto(page.url(), { waitUntil: 'load' })
+await shared.goto(activeRouteUrl, { waitUntil: 'load' })
 await shared.waitForFunction(() => document.documentElement.dataset.mapReady === 'true', null, {
   timeout: 30000,
 })
 await shared.waitForTimeout(2500)
 const restored = await shared.evaluate(() => ({
-  zoom: window.__map.getZoom(),
   marked: document.querySelectorAll('.maplibregl-marker').length,
+  routeSegments: window.__map.queryRenderedFeatures({ layers: ['route-line'] }).length,
 }))
-assert(restored.marked > 0, `shared link restores the marker (${restored.marked})`)
-assert(restored.zoom > 15, `shared link restores the zoom (${restored.zoom.toFixed(1)})`)
+assert(restored.marked > 0, `active route link restores endpoint markers (${restored.marked})`)
+assert(restored.routeSegments > 0, `active route link restores route geometry (${restored.routeSegments} segment)` )
+assert((await shared.getByTestId('directions-summary').count()) === 1, 'active route URL restores the complete Directions intent (#153)')
 await shared.close()
 
 // A shared listing link goes to a page of its own so it previews as that place.
@@ -1026,6 +1036,7 @@ await shared.close()
           ? Math.max(...points.map(([lng, lat]) => Math.hypot(lng - man[0], lat - man[1])))
           : null,
         readout: document.body.innerText,
+        routeFrom: new URL(window.location.href).searchParams.get('from'),
       }
     }, man)
     await ctx.close()
@@ -1041,20 +1052,20 @@ await shared.close()
   // A degree is about 111km here, so the whole city and the road in fit inside a
   // third of one. San Francisco is four degrees away and unmissable.
   const near = await reachFrom('near fix', { latitude: 40.7772, longitude: -119.1893 })
-  const far = await reachFrom('distant fix', { latitude: 37.7749, longitude: -122.4194 }, false)
+  const far = await reachFrom('distant fix', { latitude: 37.7749, longitude: -122.4194 })
   assert(near.reach != null && near.reach < 0.35, `a fix in the city routes from the fix (${near.reach?.toFixed(3) ?? 'no route'}°)`)
   assert(/toward \d/.test(near.readout), 'a fix in the city gives a bearing to walk')
-  // A live-origin route is deliberately withheld until there is a usable
-  // on-playa fix. The navigation readout may fall back to the Man for context,
-  // but drawing that fallback as if it were the user's path would be misleading.
+  // #138: an unusable/off-playa GPS fix now becomes an explicit fixed Man
+  // origin. The visible line, readout, and serialized route must all agree.
   assert(
-    far.points === 0 && far.reach == null,
-    `a distant fix does not draw a fake route from the Man (${far.points} points)`,
+    far.reach != null && far.reach < 0.35,
+    `a distant fix falls back to a local Man-origin route (${far.reach?.toFixed(3) ?? 'no route'}°)`,
   )
   assert(
     /from the Man/i.test(far.readout),
     'a distant fix says the distance is measured from the Man',
   )
+  assert(far.routeFrom === 'man', `the fallback route serializes From = The Man (#138) (got ${far.routeFrom})`)
 }
 
 /**
@@ -1207,6 +1218,24 @@ await sharedRoute.waitForFunction(() => window.__map, null, { timeout: 30000 })
 await sharedRoute.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
 assert((await sharedRoute.getByTestId('directions-summary').count()) === 1, 'shared Directions URL restores route summary')
 await sharedRoute.close()
+
+// #155: clearing To must clear the serialized route too. A reload must not
+// resurrect the destination the editor visibly removed.
+const clearedRoute = await context.newPage()
+await clearedRoute.goto(routeUrl, { waitUntil: 'load' })
+await clearedRoute.waitForFunction(() => window.__map, null, { timeout: 30000 })
+await clearedRoute.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+const clearedTo = clearedRoute.getByRole('combobox', { name: 'To' })
+await clearedTo.locator('xpath=..').getByLabel('Clear').click()
+await clearedRoute.waitForTimeout(300)
+assert(!new URL(clearedRoute.url()).searchParams.has('to'), 'clearing To removes the stale destination from the URL (#155)')
+assert(!new URL(clearedRoute.url()).searchParams.has('dir'), 'an incomplete Directions editor no longer advertises a complete route (#155)')
+await clearedRoute.reload({ waitUntil: 'load' })
+await clearedRoute.waitForFunction(() => window.__map, null, { timeout: 30000 })
+await clearedRoute.getByRole('button', { name: 'Directions', exact: true }).first().click()
+await clearedRoute.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+assert((await clearedRoute.getByRole('combobox', { name: 'To' }).inputValue()) === '', 'reloading after clearing To does not restore the removed destination (#155)')
+await clearedRoute.close()
 
 await browser.close()
 process.exit(problems.length || process.exitCode ? 1 : 0)

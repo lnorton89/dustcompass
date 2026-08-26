@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PlayaRoute } from '../../brc/routing'
-import { ROUTE_CARD_HEIGHT, ROUTE_CARD_WIDTH, routeCardLayout } from '../routeCard'
+import type { CityLayout } from '../../brc/layout'
+import { ROUTE_CARD_HEIGHT, ROUTE_CARD_WIDTH, routeCardCityGeometry, routeCardLayout } from '../routeCard'
 
 const route: PlayaRoute = {
   kind: 'street',
@@ -49,6 +50,27 @@ describe('route card layout', () => {
     const layout = routeCardLayout(direct)
     expect(layout.routePoints).toHaveLength(2)
     expect(layout.routePoints[0]).not.toEqual(layout.routePoints[1])
+  })
+
+
+  it('projects actual surveyed annular/radial geometry and the Man into the route crop (#135)', () => {
+    const city: CityLayout = {
+      center: { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [-119.2, 40.78] } },
+      bearing: 45, fence_distance: 6000, road_width: 40,
+      cStreets: [{ ref: 'esplanade', name: 'Esplanade', distance: 2500, segments: [['2:00', '10:00']] }],
+      tStreets: [{ refs: ['6:00'], segments: [[0, 'esplanade']] }],
+      plazas: [], portals: [],
+    }
+    const geometry = routeCardCityGeometry(city, route)
+    expect(geometry.annulars).toHaveLength(1)
+    expect(geometry.annulars[0].name).toBe('Esplanade')
+    expect(geometry.annulars[0].points.length).toBeGreaterThan(2)
+    expect(geometry.radials).toHaveLength(1)
+    expect(geometry.radials[0].ref).toBe('6:00')
+    expect(geometry.radials[0].points).toHaveLength(2)
+    expect(Number.isFinite(geometry.man.x)).toBe(true)
+    expect(Number.isFinite(geometry.man.y)).toBe(true)
+    expect(geometry.annulars[0].points).not.toEqual(geometry.radials[0].points)
   })
 
   it('keeps map and text summary in separate non-overlapping regions', () => {

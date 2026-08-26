@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CityLayout } from '../../brc/layout'
 import type { PlayaRoute } from '../../brc/routing'
@@ -13,8 +13,8 @@ const layout: CityLayout = {
   bearing: 45,
   fence_distance: 10000,
   road_width: 40,
-  cStreets: [],
-  tStreets: [],
+  cStreets: [{ ref: 'esplanade', name: 'Esplanade', distance: 2500, segments: [['2:00', '10:00']] }],
+  tStreets: [{ refs: ['7:30'], segments: [[0, 'esplanade']] }],
   plazas: [],
   portals: [],
 }
@@ -87,6 +87,21 @@ describe('DirectionsPanel', () => {
     )
 
     expect((screen.getByRole('combobox', { name: 'From' }) as HTMLInputElement).value).toBe('The Airship')
+  })
+
+  it('offers an event whose other_location is a conservatively geocoded playa address (#136)', async () => {
+    const event: EventItem = {
+      uid: 'event-other-location',
+      title: 'Open Playa Meetup',
+      event_id: 2,
+      year: 2026,
+      other_location: '7:30 & Esplanade',
+      occurrence_set: [{ start_time: '2026-09-01T12:00:00-07:00', end_time: '2026-09-01T13:00:00-07:00' }],
+    }
+    render(<DirectionsPanel {...baseProps} events={[event]} />)
+    const to = screen.getByRole('combobox', { name: 'To' })
+    fireEvent.change(to, { target: { value: event.title } })
+    expect(await screen.findByRole('option', { name: /Open Playa Meetup/i })).toBeDefined()
   })
 
   it('refreshes visible endpoint labels when From and To are swapped programmatically', () => {

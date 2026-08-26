@@ -114,10 +114,47 @@ const LIVE_POINTER_BUILD_URL = self.location.origin + '/__dust-compass-live-revi
 // attempt timestamp beside the live pointer, stamped with this build so a
 // new worker version never inherits an old build's backoff accidentally.
 const LIVE_REFRESH_META_URL = self.location.origin + '/__dust-compass-live-refresh-meta';
+// Exact fingerprints of the bytes this worker originally installed. Repairing
+// an old content-hashed cache from today's mutable Pages URLs is only safe when
+// the fetched bytes are identical to that original generation (#159).
+const PRECACHE_INTEGRITY_URL = self.location.origin + '/__dust-compass-precache-integrity';
 
 async function notify(message) {
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
   for (const client of windows) client.postMessage(message);
+}
+
+// A small deterministic fallback is retained for test/non-WebCrypto runtimes;
+// real service workers run in a secure context and additionally record SHA-256.
+function fallbackFingerprint(bytes) {
+  let a = 2166136261;
+  let b = 0x9e3779b9;
+  for (const byte of bytes) {
+    a ^= byte;
+    a = Math.imul(a, 16777619) >>> 0;
+    b = Math.imul((b ^ byte) >>> 0, 2246822519) >>> 0;
+  }
+  return bytes.length + ':' + a.toString(16) + ':' + b.toString(16);
+}
+
+async function responseFingerprint(response) {
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const fallback = fallbackFingerprint(bytes);
+  let sha256 = null;
+  if (globalThis.crypto && globalThis.crypto.subtle) {
+    const hash = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes));
+    sha256 = Array.from(hash, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+  return { fallback, sha256 };
+}
+
+function fingerprintsMatch(expected, actual) {
+  if (!expected || expected.fallback !== actual.fallback) return false;
+  // Production has Web Crypto. When both sides carry SHA-256, require it too;
+  // the fallback exists so the generated-worker VM tests can execute the same
+  // control flow in a runtime that deliberately does not expose crypto.subtle.
+  if (expected.sha256 && actual.sha256) return expected.sha256 === actual.sha256;
+  return true;
 }
 
 // A precache that gives up on the first hiccup is the failure mode that matters
@@ -131,10 +168,13 @@ const PARALLEL = 6;
 // the install until the browser kills the worker, which looks like progress.
 const REQUEST_TIMEOUT_MS = 20000;
 
-async function store(cache, url) {
+async function store(cache, url, expectedFingerprint) {
   // The cache name is a content hash of the build, so anything already in it is
-  // provably the right bytes. Retrying an install must not re-download 8MB.
-  if (await cache.match(url)) return;
+  // the byte generation this worker installed. Return its fingerprint so a
+  // retried/reinstalled worker can rebuild the integrity record without any
+  // network request.
+  const existing = await cache.match(url);
+  if (existing) return responseFingerprint(existing);
   let failure;
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 300 * Math.pow(2, attempt - 1)));
@@ -144,8 +184,12 @@ async function store(cache, url) {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       }));
       if (!response.ok) throw new Error('HTTP ' + response.status);
+      const fingerprint = await responseFingerprint(response.clone());
+      if (expectedFingerprint && !fingerprintsMatch(expectedFingerprint, fingerprint)) {
+        throw new Error('Build fingerprint mismatch for ' + url);
+      }
       await cache.put(url, response);
-      return;
+      return fingerprint;
     } catch (error) {
       failure = error;
     }
@@ -168,6 +212,7 @@ self.addEventListener('install', (event) => {
     try {
       const cache = await caches.open(CACHE_NAME);
       const queue = PRECACHE.slice();
+      const fingerprints = {};
       let failed = null;
 
       // Install still fails as a whole if anything is unreachable. A partial
@@ -176,7 +221,7 @@ self.addEventListener('install', (event) => {
         while (queue.length > 0 && failed === null) {
           const url = queue.shift();
           try {
-            await store(cache, url);
+            fingerprints[url] = await store(cache, url);
           } catch (error) {
             failed = { url: url, reason: String((error && error.message) || error) };
             return;
@@ -188,6 +233,11 @@ self.addEventListener('install', (event) => {
 
       await Promise.all(Array.from({ length: Math.min(PARALLEL, queue.length) }, drain));
       if (failed !== null) throw new Error('Could not cache ' + failed.url + ': ' + failed.reason);
+      if (!PRECACHE.every((url) => fingerprints[url])) throw new Error('Could not fingerprint complete precache');
+      await cache.put(
+        PRECACHE_INTEGRITY_URL,
+        new Response(JSON.stringify({ cacheName: CACHE_NAME, fingerprints })),
+      );
     } catch (error) {
       // Every failure path reports. caches.open itself throws when storage is
       // already full, and that used to leave the chip saying "Preparing
@@ -273,13 +323,11 @@ self.addEventListener('message', (event) => {
  * up until the moment a real offline launch failed to load something the UI
  * had promised was saved (#58).
  *
- * Verifies every expected PRECACHE key is actually present in this exact
- * build's cache and, if any are missing, repairs it the same way install()
- * built it in the first place — reporting through the same CACHE_PROGRESS/
- * CACHE_FAILED/OFFLINE_READY messages the page already listens for, so a
- * fully intact cache reaches Ready with nothing more than a handful of
- * cheap existence checks, and only a genuinely incomplete one pays for a
- * re-download.
+ * A repair fetch happens long after install and stable Pages URLs may now name
+ * a newer deployment. The integrity record written during install is therefore
+ * the trust boundary: repair may restore only byte-identical entries from the
+ * same installed generation, never current-server bytes from another build
+ * (#159).
  */
 async function verifyAndRepairPrecache() {
   const cache = await caches.open(CACHE_NAME);
@@ -294,8 +342,16 @@ async function verifyAndRepairPrecache() {
   let completed = PRECACHE.length - missing.length;
   await notify({ type: 'CACHE_PROGRESS', completed, total: PRECACHE.length });
   try {
+    const integrityResponse = await cache.match(PRECACHE_INTEGRITY_URL);
+    if (!integrityResponse) throw new Error('Offline cache integrity record is missing');
+    const integrity = await integrityResponse.json();
+    if (integrity?.cacheName !== CACHE_NAME || !integrity?.fingerprints) {
+      throw new Error('Offline cache integrity record is invalid');
+    }
     for (const url of missing) {
-      await store(cache, url);
+      const expected = integrity.fingerprints[url];
+      if (!expected) throw new Error('No installed fingerprint for ' + url);
+      await store(cache, url, expected);
       completed += 1;
       await notify({ type: 'CACHE_PROGRESS', completed, total: PRECACHE.length });
     }

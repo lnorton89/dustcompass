@@ -30,7 +30,11 @@ export function useGeolocation(): Geolocation {
       navigator.geolocation.clearWatch(watchId.current)
       watchId.current = undefined
     }
-    setStatus((current) => (current === 'tracking' || current === 'locating' ? 'idle' : current))
+    setStatus((current) =>
+      current === 'tracking' || current === 'locating' || current === 'unavailable'
+        ? 'idle'
+        : current,
+    )
     clearFix()
   }, [clearFix])
 
@@ -59,8 +63,13 @@ export function useGeolocation(): Geolocation {
       },
       (error) => {
         if (error.code !== error.PERMISSION_DENIED) {
+          // Keep the watch alive so a later callback can recover (#82), but
+          // expose the current request failure instead of pretending acquisition
+          // is still making progress forever. Consumers such as Directions can
+          // fall back immediately while navigation may keep the same recoverable
+          // watch running (#143).
           clearFix()
-          setStatus('locating')
+          setStatus('unavailable')
           return
         }
         if (watchId.current !== undefined) {

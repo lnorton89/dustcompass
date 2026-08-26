@@ -62,7 +62,7 @@ import { travelForMeters } from './brc/travel'
 import { routeBetween } from './brc/routing'
 import { bearingToClock, bearingBetween, bearingsMatch, distanceBetween, isNearCity } from './brc/geo'
 import { shareLink } from './ui/share'
-import type { EventItem, Poi, PoiKind, UnplacedListing } from './data/types'
+import type { EventItem, Poi, PoiKind, PositionAccuracy, UnplacedListing } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
 import {
@@ -83,8 +83,9 @@ import { DirectionsPanel } from './ui/DirectionsPanel'
 import {
   defaultDirectionsOrigin,
   directionsUrl,
-  readDirectionsIntent,
+  readDirectionsResult,
   type DirectionsEndpoint,
+  type DirectionsReadResult,
   type DirectionsMode,
 } from './data/directions'
 import { resolveDirectionsRoute } from './data/directionsRuntime'
@@ -354,6 +355,11 @@ export default function App() {
   // that lands somewhere else — claiming one anyway is exactly the bug this
   // exists to fix.
   const orientationLabel = cityUp ? '12:00 up' : northUp ? 'North up' : 'Free rotation'
+  const orientationActionLabel = cityUp
+    ? 'Switch map to North up'
+    : northUp
+      ? 'Switch map to 12:00 up'
+      : 'Orient map to 12:00 up'
   /**
    * "I cannot read this" is a real complaint out there and it has nothing to do
    * with eyesight: full sun, a screen under a week of dust, and reading glasses
@@ -466,10 +472,11 @@ export default function App() {
   const releaseEventsLocation = useCallback(() => releaseLocation('events'), [releaseLocation])
   // A terminal denial clears the owner set. Navigation remains logically active,
   // so Retry must re-establish its claim instead of bypassing owner accounting.
-  const retryNavigationLocation = useCallback(
-    () => acquireLocation('navigation'),
-    [acquireLocation],
-  )
+  const [navigationRetrying, setNavigationRetrying] = useState(false)
+  const retryNavigationLocation = useCallback(() => {
+    setNavigationRetrying(true)
+    acquireLocation('navigation')
+  }, [acquireLocation])
   const [eventsOpen, setEventsOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   // The large source/non-affiliation disclosure is useful once and costly on a
@@ -579,15 +586,23 @@ export default function App() {
     position: Position
     address?: string
     approximate?: boolean
+    /** Keep published best-effort POI provenance visible during navigation/share (#137). */
+    destinationAccuracy?: PositionAccuracy
     /** Present when heading to a listed camp/art piece, so the URL can name it. */
     uid?: string
     /** Fixed planning origins stay fixed; live origins continue following GPS. */
     origin?: Position
     originLabel?: string
     liveOrigin?: boolean
+    /** A failed one-tap GPS origin may deliberately be retried from the fixed Man fallback. */
+    retryableOrigin?: boolean
     mode?: DirectionsMode
+    routeFrom?: DirectionsEndpoint
+    routeTo?: DirectionsEndpoint
   }>()
-  const [initialDirections] = useState(() => readDirectionsIntent())
+  const [initialDirectionsResult] = useState(() => readDirectionsResult())
+  const initialDirections = initialDirectionsResult.status === 'resolved' ? initialDirectionsResult.intent : undefined
+  const [directionsLinkError, setDirectionsLinkError] = useState<DirectionsReadResult | undefined>(() => initialDirectionsResult.status !== 'none' && initialDirectionsResult.status !== 'resolved' ? initialDirectionsResult : undefined)
   const [directionsOpen, setDirectionsOpen] = useState(() => Boolean(initialDirections))
   const [directionsFrom, setDirectionsFrom] = useState<DirectionsEndpoint>(
     () => initialDirections?.from ?? { kind: 'man' },
@@ -598,6 +613,15 @@ export default function App() {
   const [directionsMode, setDirectionsMode] = useState<DirectionsMode>(
     () => initialDirections?.mode ?? 'walk',
   )
+  // Directions owns the shared GPS watch whenever either endpoint is live.
+  // Deriving this from the complete route state prevents swaps/restored links
+  // from accidentally releasing a watch that the opposite endpoint still needs (#145).
+  const directionsNeedsLocation = directionsOpen &&
+    (directionsFrom.kind === 'live' || directionsTo?.kind === 'live')
+  useEffect(() => {
+    if (directionsNeedsLocation) acquireLocation('directions')
+    else releaseLocation('directions')
+  }, [acquireLocation, directionsNeedsLocation, releaseLocation])
 
   // "On now" has to stay true as time passes, or the panel quietly lies.
   useEffect(() => {
@@ -636,6 +660,7 @@ export default function App() {
       if (event.key === 'Escape') {
         // Whatever is open, innermost first, so one key walks back out.
         if (saving) return
+        if (directionsOpen) { setDirectionsOpen(false); return }
         if (eventsOpen) setEventsOpen(false)
         else if (filtersOpen) setFiltersOpen(false)
         else if (selected) setSelected(undefined)
@@ -657,7 +682,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [eventsOpen, filtersOpen, heading, releaseLocation, saving, selected])
+  }, [directionsOpen, eventsOpen, filtersOpen, heading, releaseLocation, saving, selected])
 
   /**
    * A shared link names either a listing or an address. Resolve it to a
@@ -734,12 +759,17 @@ export default function App() {
     // publishing here would erase the very link the notice is about before
     // the reader has done anything with it. Dismissing the notice clears
     // `staleLink` and lets this effect resume normally on the next run.
-    if (staleLink) return
+    if (staleLink || directionsLinkError) return
     // Directions owns the query string while its editor is open. A separate
     // effect below mirrors the complete versioned route intent; letting the
     // legacy POI/pin publisher run here would erase `dir/from/to/mode` from a
     // cold shared route before the reader could act on it.
     if (directionsOpen) return
+    if (heading?.routeFrom && heading.routeTo) {
+      const next = directionsUrl({ version: 1, from: heading.routeFrom, to: heading.routeTo, mode: heading.mode ?? directionsMode })
+      if (next !== window.location.href) window.history.replaceState(null, '', next)
+      return
+    }
     if (selected) publish({ poi: selected.uid })
     else if (unplaced) publish({ poi: unplaced.uid })
     // The active navigation destination outranks a leftover dropped pin —
@@ -767,11 +797,23 @@ export default function App() {
     linkKey,
     restoredLink,
     staleLink,
+    directionsLinkError,
     directionsOpen,
+    directionsMode,
   ])
 
   useEffect(() => {
-    if (!directionsOpen || !directionsTo) return
+    if (!directionsOpen) return
+    if (!directionsTo) {
+      // #155: an incomplete editor must not leave a previously complete route
+      // serialized in the address bar. Otherwise clearing To is undone by a
+      // reload/share of the stale URL.
+      const next = new URL(window.location.href)
+      next.search = ''
+      next.hash = ''
+      if (next.toString() !== window.location.href) window.history.replaceState(null, '', next)
+      return
+    }
     const next = directionsUrl({
       version: 1,
       from: directionsFrom,
@@ -804,43 +846,29 @@ export default function App() {
    */
   const usableFix = here && data && isNearCity(data.layout, here) ? here : undefined
   const openDirections = useCallback(() => {
-    if (usableFix) {
+    if (usableFix || location.status === 'idle' || location.status === 'locating') {
       setDirectionsFrom({ kind: 'live' })
-    } else if (location.status === 'idle' || location.status === 'locating') {
-      setDirectionsFrom({ kind: 'live' })
-      acquireLocation('directions')
     } else {
       setDirectionsFrom({ kind: 'man' })
-      releaseLocation('directions')
     }
     setDirectionsOpen(true)
-  }, [acquireLocation, location.status, releaseLocation, usableFix])
+  }, [location.status, usableFix])
 
   const closeDirections = useCallback(() => {
     setDirectionsOpen(false)
-    releaseLocation('directions')
-  }, [releaseLocation])
+  }, [])
 
   const changeDirectionsFrom = useCallback((endpoint: DirectionsEndpoint) => {
     setDirectionsFrom(endpoint)
-    if (endpoint.kind === 'live') acquireLocation('directions')
-    else releaseLocation('directions')
-  }, [acquireLocation, releaseLocation])
+  }, [])
 
   useEffect(() => {
     if (!directionsOpen || directionsFrom.kind !== 'live' || usableFix) return
-    if (location.status === 'idle') {
-      acquireLocation('directions')
-      return
-    }
     const outsideCity = location.status === 'tracking' && Boolean(here)
-    if (location.status === 'denied' || location.status === 'unavailable' || outsideCity) {
-      queueMicrotask(() => {
-        setDirectionsFrom({ kind: 'man' })
-        releaseLocation('directions')
-      })
-    }
-  }, [acquireLocation, directionsFrom.kind, directionsOpen, here, location.status, releaseLocation, usableFix])
+    if (!locationWatchHasFailed(location.status) && !outsideCity) return
+    const id = requestAnimationFrame(() => setDirectionsFrom({ kind: 'man' }))
+    return () => cancelAnimationFrame(id)
+  }, [directionsFrom.kind, directionsOpen, here, location.status, usableFix])
   /**
    * What the map owes the reader about art, if anything.
    *
@@ -905,6 +933,39 @@ export default function App() {
     }
   }, [data, directionsFrom, directionsTo, usableFix])
 
+  // While a refreshed POI is being reconciled, arrival must not evaluate the
+  // obsolete coordinate from the previous dataset for one more effect pass.
+  const destinationRefreshPending = useRef(false)
+  useEffect(() => {
+    if (!heading?.uid || !data) {
+      destinationRefreshPending.current = false
+      return
+    }
+    const latest = data.pois.find((poi) => poi.uid === heading.uid)
+    if (!latest) {
+      destinationRefreshPending.current = true
+      const id = requestAnimationFrame(() => {
+        setProbe('This navigation destination is no longer in the current map.')
+        setHeading(undefined)
+        destinationRefreshPending.current = false
+        releaseLocation('navigation')
+      })
+      return () => cancelAnimationFrame(id)
+    }
+    if (latest.position[0] === heading.position[0] && latest.position[1] === heading.position[1] && latest.name === heading.name && latest.address === heading.address && latest.accuracyClass === heading.destinationAccuracy) {
+      destinationRefreshPending.current = false
+      return
+    }
+    // #152: reset the one-shot arrival latch as soon as the authoritative POI
+    // moves, and suppress arrival until heading.position has caught up.
+    destinationRefreshPending.current = true
+    const id = requestAnimationFrame(() => {
+      setHeading((current) => current?.uid === latest.uid ? { ...current, name: latest.name, position: latest.position, address: latest.address, approximate: latest.accuracyClass === 'derived', destinationAccuracy: latest.accuracyClass } : current)
+      destinationRefreshPending.current = false
+    })
+    return () => cancelAnimationFrame(id)
+  }, [data, heading?.address, heading?.destinationAccuracy, heading?.name, heading?.position, heading?.uid, releaseLocation])
+
   const navigation = useMemo(() => {
     if (!heading || !origin || !data) return undefined
     const route = routeBetween(data.layout, origin, heading.position)
@@ -939,9 +1000,11 @@ export default function App() {
    * distance counting down, and it is the buzz that carries the news to someone
    * whose phone is in a pocket.
    */
-  const arrived = useRef(false)
+  const arrived = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (!navigation || arrived.current) return
+    if (!navigation || !heading || destinationRefreshPending.current) return
+    const arrivalKey = `${heading.position[0]},${heading.position[1]}`
+    if (arrived.current === arrivalKey) return
     // `origin` falls back to the Man's own coordinates until a real,
     // in-city GPS fix exists, and `navigation.travel` is computed from
     // `origin` — not from the raw fix. Gating on `here` (any fix at all,
@@ -966,7 +1029,7 @@ export default function App() {
         location.accuracy,
       )
     ) return
-    arrived.current = true
+    arrived.current = arrivalKey
     haptic('arrive')
   }, [navigation, heading, usableFix, location.accuracy])
 
@@ -1001,6 +1064,71 @@ export default function App() {
 
   const framedNavigationFor = useRef<string | undefined>(undefined)
 
+  // A one-tap live route becomes a real fixed Man route when the current
+  // GPS attempt fails. Geometry, editable intent, label and camera all
+  // transition together instead of silently calculating from the Man while
+  // the route still claims `Your location` (#138/#143).
+  useEffect(() => {
+    if (!heading?.liveOrigin || usableFix || !data || !manPosition) return
+    const outsideCity = location.status === 'tracking' && Boolean(here)
+    if (!locationWatchHasFailed(location.status) && !outsideCity) return
+    const id = requestAnimationFrame(() => {
+      setDirectionsFrom({ kind: 'man' })
+      setNavigationRetrying(false)
+      setHeading((current) => current?.liveOrigin ? {
+        ...current,
+        origin: manPosition,
+        originLabel: 'The Man',
+        liveOrigin: false,
+        retryableOrigin: true,
+        routeFrom: { kind: 'man' },
+      } : current)
+      releaseLocation('navigation')
+      const routed = routeBetween(data.layout, manPosition, heading.position)
+      mapRef.current?.fitBounds(boundsOfPositions(routed.coordinates), {
+        padding: navigationPadding(), duration: 0, maxZoom: 16.5,
+      })
+      framedNavigationFor.current = `${heading.position[0]},${heading.position[1]}`
+    })
+    return () => cancelAnimationFrame(id)
+  }, [data, heading, here, location.status, manPosition, navigationPadding, releaseLocation, usableFix])
+
+  useEffect(() => {
+    if (!navigationRetrying || !heading || !usableFix || !data) return
+    const id = requestAnimationFrame(() => {
+      setDirectionsFrom({ kind: 'live' })
+      setHeading((current) => current ? {
+        ...current,
+        origin: undefined,
+        originLabel: 'Your location',
+        liveOrigin: true,
+        retryableOrigin: true,
+        routeFrom: { kind: 'live' },
+      } : current)
+      setNavigationRetrying(false)
+      const routed = routeBetween(data.layout, usableFix, heading.position)
+      mapRef.current?.fitBounds(boundsOfPositions(routed.coordinates), {
+        padding: navigationPadding(), duration: 0, maxZoom: 16.5,
+      })
+      framedNavigationFor.current = `${heading.position[0]},${heading.position[1]}`
+    })
+    return () => cancelAnimationFrame(id)
+  }, [data, heading, navigationPadding, navigationRetrying, usableFix])
+
+  useEffect(() => {
+    if (!navigationRetrying) return
+    // A successful browser fix can still be unusable for a BRC route. Treat
+    // that as a completed retry too; otherwise an off-playa fix leaves the
+    // retry watch running indefinitely while the route correctly stays at Man.
+    const outsideCity = location.status === 'tracking' && Boolean(here) && !usableFix
+    if (!locationWatchHasFailed(location.status) && !outsideCity) return
+    const id = requestAnimationFrame(() => {
+      setNavigationRetrying(false)
+      releaseLocation('navigation')
+    })
+    return () => cancelAnimationFrame(id)
+  }, [here, location.status, navigationRetrying, releaseLocation, usableFix])
+
   const startDirections = useCallback(() => {
     if (!data || !directionsTo) return
     const route = resolveDirectionsRoute(directionsFrom, directionsTo, {
@@ -1021,18 +1149,25 @@ export default function App() {
       name: route.to.label,
       position: route.to.position,
       address: route.to.detail,
-      approximate: route.to.endpoint.kind === 'address',
+      approximate: route.to.accuracy === 'approximate',
+      destinationAccuracy: route.to.accuracy === 'published' ? 'published' : route.to.accuracy === 'approximate' ? 'derived' : 'surveyed',
       uid: route.to.endpoint.kind === 'poi' ? route.to.endpoint.uid : undefined,
       origin: route.from.dynamic ? undefined : route.from.position,
       originLabel: route.from.label,
       liveOrigin: route.from.dynamic,
+      retryableOrigin: route.from.dynamic,
       mode: directionsMode,
+      routeFrom: directionsFrom,
+      routeTo: directionsTo,
     })
-    arrived.current = false
+    arrived.current = undefined
     setSelected(undefined)
     setPin(undefined)
+    // Add navigation ownership before closing Directions. The derived Directions
+    // owner then releases without ever dropping the only GPS owner (#142).
+    if (route.from.dynamic) acquireLocation('navigation')
+    else releaseLocation('navigation')
     setDirectionsOpen(false)
-    releaseLocation('directions')
     const routed = routeBetween(data.layout, route.from.position, route.to.position)
     mapRef.current?.fitBounds(boundsOfPositions(routed.coordinates), {
       padding: navigationPadding(),
@@ -1040,8 +1175,6 @@ export default function App() {
       maxZoom: 16.5,
     })
     framedNavigationFor.current = `${route.to.position[0]},${route.to.position[1]}`
-    if (route.from.dynamic) acquireLocation('navigation')
-    else releaseLocation('navigation')
   }, [
     acquireLocation,
     data,
@@ -1064,7 +1197,7 @@ export default function App() {
   }, [directionsFrom, directionsMode, directionsTo])
 
   const shareDirectionsImage = useCallback(async () => {
-    if (!directionsPreview) return
+    if (!directionsPreview || !data) return
     try {
       const result = await shareRouteCard({
         fromLabel: directionsPreview.resolved.from.label,
@@ -1073,22 +1206,23 @@ export default function App() {
         route: directionsPreview.route,
         mode: directionsMode,
         heading: directionsPreview.heading,
-        approximate: directionsPreview.resolved.to.endpoint.kind === 'address',
+        approximate: directionsPreview.resolved.to.accuracy === 'approximate',
+        published: directionsPreview.resolved.to.accuracy === 'published',
+        layout: data.layout,
       })
+      if (result === 'cancelled') return
       setProbe(result === 'shared' ? 'Route card shared' : result === 'copied' ? 'Route card copied' : 'Route card downloaded')
     } catch {
       setProbe('Could not create the route card')
     }
-  }, [directionsMode, directionsPreview])
+  }, [data, directionsMode, directionsPreview])
 
   const swapDirections = useCallback(() => {
     if (!directionsTo) return
     const previousFrom = directionsFrom
     setDirectionsFrom(directionsTo)
     setDirectionsTo(previousFrom)
-    if (directionsTo.kind === 'live') acquireLocation('directions')
-    else releaseLocation('directions')
-  }, [acquireLocation, directionsFrom, directionsTo, releaseLocation])
+  }, [directionsFrom, directionsTo])
 
   const navigateTo = useCallback(
     (target: {
@@ -1096,6 +1230,7 @@ export default function App() {
       position: Position
       address?: string
       positionSource?: 'gps' | 'address'
+      accuracyClass?: PositionAccuracy
       uid?: string
     }) => {
       const routeOrigin = defaultDirectionsOrigin(
@@ -1114,12 +1249,16 @@ export default function App() {
         name: target.name,
         position: target.position,
         address: target.address,
-        approximate: target.positionSource === 'address',
+        approximate: target.accuracyClass === 'derived' || (!target.accuracyClass && target.positionSource === 'address'),
+        destinationAccuracy: target.accuracyClass,
         uid: target.uid,
         liveOrigin: routeOrigin.kind === 'live',
+        retryableOrigin: true,
         mode: directionsMode,
+        routeFrom: routeOrigin,
+        routeTo: target.uid ? { kind: 'poi', uid: target.uid } : target.address ? { kind: 'address', address: target.address, position: target.position } : { kind: 'fixed', label: target.name, position: target.position },
       })
-      arrived.current = false
+      arrived.current = undefined
       setSelected(undefined)
       // An earlier dropped pin is unrelated to this destination — leaving it
       // behind meant it could out-rank the new heading in the URL-mirroring
@@ -1148,6 +1287,14 @@ export default function App() {
           maxZoom: 16.5,
         })
         framedNavigationFor.current = `${target.position[0]},${target.position[1]}`
+      } else if (routeOrigin.kind === 'man' && data && manPosition) {
+        const routed = routeBetween(data.layout, manPosition, target.position)
+        mapRef.current?.fitBounds(boundsOfPositions(routed.coordinates), {
+          padding: navigationPadding(),
+          duration: 900,
+          maxZoom: 16.5,
+        })
+        framedNavigationFor.current = `${target.position[0]},${target.position[1]}`
       } else {
         mapRef.current?.flyTo({
           center: target.position,
@@ -1160,7 +1307,7 @@ export default function App() {
       if (routeOrigin.kind === 'live') acquireLocation('navigation')
       else releaseLocation('navigation')
     },
-    [acquireLocation, directionsMode, location.status, navigationPadding, releaseLocation, usableFix],
+    [acquireLocation, data, directionsMode, location.status, manPosition, navigationPadding, releaseLocation, usableFix],
   )
 
   useEffect(() => {
@@ -1208,8 +1355,7 @@ export default function App() {
 
   const editCurrentRoute = useCallback(() => {
     setDirectionsOpen(true)
-    if (directionsFrom.kind === 'live') acquireLocation('directions')
-  }, [acquireLocation, directionsFrom.kind])
+  }, [])
 
   const flyTo = useCallback(
     (position: Position, poi?: Poi) => {
@@ -1513,7 +1659,7 @@ export default function App() {
                     />
                     <ControlButton
                       icon={<ExploreIcon />}
-                      title="Orient the map so 12:00 points up"
+                      title={orientationActionLabel}
                       tooltip={orientationLabel}
                       selected={cityUp}
                       pressed={cityUp}
@@ -1649,13 +1795,9 @@ export default function App() {
                 // actually draws it (not `here` directly): a fix nowhere near
                 // the city still resolves to the Man, same as the distance
                 // readout, rather than a route line running off the map.
-                route={
-                  heading
-                    ? (heading.liveOrigin && !usableFix ? undefined : navigation?.route)
-                    : directionsOpen ? directionsPreview?.route : undefined
-                }
-                routeStart={!heading && directionsOpen ? directionsPreview?.resolved.from.position : undefined}
-                routeEnd={!heading && directionsOpen ? directionsPreview?.resolved.to.position : undefined}
+                route={directionsOpen ? directionsPreview?.route : heading ? navigation?.route : undefined}
+                routeStart={directionsOpen ? directionsPreview?.resolved.from.position : undefined}
+                routeEnd={directionsOpen ? directionsPreview?.resolved.to.position : undefined}
                 selected={selected}
                 destination={heading}
               />
@@ -1740,12 +1882,14 @@ export default function App() {
                   palette={palette}
                   located={Boolean(heading.liveOrigin && usableFix)}
                   liveOrigin={Boolean(heading.liveOrigin)}
+                  retryableOrigin={Boolean(heading.retryableOrigin)}
                   fromLabel={originLabel}
                   mode={heading.mode ?? directionsMode}
                   routeKind={navigation.route.kind}
                   status={location.status}
                   accuracy={location.accuracy}
                   approximate={heading.approximate}
+                  published={heading.destinationAccuracy === 'published'}
                   screenAwake={wakeLock === 'active'}
                   onRetryLocation={retryNavigationLocation}
                   onEdit={editCurrentRoute}
@@ -1849,6 +1993,16 @@ export default function App() {
                     <Button size="small" color="warning" onClick={retry}>
                       Retry
                     </Button>
+                  </Paper>
+                )}
+                {directionsLinkError && (
+                  <Paper elevation={0} sx={{ display: 'flex', alignItems: 'center', gap: 1, pl: 1.25, pr: 0.5, py: 0.25, border: '1px solid', borderColor: 'divider' }}>
+                    <LinkOffIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+                    <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
+                      {directionsLinkError.status === 'wrong-year' ? `These directions are for ${directionsLinkError.year ?? 'another data year'} and cannot be applied to the ${DATA_YEAR} map.` : directionsLinkError.status === 'unsupported-version' ? 'This directions link uses a route format this version of Dust Compass does not support.' : 'This directions link is incomplete or malformed.'}
+                    </Typography>
+                    <Button size="small" onClick={() => { setDirectionsLinkError(undefined); setDirectionsOpen(true) }}>Plan new route</Button>
+                    <Button size="small" onClick={() => setDirectionsLinkError(undefined)}>Show map</Button>
                   </Paper>
                 )}
                 {staleLink && (
@@ -1971,7 +2125,7 @@ export default function App() {
               {
                 key: 'orient',
                 label: orientationLabel,
-                title: 'Orient the map so 12:00 points up',
+                title: orientationActionLabel,
                 icon: <ExploreIcon />,
                 selected: cityUp,
                 pressed: cityUp,

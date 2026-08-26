@@ -33,10 +33,6 @@ jobs:
         run: npm run fetch-data -- 2026
 
       - name: Fetch 2026 listings
-        # 2026 listings are only available from the keyed API. Add the key as a
-        # repository secret (Settings -> Secrets and variables -> Actions ->
-        # BURNING_MAN_API_KEY); the fetcher enforces the location embargo before
-        # anything is written, so nothing under embargo reaches the build.
         env:
           BURNING_MAN_API_KEY: ${{ secrets.BURNING_MAN_API_KEY }}
         run: npm run fetch-api -- 2026
@@ -53,11 +49,6 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      # Next.js's own incremental build cache — without this every run
-      # recompiles from nothing, which is what the build step's own "No build
-      # cache found" warning was pointing at. Keyed on the lockfile plus every
-      # source file, so a dependency bump or any code change still gets a
-      # correct (if partial-hit) cache rather than a stale one.
       - uses: actions/cache@v6
         with:
           path: .next/cache
@@ -65,32 +56,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-
 
-      # No NEXT_PUBLIC_E2E flag: `window.__map` (the test-only map handle the
-      # browser suites drive) is gated on a runtime flag a test harness sets
-      # via `page.addInitScript()`, not a build-time env var (see MapView.tsx
-      # and issue #68) — so this build is the same artifact in every
-      # environment, including the one deploy.yml publishes.
       - name: Build
         env:
           NEXT_PUBLIC_BASE_PATH: /dustcompass
           NEXT_PUBLIC_DATA_YEAR: '2026'
         run: npm run build
 
-      # Each browser-test suite below is its own step (rather than one shell
-      # block running all four in sequence) so that a failing test:smoke does
-      # not stop test:a11y/test:ui/test:offline from also running and
-      # reporting their own pass/fail in the Actions UI. GitHub Actions runs
-      # every `run:` block under `bash -e`, which used to abort the whole
-      # block at the first non-zero exit — that let real, unrelated bugs in
-      # the later scripts (a broken theme switch, an undersized touch target)
-      # sit invisible behind an earlier failure.
-      #
-      # Splitting into steps was not enough on its own (issue #70): a bare
-      # `steps.start-server.outcome == 'success'` condition still gets ANDed
-      # with the job's own running success() behind the scenes, so one suite
-      # failing here still skipped every suite listed after it. `!cancelled()`
-      # makes the override explicit: each suite runs whenever the server
-      # started, regardless of any earlier suite's result.
       - name: Start preview server
         id: start-server
         env:

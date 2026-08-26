@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CityLayout } from '../brc/layout'
-import { geocode, reverseGeocode } from '../brc/geocode'
-import { isNearCity, type Position } from '../brc/geo'
+import { reverseGeocode } from '../brc/geocode'
+import type { Position } from '../brc/geo'
 import { BASE_PATH } from '../config'
+import { trustedAddressPosition } from './locationTrust'
 
 export interface DeepLink {
   poi?: string
@@ -71,30 +72,15 @@ export type DeepLinkResolution =
   | { status: 'unresolvable' }
   | { status: 'none' }
 
-function normalizedAddress(address: string): string {
-  return address.trim().replace(/\s+/g, ' ').toLowerCase()
-}
-
 /**
  * `ll` is only an exact refinement of `at`; it must describe the same address
- * under the app's own reverse-geocoding model. A broad metric tolerance can
- * span adjacent 15-minute intersections, so round-trip semantics are the
- * consistency boundary instead (#105).
+ * under the app's own reverse-geocoding model. Directions and legacy links now
+ * share this exact trust boundary so the two formats cannot drift (#105/#134).
  */
 export function resolveDeepLink(link: DeepLink, layout: CityLayout): DeepLinkResolution {
-  if (link.ll && link.at && isNearCity(layout, link.ll)) {
-    const geocoded = geocode(link.at, layout)
-    const roundTripped = reverseGeocode(link.ll, layout)
-    if (
-      geocoded &&
-      normalizedAddress(roundTripped.label) === normalizedAddress(link.at)
-    ) {
-      return { status: 'resolved', position: link.ll }
-    }
-  }
   if (!link.at) return { status: 'none' }
-  const result = geocode(link.at, layout)
-  return result ? { status: 'resolved', position: result.position } : { status: 'unresolvable' }
+  const position = trustedAddressPosition(link.at, link.ll, layout)
+  return position ? { status: 'resolved', position } : { status: 'unresolvable' }
 }
 
 export function addressFor(position: Position, layout: CityLayout): string {

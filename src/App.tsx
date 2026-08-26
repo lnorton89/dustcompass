@@ -1000,7 +1000,7 @@ export default function App() {
    * distance counting down, and it is the buzz that carries the news to someone
    * whose phone is in a pocket.
    */
-  const arrived = useRef<string>()
+  const arrived = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!navigation || !heading || destinationRefreshPending.current) return
     const arrivalKey = `${heading.position[0]},${heading.position[1]}`

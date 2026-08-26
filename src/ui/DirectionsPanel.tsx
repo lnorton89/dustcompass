@@ -63,17 +63,23 @@ function baseOptions(pois: readonly Poi[], events: readonly EventItem[], places:
 }
 
 function EndpointPicker({ label, value, options, layout, pois, disableLive, clearable = true, onChange }: { label: string; value?: DirectionsEndpoint; options: readonly EndpointOption[]; layout: CityLayout; pois: readonly Poi[]; disableLive: boolean; clearable?: boolean; onChange: (endpoint: DirectionsEndpoint | undefined) => void }) {
-  const [query, setQuery] = useState('')
+  // This component itself is keyed by endpoint identity at the callsite. That
+  // gives programmatic swaps a fresh input initialized from the new endpoint,
+  // while a human editing the *same* endpoint owns this controlled string until
+  // they choose a replacement. Keeping only the Autocomplete child keyed left
+  // this state outside the remount boundary and let MUI reset newly typed text
+  // back to the previous selected address in a real mobile browser (#169).
+  const [inputValue, setInputValue] = useState(() => value ? directionsEndpointLabel(value, pois) : '')
   const dynamicOptions = useMemo(() => {
-    const trimmed = query.trim(); if (trimmed.length < 2) return options
+    const trimmed = inputValue.trim(); if (trimmed.length < 2) return options
     const result = geocode(trimmed, layout); if (!result) return options
     return [{ key: `address:${result.label}`, label: result.label, detail: 'Playa address', endpoint: { kind: 'address' as const, address: result.label, position: result.position } }, ...options]
-  }, [layout, options, query])
+  }, [inputValue, layout, options])
   const selected = value ? dynamicOptions.find((option) => option.key === optionKey(value)) ?? dynamicOptions.find((option) => optionKey(option.endpoint) === optionKey(value)) ?? { key: optionKey(value), label: directionsEndpointLabel(value, pois), detail: '', endpoint: value } : null
-  return <Autocomplete key={value ? optionKey(value) : 'empty'} options={dynamicOptions} value={selected}
+  return <Autocomplete options={dynamicOptions} value={selected} inputValue={inputValue}
     autoHighlight disableClearable={!clearable}
     sx={clearable ? { '& .MuiAutocomplete-clearIndicator': { visibility: 'visible' } } : undefined}
-    onInputChange={(_, next, reason) => setQuery(reason === 'input' ? next : '')} getOptionLabel={(option) => option.label}
+    onInputChange={(_, next) => setInputValue(next)} getOptionLabel={(option) => option.label}
     getOptionDisabled={(option) => disableLive && option.endpoint.kind === 'live'} isOptionEqualToValue={(a, b) => a.key === b.key}
     filterOptions={(items, state) => {
       const raw = state.inputValue.trim()
@@ -102,8 +108,8 @@ export function DirectionsPanel({ open, compact, layout, pois, events, places, d
   const content = <Stack spacing={1.5} sx={{ p: 2, width: compact ? 'auto' : 410, maxWidth: '100vw' }}>
     <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="h6">Directions</Typography><Typography variant="caption" color="text.secondary">Point-to-point planning stays on this device and works offline.</Typography></Box><IconButton aria-label="Close directions" onClick={onClose}><CloseIcon /></IconButton></Stack>
     <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><Stack spacing={1} sx={{ flex: 1, minWidth: 0 }}>
-      <EndpointPicker label="From" value={from} options={options} layout={layout} pois={pois} disableLive={!hasUsableLiveFix && !findingLocation} clearable={false} onChange={(endpoint) => endpoint && onFromChange(endpoint)} />
-      <EndpointPicker label="To" value={to} options={options} layout={layout} pois={pois} disableLive onChange={onToChange} />
+      <EndpointPicker key={`from:${optionKey(from)}`} label="From" value={from} options={options} layout={layout} pois={pois} disableLive={!hasUsableLiveFix && !findingLocation} clearable={false} onChange={(endpoint) => endpoint && onFromChange(endpoint)} />
+      <EndpointPicker key={`to:${to ? optionKey(to) : 'empty'}`} label="To" value={to} options={options} layout={layout} pois={pois} disableLive onChange={onToChange} />
     </Stack><IconButton aria-label="Swap directions endpoints" onClick={onSwap} disabled={!canSwap} title={from.kind === 'live' ? 'Choose a fixed start before swapping; Your location is an origin only' : undefined}><SwapVertIcon /></IconButton></Stack>
     {from.kind === 'live' && <Paper variant="outlined" sx={{ px: 1.25, py: 1 }}><Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><MyLocationIcon fontSize="small" color={hasUsableLiveFix ? 'primary' : 'disabled'} /><Typography variant="body2" color="text.secondary">{hasUsableLiveFix ? `${fromLabel} follows your live GPS position.` : findingLocation ? 'Finding your location… You can choose a destination while GPS starts.' : 'Your location is unavailable here. Choose The Man or another fixed start.'}</Typography></Stack></Paper>}
     <ToggleButtonGroup exclusive fullWidth size="small" value={mode} onChange={(_, value: DirectionsMode | null) => value && onModeChange(value)} aria-label="Travel mode"><ToggleButton value="walk"><DirectionsWalkIcon fontSize="small" /> Walk</ToggleButton><ToggleButton value="bike"><DirectionsBikeIcon fontSize="small" /> Bike</ToggleButton></ToggleButtonGroup>

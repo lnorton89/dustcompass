@@ -62,7 +62,7 @@ function baseOptions(pois: readonly Poi[], events: readonly EventItem[], places:
   return options
 }
 
-function EndpointPicker({ label, value, options, layout, pois, disableLive, onChange }: { label: string; value?: DirectionsEndpoint; options: readonly EndpointOption[]; layout: CityLayout; pois: readonly Poi[]; disableLive: boolean; onChange: (endpoint: DirectionsEndpoint | undefined) => void }) {
+function EndpointPicker({ label, value, options, layout, pois, disableLive, clearable = true, onChange }: { label: string; value?: DirectionsEndpoint; options: readonly EndpointOption[]; layout: CityLayout; pois: readonly Poi[]; disableLive: boolean; clearable?: boolean; onChange: (endpoint: DirectionsEndpoint | undefined) => void }) {
   const [query, setQuery] = useState('')
   const dynamicOptions = useMemo(() => {
     const trimmed = query.trim(); if (trimmed.length < 2) return options
@@ -71,9 +71,17 @@ function EndpointPicker({ label, value, options, layout, pois, disableLive, onCh
   }, [layout, options, query])
   const selected = value ? dynamicOptions.find((option) => option.key === optionKey(value)) ?? dynamicOptions.find((option) => optionKey(option.endpoint) === optionKey(value)) ?? { key: optionKey(value), label: directionsEndpointLabel(value, pois), detail: '', endpoint: value } : null
   return <Autocomplete key={value ? optionKey(value) : 'empty'} options={dynamicOptions} value={selected}
+    autoHighlight disableClearable={!clearable}
     onInputChange={(_, next, reason) => setQuery(reason === 'input' ? next : '')} getOptionLabel={(option) => option.label}
     getOptionDisabled={(option) => disableLive && option.endpoint.kind === 'live'} isOptionEqualToValue={(a, b) => a.key === b.key}
-    filterOptions={(items, state) => { const term = state.inputValue.trim().toLowerCase(); return (term ? items.filter((option) => `${option.label} ${option.detail}`.toLowerCase().includes(term)) : items).slice(0, 40) }}
+    filterOptions={(items, state) => {
+      const raw = state.inputValue.trim()
+      if (!raw) return items.slice(0, 40)
+      const term = raw.toLowerCase()
+      const geocoded = geocode(raw, layout)
+      const canonicalKey = geocoded ? `address:${geocoded.label}` : undefined
+      return items.filter((option) => option.key === canonicalKey || `${option.label} ${option.detail}`.toLowerCase().includes(term)).slice(0, 40)
+    }}
     onChange={(_, option) => onChange(option?.endpoint)} renderInput={(params) => <TextField {...params} label={label} size="small" />}
     renderOption={(props, option) => <Box component="li" {...props} key={option.key}><Box sx={{ minWidth: 0 }}><Typography variant="body2" noWrap>{option.label}</Typography><Typography variant="caption" color="text.secondary" noWrap>{option.detail}</Typography></Box></Box>} />
 }
@@ -92,7 +100,7 @@ export function DirectionsPanel({ open, compact, layout, pois, events, places, d
   const content = <Stack spacing={1.5} sx={{ p: 2, width: compact ? 'auto' : 410, maxWidth: '100vw' }}>
     <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="h6">Directions</Typography><Typography variant="caption" color="text.secondary">Point-to-point planning stays on this device and works offline.</Typography></Box><IconButton aria-label="Close directions" onClick={onClose}><CloseIcon /></IconButton></Stack>
     <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><Stack spacing={1} sx={{ flex: 1, minWidth: 0 }}>
-      <EndpointPicker label="From" value={from} options={options} layout={layout} pois={pois} disableLive={!hasUsableLiveFix && !findingLocation} onChange={(endpoint) => endpoint && onFromChange(endpoint)} />
+      <EndpointPicker label="From" value={from} options={options} layout={layout} pois={pois} disableLive={!hasUsableLiveFix && !findingLocation} clearable={false} onChange={(endpoint) => endpoint && onFromChange(endpoint)} />
       <EndpointPicker label="To" value={to} options={options} layout={layout} pois={pois} disableLive={!hasUsableLiveFix && !findingLocation} onChange={onToChange} />
     </Stack><IconButton aria-label="Swap directions endpoints" onClick={onSwap} disabled={!to}><SwapVertIcon /></IconButton></Stack>
     {from.kind === 'live' && <Paper variant="outlined" sx={{ px: 1.25, py: 1 }}><Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><MyLocationIcon fontSize="small" color={hasUsableLiveFix ? 'primary' : 'disabled'} /><Typography variant="body2" color="text.secondary">{hasUsableLiveFix ? `${fromLabel} follows your live GPS position.` : findingLocation ? 'Finding your location… You can choose a destination while GPS starts.' : 'Your location is unavailable here. Choose The Man or another fixed start.'}</Typography></Stack></Paper>}

@@ -17,6 +17,7 @@ export interface RouteCardInput {
   mode: DirectionsMode
   heading: string
   approximate?: boolean
+  published?: boolean
   layout: CityLayout
 }
 
@@ -122,26 +123,46 @@ function drawPolyline(ctx: CanvasRenderingContext2D, positions: Position[], proj
   ctx.stroke()
 }
 
+export function routeCardCityGeometry(city: CityLayout, route: PlayaRoute) {
+  const { project } = projection(route)
+  return {
+    annulars: city.cStreets.flatMap((street) => street.segments.map(([from, to]) => ({
+      name: street.name,
+      points: arc(city, street.distance, from, to, 2).map(project),
+    }))),
+    radials: city.tStreets.flatMap((radial) => radial.refs.flatMap((ref) => radial.segments.map(([inner, outer]) => ({
+      ref,
+      points: [
+        polarToPosition(city, ref, resolveRadius(city, inner)),
+        polarToPosition(city, ref, resolveRadius(city, outer)),
+      ].map(project),
+    })))),
+    man: project(city.center.geometry.coordinates as Position),
+  }
+}
+
 function drawCity(ctx: CanvasRenderingContext2D, city: CityLayout, route: PlayaRoute) {
+  const geometry = routeCardCityGeometry(city, route)
   const { project } = projection(route)
   ctx.strokeStyle = 'rgba(69, 59, 48, 0.42)'
   ctx.lineWidth = 2
-  for (const street of city.cStreets) {
-    for (const [from, to] of street.segments) {
-      drawPolyline(ctx, arc(city, street.distance, from, to, 2), project)
-    }
+  for (const street of geometry.annulars) {
+    const positions = street.points
+    if (positions.length < 2) continue
+    ctx.beginPath()
+    ctx.moveTo(positions[0].x, positions[0].y)
+    for (const point of positions.slice(1)) ctx.lineTo(point.x, point.y)
+    ctx.stroke()
   }
-  for (const radial of city.tStreets) {
-    for (const ref of radial.refs) {
-      for (const [inner, outer] of radial.segments) {
-        drawPolyline(ctx, [
-          polarToPosition(city, ref, resolveRadius(city, inner)),
-          polarToPosition(city, ref, resolveRadius(city, outer)),
-        ], project)
-      }
-    }
+  for (const radial of geometry.radials) {
+    const positions = radial.points
+    if (positions.length < 2) continue
+    ctx.beginPath()
+    ctx.moveTo(positions[0].x, positions[0].y)
+    for (const point of positions.slice(1)) ctx.lineTo(point.x, point.y)
+    ctx.stroke()
   }
-  const man = project(city.center.geometry.coordinates as Position)
+  const man = geometry.man
   ctx.beginPath()
   ctx.arc(man.x, man.y, 7, 0, Math.PI * 2)
   ctx.fillStyle = '#6e5d48'
@@ -260,6 +281,10 @@ export async function generateRouteCard(input: RouteCardInput): Promise<Blob> {
     ctx.fillStyle = '#d5a84e'
     ctx.font = '600 15px system-ui, sans-serif'
     wrapText(ctx, 'Destination is an approximate address area.', layout.summary.x + 28, y + 12, layout.summary.width - 56, 20, 2)
+  } else if (input.published) {
+    ctx.fillStyle = '#b9ad9a'
+    ctx.font = '600 15px system-ui, sans-serif'
+    wrapText(ctx, 'Officially published location — not surveyed; camps and art can move.', layout.summary.x + 28, y + 12, layout.summary.width - 56, 20, 2)
   }
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Could not encode route card')), 'image/png')

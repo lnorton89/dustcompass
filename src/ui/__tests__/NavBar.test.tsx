@@ -111,3 +111,17 @@ describe('NavBar routed directions summary (#132)', () => {
     expect(screen.queryByText('4 min')).toBeNull()
   })
 })
+
+describe('NavBar destination provenance (#137)', () => {
+  it('keeps an officially published-but-unsurveyed warning visible during active navigation', () => {
+    render(
+      <ThemeProvider theme={playaTheme('dark')}>
+        <NavBar
+          name="Published Camp" travel={travel} heading="6:00" located={false} status="idle"
+          published liveOrigin={false} onRetryLocation={vi.fn()} onClear={vi.fn()}
+        />
+      </ThemeProvider>,
+    )
+    expect(screen.getByText(/Officially published location — not surveyed/i)).toBeDefined()
+  })
+})

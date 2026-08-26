@@ -62,7 +62,7 @@ import { travelForMeters } from './brc/travel'
 import { routeBetween } from './brc/routing'
 import { bearingToClock, bearingBetween, bearingsMatch, distanceBetween, isNearCity } from './brc/geo'
 import { shareLink } from './ui/share'
-import type { EventItem, Poi, PoiKind, UnplacedListing } from './data/types'
+import type { EventItem, Poi, PoiKind, PositionAccuracy, UnplacedListing } from './data/types'
 import { reverseGeocode } from './brc/geocode'
 import type { Position } from './brc/geo'
 import {
@@ -586,6 +586,8 @@ export default function App() {
     position: Position
     address?: string
     approximate?: boolean
+    /** Keep published best-effort POI provenance visible during navigation/share (#137). */
+    destinationAccuracy?: PositionAccuracy
     /** Present when heading to a listed camp/art piece, so the URL can name it. */
     uid?: string
     /** Fixed planning origins stay fixed; live origins continue following GPS. */
@@ -960,7 +962,7 @@ export default function App() {
     destinationRefreshPending.current = true
     arrived.current = false
     const id = requestAnimationFrame(() => {
-      setHeading((current) => current?.uid === latest.uid ? { ...current, name: latest.name, position: latest.position, address: latest.address, approximate: latest.accuracyClass === 'derived' } : current)
+      setHeading((current) => current?.uid === latest.uid ? { ...current, name: latest.name, position: latest.position, address: latest.address, approximate: latest.accuracyClass === 'derived', destinationAccuracy: latest.accuracyClass } : current)
       destinationRefreshPending.current = false
     })
     return () => cancelAnimationFrame(id)
@@ -1148,6 +1150,7 @@ export default function App() {
       position: route.to.position,
       address: route.to.detail,
       approximate: route.to.accuracy === 'approximate',
+      destinationAccuracy: route.to.accuracy === 'published' ? 'published' : route.to.accuracy === 'approximate' ? 'derived' : 'surveyed',
       uid: route.to.endpoint.kind === 'poi' ? route.to.endpoint.uid : undefined,
       origin: route.from.dynamic ? undefined : route.from.position,
       originLabel: route.from.label,
@@ -1204,6 +1207,7 @@ export default function App() {
         mode: directionsMode,
         heading: directionsPreview.heading,
         approximate: directionsPreview.resolved.to.accuracy === 'approximate',
+        published: directionsPreview.resolved.to.accuracy === 'published',
         layout: data.layout,
       })
       if (result === 'cancelled') return
@@ -1226,6 +1230,7 @@ export default function App() {
       position: Position
       address?: string
       positionSource?: 'gps' | 'address'
+      accuracyClass?: PositionAccuracy
       uid?: string
     }) => {
       const routeOrigin = defaultDirectionsOrigin(
@@ -1244,7 +1249,8 @@ export default function App() {
         name: target.name,
         position: target.position,
         address: target.address,
-        approximate: target.positionSource === 'address',
+        approximate: target.accuracyClass === 'derived' || (!target.accuracyClass && target.positionSource === 'address'),
+        destinationAccuracy: target.accuracyClass,
         uid: target.uid,
         liveOrigin: routeOrigin.kind === 'live',
         retryableOrigin: true,
@@ -1883,6 +1889,7 @@ export default function App() {
                   status={location.status}
                   accuracy={location.accuracy}
                   approximate={heading.approximate}
+                  published={heading.destinationAccuracy === 'published'}
                   screenAwake={wakeLock === 'active'}
                   onRetryLocation={retryNavigationLocation}
                   onEdit={editCurrentRoute}

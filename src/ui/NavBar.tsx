@@ -23,6 +23,7 @@ interface Props {
   status: 'idle' | 'locating' | 'tracking' | 'denied' | 'unavailable'
   accuracy?: number
   approximate?: boolean
+  published?: boolean
   screenAwake?: boolean
   onRetryLocation: () => void
   onClear: () => void
@@ -47,6 +48,7 @@ export function NavBar({
   status,
   accuracy,
   approximate,
+  published,
   screenAwake,
   onRetryLocation,
   onClear,
@@ -136,6 +138,11 @@ export function NavBar({
         {approximate && (
           <Typography variant="caption" color="warning.main" sx={{ display: 'block', lineHeight: 1.2, mt: 0.25 }}>
             Approximate address area — nearby camps may share this pin
+          </Typography>
+        )}
+        {published && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2, mt: 0.25 }}>
+            Officially published location — not surveyed. Camps and art can move after publication.
           </Typography>
         )}
         {liveOrigin && located && accuracy != null && (

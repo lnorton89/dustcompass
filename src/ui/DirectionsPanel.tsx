@@ -67,7 +67,7 @@ function EndpointPicker({ label, value, options, layout, pois, disableLive, clea
   const dynamicOptions = useMemo(() => {
     const trimmed = query.trim(); if (trimmed.length < 2) return options
     const result = geocode(trimmed, layout); if (!result) return options
-    return [{ key: `address:${result.label}`, label: result.label, detail: 'Playa address', endpoint: { kind: 'address', address: result.label, position: result.position } as DirectionsEndpoint }, ...options]
+    return [{ key: `address:${result.label}`, label: result.label, detail: 'Playa address', endpoint: { kind: 'address' as const, address: result.label, position: result.position } }, ...options]
   }, [layout, options, query])
   const selected = value ? dynamicOptions.find((option) => option.key === optionKey(value)) ?? dynamicOptions.find((option) => optionKey(option.endpoint) === optionKey(value)) ?? { key: optionKey(value), label: directionsEndpointLabel(value, pois), detail: '', endpoint: value } : null
   return <Autocomplete key={value ? optionKey(value) : 'empty'} options={dynamicOptions} value={selected}

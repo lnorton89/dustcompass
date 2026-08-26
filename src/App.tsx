@@ -801,7 +801,17 @@ export default function App() {
   ])
 
   useEffect(() => {
-    if (!directionsOpen || !directionsTo) return
+    if (!directionsOpen) return
+    if (!directionsTo) {
+      // #155: an incomplete editor must not leave a previously complete route
+      // serialized in the address bar. Otherwise clearing To is undone by a
+      // reload/share of the stale URL.
+      const next = new URL(window.location.href)
+      next.search = ''
+      next.hash = ''
+      if (next.toString() !== window.location.href) window.history.replaceState(null, '', next)
+      return
+    }
     const next = directionsUrl({
       version: 1,
       from: directionsFrom,
@@ -921,15 +931,38 @@ export default function App() {
     }
   }, [data, directionsFrom, directionsTo, usableFix])
 
+  // While a refreshed POI is being reconciled, arrival must not evaluate the
+  // obsolete coordinate from the previous dataset for one more effect pass.
+  const destinationRefreshPending = useRef(false)
   useEffect(() => {
-    if (!heading?.uid || !data) return
+    if (!heading?.uid || !data) {
+      destinationRefreshPending.current = false
+      return
+    }
     const latest = data.pois.find((poi) => poi.uid === heading.uid)
     if (!latest) {
-      const id = requestAnimationFrame(() => { setProbe('This navigation destination is no longer in the current map.'); setHeading(undefined); releaseLocation('navigation') })
+      destinationRefreshPending.current = true
+      arrived.current = false
+      const id = requestAnimationFrame(() => {
+        setProbe('This navigation destination is no longer in the current map.')
+        setHeading(undefined)
+        destinationRefreshPending.current = false
+        releaseLocation('navigation')
+      })
       return () => cancelAnimationFrame(id)
     }
-    if (latest.position[0] === heading.position[0] && latest.position[1] === heading.position[1] && latest.name === heading.name && latest.address === heading.address) return
-    const id = requestAnimationFrame(() => { setHeading((current) => current?.uid === latest.uid ? { ...current, name: latest.name, position: latest.position, address: latest.address, approximate: latest.accuracyClass === 'derived' } : current) })
+    if (latest.position[0] === heading.position[0] && latest.position[1] === heading.position[1] && latest.name === heading.name && latest.address === heading.address) {
+      destinationRefreshPending.current = false
+      return
+    }
+    // #152: reset the one-shot arrival latch as soon as the authoritative POI
+    // moves, and suppress arrival until heading.position has caught up.
+    destinationRefreshPending.current = true
+    arrived.current = false
+    const id = requestAnimationFrame(() => {
+      setHeading((current) => current?.uid === latest.uid ? { ...current, name: latest.name, position: latest.position, address: latest.address, approximate: latest.accuracyClass === 'derived' } : current)
+      destinationRefreshPending.current = false
+    })
     return () => cancelAnimationFrame(id)
   }, [data, heading?.address, heading?.name, heading?.position, heading?.uid, releaseLocation])
 
@@ -969,7 +1002,7 @@ export default function App() {
    */
   const arrived = useRef(false)
   useEffect(() => {
-    if (!navigation || arrived.current) return
+    if (!navigation || arrived.current || destinationRefreshPending.current) return
     // `origin` falls back to the Man's own coordinates until a real,
     // in-city GPS fix exists, and `navigation.travel` is computed from
     // `origin` — not from the raw fix. Gating on `here` (any fix at all,
@@ -1081,13 +1114,18 @@ export default function App() {
   }, [data, heading, navigationPadding, navigationRetrying, usableFix])
 
   useEffect(() => {
-    if (!navigationRetrying || !locationWatchHasFailed(location.status)) return
+    if (!navigationRetrying) return
+    // A successful browser fix can still be unusable for a BRC route. Treat
+    // that as a completed retry too; otherwise an off-playa fix leaves the
+    // retry watch running indefinitely while the route correctly stays at Man.
+    const outsideCity = location.status === 'tracking' && Boolean(here) && !usableFix
+    if (!locationWatchHasFailed(location.status) && !outsideCity) return
     const id = requestAnimationFrame(() => {
       setNavigationRetrying(false)
       releaseLocation('navigation')
     })
     return () => cancelAnimationFrame(id)
-  }, [location.status, navigationRetrying, releaseLocation])
+  }, [here, location.status, navigationRetrying, releaseLocation, usableFix])
 
   const startDirections = useCallback(() => {
     if (!data || !directionsTo) return

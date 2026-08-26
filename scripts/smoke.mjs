@@ -1219,6 +1219,24 @@ await sharedRoute.getByRole('heading', { name: 'Directions' }).waitFor({ timeout
 assert((await sharedRoute.getByTestId('directions-summary').count()) === 1, 'shared Directions URL restores route summary')
 await sharedRoute.close()
 
+// #155: clearing To must clear the serialized route too. A reload must not
+// resurrect the destination the editor visibly removed.
+const clearedRoute = await context.newPage()
+await clearedRoute.goto(routeUrl, { waitUntil: 'load' })
+await clearedRoute.waitForFunction(() => window.__map, null, { timeout: 30000 })
+await clearedRoute.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+const clearedTo = clearedRoute.getByRole('combobox', { name: 'To' })
+await clearedTo.locator('xpath=..').getByLabel('Clear').click()
+await clearedRoute.waitForTimeout(300)
+assert(!new URL(clearedRoute.url()).searchParams.has('to'), 'clearing To removes the stale destination from the URL (#155)')
+assert(!new URL(clearedRoute.url()).searchParams.has('dir'), 'an incomplete Directions editor no longer advertises a complete route (#155)')
+await clearedRoute.reload({ waitUntil: 'load' })
+await clearedRoute.waitForFunction(() => window.__map, null, { timeout: 30000 })
+await clearedRoute.getByRole('button', { name: 'Directions', exact: true }).first().click()
+await clearedRoute.getByRole('heading', { name: 'Directions' }).waitFor({ timeout: 5000 })
+assert((await clearedRoute.getByRole('combobox', { name: 'To' }).inputValue()) === '', 'reloading after clearing To does not restore the removed destination (#155)')
+await clearedRoute.close()
+
 await browser.close()
 process.exit(problems.length || process.exitCode ? 1 : 0)
 

@@ -18,41 +18,27 @@ interface Props {
   name: string
   address?: string
   travel: Travel
-  /** Clock direction to head in, e.g. "4:30" — how directions are given here. */
   heading: string
-  /** True when measured from a real GPS fix rather than the Man. */
   located: boolean
   status: 'idle' | 'locating' | 'tracking' | 'denied' | 'unavailable'
   accuracy?: number
   approximate?: boolean
-  /** True while a Screen Wake Lock is actually held for this navigation (#65) — not merely supported. */
   screenAwake?: boolean
   onRetryLocation: () => void
   onClear: () => void
-  /** Target bearing in degrees — the same value `heading`'s clock position is
-   * derived from (`bearingBetween`/`bearingToClock`, src/brc/geo.ts). Needed
-   * alongside `compass` to point the needle; omit either and the strip falls
-   * back to today's text-only navigation, unchanged. */
   bearing?: number
-  /** Device-orientation state from `useCompassHeading` (#63). This is a
-   * physical compass sensor, not the map's own bearing/orientation controls
-   * — the two are unrelated and this never touches the map camera. */
   compass?: CompassHeading
   palette?: PlayaPalette
   fromLabel?: string
   mode?: DirectionsMode
   routeKind?: PlayaRoute['kind']
   liveOrigin?: boolean
+  /** True when this fixed Man-origin route came from a failed live-origin attempt. */
+  retryableOrigin?: boolean
   onEdit?: () => void
   onShowRoute?: () => void
 }
 
-/**
- * Stays on screen while you walk. Distance and time are the useful part, but
- * the heading is given as a clock position because that is the vocabulary the
- * city is built in — "head toward 4:30" is something you can act on without
- * looking at the screen again.
- */
 export function NavBar({
   name,
   travel,
@@ -71,25 +57,22 @@ export function NavBar({
   mode = 'walk',
   routeKind = 'direct',
   liveOrigin = true,
+  retryableOrigin = liveOrigin,
   onEdit,
   onShowRoute,
 }: Props) {
-  // Dismissing the denial note is purely local UI state — it says nothing
-  // about the sensor itself, so it does not live in useCompassHeading.
   const [deniedNoteDismissed, setDeniedNoteDismissed] = useState(false)
   const showCompassControl = compass && palette && compass.support !== 'unsupported'
-  const showNeedle =
-    compass?.support === 'active' && palette && bearing != null && compass.heading != null
+  const showNeedle = compass?.support === 'active' && palette && bearing != null && compass.heading != null
   const showTurnOn = compass?.support === 'idle' || compass?.support === 'needs-permission'
   const showDeniedNote = compass?.support === 'denied' && !deniedNoteDismissed
+  const showRetryLocation = retryableOrigin && !located && status !== 'locating' && status !== 'tracking'
 
   return (
     <Paper
       elevation={8}
       sx={{
         position: 'absolute',
-        // It sits over the map at the bottom of the screen, which on a phone
-        // is where the home indicator is and where the corners curve away.
         left: 'calc(8px + var(--safe-left))',
         right: 'calc(8px + var(--safe-right))',
         bottom: 'calc(8px + var(--safe-bottom))',
@@ -99,10 +82,6 @@ export function NavBar({
         gap: { xs: 0.75, sm: 1.5 },
         maxWidth: { sm: 520 },
         mx: { sm: 'auto' },
-        // Foreground navigation chrome must stay above MapLibre markers and
-        // labels. FocusMarker deliberately has its own map-local z-index;
-        // without an app-level stack here its destination card can paint over
-        // the distance/heading strip on a phone (#129).
         zIndex: (theme) => theme.zIndex.appBar + 1,
       }}
       data-testid="navigation-bar"
@@ -112,15 +91,6 @@ export function NavBar({
         <Typography variant="subtitle2" sx={{ lineHeight: 1.2 }}>
           Heading to {name}
         </Typography>
-        {/*
-         * This is the screen you read while walking, at arm's length, in
-         * daylight, and it was set entirely in 13px caption — the distance, the
-         * times and the clock heading all at footnote size. The two things you
-         * actually act on are how far it is and which way to go, so those come
-         * up to body size and the heading takes the accent; the travel times
-         * stay a step below; the accuracy and the caveats stay footnotes,
-         * because that is what they are.
-         */}
         <Stack
           direction="row"
           spacing={1.25}
@@ -129,8 +99,6 @@ export function NavBar({
             color: 'text.secondary',
             flexWrap: 'wrap',
             rowGap: 0.25,
-            // The travel icons take their size from here, so the row moves with
-            // the type scale rather than being pinned to a raw pixel value.
             fontSize: (theme) => theme.typography.body2.fontSize,
           }}
         >
@@ -190,15 +158,7 @@ export function NavBar({
             </IconButton>
           </Stack>
         )}
-        {liveOrigin && (status === 'denied' || status === 'unavailable') && (
-          // A real MuiButton rather than a bare `<Typography component="button">`
-          // so it picks up theme.ts's 44px touch floor (MuiButton styleOverrides,
-          // below `md`) the same way every other control in the app does, instead
-          // of needing its own copy of that breakpoint rule. The sx below only
-          // undoes Button's own padding/typography so it still reads as the small
-          // underlined caption link this was before, not a filled button — the
-          // extra hit area is invisible, via negative margin absorbing the padding
-          // that creates it.
+        {showRetryLocation && (
           <Button
             onClick={onRetryLocation}
             type="button"
@@ -221,13 +181,6 @@ export function NavBar({
           </Button>
         )}
       </Box>
-      {/*
-       * The only feedback that this is holding the screen open at all —
-       * otherwise the reason the phone never dims mid-route is invisible.
-       * Shown only while a lock is actually held, not merely supported: a
-       * refused/unsupported request keeps navigation working exactly as it
-       * did before this existed, silently.
-       */}
       {screenAwake && (
         <Tooltip title="Keeping the screen on while you navigate">
           <VisibilityIcon
@@ -243,10 +196,6 @@ export function NavBar({
             <CompassNeedle angle={needleAngle(bearing, compass.heading)} accuracy={compass.accuracy} palette={palette} />
           ) : (
             showTurnOn && (
-              // A real tap target, not automatic — iOS requires
-              // `requestPermission()` to run inside this exact click handler,
-              // and other platforms get the same explicit "turn it on"
-              // affordance rather than a silent listener nobody asked for.
               <Button
                 onClick={() => void compass.requestPermission()}
                 type="button"

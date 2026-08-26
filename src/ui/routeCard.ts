@@ -111,18 +111,6 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: num
   return y + lines.length * lineHeight
 }
 
-function drawPolyline(ctx: CanvasRenderingContext2D, positions: Position[], project: (p: Position) => { x: number; y: number }) {
-  if (positions.length < 2) return
-  const first = project(positions[0])
-  ctx.beginPath()
-  ctx.moveTo(first.x, first.y)
-  for (const position of positions.slice(1)) {
-    const point = project(position)
-    ctx.lineTo(point.x, point.y)
-  }
-  ctx.stroke()
-}
-
 export function routeCardCityGeometry(city: CityLayout, route: PlayaRoute) {
   const { project } = projection(route)
   return {

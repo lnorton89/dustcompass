@@ -91,7 +91,11 @@ describe('directions endpoint runtime resolution', () => {
       { kind: 'address', address: '6:00 & Esplanade', position: geocoded!.position },
       context,
     )
-    expect(exact?.position).toEqual(geocoded!.position)
+    expect(exact).toMatchObject({
+      position: geocoded!.position,
+      accuracy: 'exact',
+      dynamic: false,
+    })
 
     const contradictory = resolveDirectionsEndpoint(
       {
@@ -101,7 +105,11 @@ describe('directions endpoint runtime resolution', () => {
       },
       context,
     )
-    expect(contradictory?.position).toEqual(geocoded!.position)
+    expect(contradictory).toMatchObject({
+      position: geocoded!.position,
+      accuracy: 'exact',
+      dynamic: false,
+    })
     expect(contradictory?.position).not.toEqual(layout.center.geometry.coordinates)
   })
 

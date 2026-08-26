@@ -953,7 +953,7 @@ export default function App() {
       })
       return () => cancelAnimationFrame(id)
     }
-    if (latest.position[0] === heading.position[0] && latest.position[1] === heading.position[1] && latest.name === heading.name && latest.address === heading.address) {
+    if (latest.position[0] === heading.position[0] && latest.position[1] === heading.position[1] && latest.name === heading.name && latest.address === heading.address && latest.accuracyClass === heading.destinationAccuracy) {
       destinationRefreshPending.current = false
       return
     }

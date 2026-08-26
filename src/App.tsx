@@ -83,8 +83,9 @@ import { DirectionsPanel } from './ui/DirectionsPanel'
 import {
   defaultDirectionsOrigin,
   directionsUrl,
-  readDirectionsIntent,
+  readDirectionsResult,
   type DirectionsEndpoint,
+  type DirectionsReadResult,
   type DirectionsMode,
 } from './data/directions'
 import { resolveDirectionsRoute } from './data/directionsRuntime'
@@ -594,8 +595,12 @@ export default function App() {
     /** A failed one-tap GPS origin may deliberately be retried from the fixed Man fallback. */
     retryableOrigin?: boolean
     mode?: DirectionsMode
+    routeFrom?: DirectionsEndpoint
+    routeTo?: DirectionsEndpoint
   }>()
-  const [initialDirections] = useState(() => readDirectionsIntent())
+  const [initialDirectionsResult] = useState(() => readDirectionsResult())
+  const initialDirections = initialDirectionsResult.status === 'resolved' ? initialDirectionsResult.intent : undefined
+  const [directionsLinkError, setDirectionsLinkError] = useState<DirectionsReadResult | undefined>(() => initialDirectionsResult.status !== 'none' && initialDirectionsResult.status !== 'resolved' ? initialDirectionsResult : undefined)
   const [directionsOpen, setDirectionsOpen] = useState(() => Boolean(initialDirections))
   const [directionsFrom, setDirectionsFrom] = useState<DirectionsEndpoint>(
     () => initialDirections?.from ?? { kind: 'man' },
@@ -653,6 +658,7 @@ export default function App() {
       if (event.key === 'Escape') {
         // Whatever is open, innermost first, so one key walks back out.
         if (saving) return
+        if (directionsOpen) { setDirectionsOpen(false); return }
         if (eventsOpen) setEventsOpen(false)
         else if (filtersOpen) setFiltersOpen(false)
         else if (selected) setSelected(undefined)
@@ -674,7 +680,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [eventsOpen, filtersOpen, heading, releaseLocation, saving, selected])
+  }, [directionsOpen, eventsOpen, filtersOpen, heading, releaseLocation, saving, selected])
 
   /**
    * A shared link names either a listing or an address. Resolve it to a
@@ -751,12 +757,17 @@ export default function App() {
     // publishing here would erase the very link the notice is about before
     // the reader has done anything with it. Dismissing the notice clears
     // `staleLink` and lets this effect resume normally on the next run.
-    if (staleLink) return
+    if (staleLink || directionsLinkError) return
     // Directions owns the query string while its editor is open. A separate
     // effect below mirrors the complete versioned route intent; letting the
     // legacy POI/pin publisher run here would erase `dir/from/to/mode` from a
     // cold shared route before the reader could act on it.
     if (directionsOpen) return
+    if (heading?.routeFrom && heading.routeTo) {
+      const next = directionsUrl({ version: 1, from: heading.routeFrom, to: heading.routeTo, mode: heading.mode ?? directionsMode })
+      if (next !== window.location.href) window.history.replaceState(null, '', next)
+      return
+    }
     if (selected) publish({ poi: selected.uid })
     else if (unplaced) publish({ poi: unplaced.uid })
     // The active navigation destination outranks a leftover dropped pin —
@@ -784,7 +795,9 @@ export default function App() {
     linkKey,
     restoredLink,
     staleLink,
+    directionsLinkError,
     directionsOpen,
+    directionsMode,
   ])
 
   useEffect(() => {
@@ -907,6 +920,18 @@ export default function App() {
       heading: bearingToClock(data.layout, bearing),
     }
   }, [data, directionsFrom, directionsTo, usableFix])
+
+  useEffect(() => {
+    if (!heading?.uid || !data) return
+    const latest = data.pois.find((poi) => poi.uid === heading.uid)
+    if (!latest) {
+      const id = requestAnimationFrame(() => { setProbe('This navigation destination is no longer in the current map.'); setHeading(undefined); releaseLocation('navigation') })
+      return () => cancelAnimationFrame(id)
+    }
+    if (latest.position[0] === heading.position[0] && latest.position[1] === heading.position[1] && latest.name === heading.name && latest.address === heading.address) return
+    const id = requestAnimationFrame(() => { setHeading((current) => current?.uid === latest.uid ? { ...current, name: latest.name, position: latest.position, address: latest.address, approximate: latest.accuracyClass === 'derived' } : current) })
+    return () => cancelAnimationFrame(id)
+  }, [data, heading?.address, heading?.name, heading?.position, heading?.uid, releaseLocation])
 
   const navigation = useMemo(() => {
     if (!heading || !origin || !data) return undefined
@@ -1089,6 +1114,8 @@ export default function App() {
       liveOrigin: route.from.dynamic,
       retryableOrigin: route.from.dynamic,
       mode: directionsMode,
+      routeFrom: directionsFrom,
+      routeTo: directionsTo,
     })
     arrived.current = false
     setSelected(undefined)
@@ -1182,6 +1209,8 @@ export default function App() {
         liveOrigin: routeOrigin.kind === 'live',
         retryableOrigin: true,
         mode: directionsMode,
+        routeFrom: routeOrigin,
+        routeTo: target.uid ? { kind: 'poi', uid: target.uid } : target.address ? { kind: 'address', address: target.address, position: target.position } : { kind: 'fixed', label: target.name, position: target.position },
       })
       arrived.current = false
       setSelected(undefined)
@@ -1917,6 +1946,16 @@ export default function App() {
                     <Button size="small" color="warning" onClick={retry}>
                       Retry
                     </Button>
+                  </Paper>
+                )}
+                {directionsLinkError && (
+                  <Paper elevation={0} sx={{ display: 'flex', alignItems: 'center', gap: 1, pl: 1.25, pr: 0.5, py: 0.25, border: '1px solid', borderColor: 'divider' }}>
+                    <LinkOffIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+                    <Typography variant="body2" sx={{ flex: 1, color: 'text.secondary' }}>
+                      {directionsLinkError.status === 'wrong-year' ? `These directions are for ${directionsLinkError.year ?? 'another data year'} and cannot be applied to the ${DATA_YEAR} map.` : directionsLinkError.status === 'unsupported-version' ? 'This directions link uses a route format this version of Dust Compass does not support.' : 'This directions link is incomplete or malformed.'}
+                    </Typography>
+                    <Button size="small" onClick={() => { setDirectionsLinkError(undefined); setDirectionsOpen(true) }}>Plan new route</Button>
+                    <Button size="small" onClick={() => setDirectionsLinkError(undefined)}>Show map</Button>
                   </Paper>
                 )}
                 {staleLink && (

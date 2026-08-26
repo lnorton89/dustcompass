@@ -1,0 +1,37 @@
+name: PR140 refreshed provenance patch
+
+on:
+  push:
+    branches:
+      - fix/directions-audit-134-139
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[pr140-refresh-provenance-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/directions-audit-134-139
+          fetch-depth: 0
+      - name: Keep active destination provenance synchronized on data refresh
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/App.tsx')
+          text = p.read_text()
+          old = """    if (latest.position[0] === heading.position[0] && latest.position[1] === heading.position[1] && latest.name === heading.name && latest.address === heading.address) {\n      destinationRefreshPending.current = false\n      return\n    }"""
+          new = """    if (latest.position[0] === heading.position[0] && latest.position[1] === heading.position[1] && latest.name === heading.name && latest.address === heading.address && latest.accuracyClass === heading.destinationAccuracy) {\n      destinationRefreshPending.current = false\n      return\n    }"""
+          assert text.count(old) == 1, text.count(old)
+          p.write_text(text.replace(old, new))
+      - name: Commit patch and remove helper workflow
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/pr140-refresh-provenance-patch.yml
+          git add src/App.tsx
+          git commit -m "Reconcile active destination provenance after data refresh [pr140-refresh-provenance-patched]"
+          git push origin HEAD:fix/directions-audit-134-139

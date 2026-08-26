@@ -37,6 +37,7 @@ interface Props {
     position: Position
     address?: string
     positionSource?: 'gps' | 'address'
+    accuracyClass?: Poi['accuracyClass']
     uid?: string
   }) => void
 }
@@ -154,6 +155,9 @@ export function EventDetail({
                       position: location.position,
                       address: location.label,
                       positionSource: 'address',
+                      // A conservatively geocoded surveyed playa address is an
+                      // exact address endpoint, not an address-derived camp pin (#137).
+                      accuracyClass: 'surveyed',
                     })
                   }
                   onClose()

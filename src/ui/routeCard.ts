@@ -153,7 +153,7 @@ function drawCity(ctx: CanvasRenderingContext2D, city: CityLayout, route: PlayaR
   for (const street of city.cStreets) {
     const segment = street.segments[0]
     if (!segment) continue
-    let start = clockToMinutes(segment[0])
+    const start = clockToMinutes(segment[0])
     let end = clockToMinutes(segment[1])
     if (end <= start) end += 720
     const point = project(polarToPosition(city, (start + end) / 2, street.distance))

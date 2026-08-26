@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { geocode } from '../../brc/geocode'
 import type { CityLayout } from '../../brc/layout'
 import type { Poi } from '../types'
 import { directionsEndpointLabel, resolveDirectionsEndpoint, resolveDirectionsRoute } from '../directionsRuntime'
@@ -81,6 +82,36 @@ describe('directions endpoint runtime resolution', () => {
     expect(resolveDirectionsEndpoint({ kind: 'poi', uid: derived.uid }, { layout, pois: [derived] })).toMatchObject({
       accuracy: 'approximate',
     })
+  })
+
+  it('trusts a serialized address coordinate only when it round-trips to that address (#134)', () => {
+    const geocoded = geocode('6:00 & Esplanade', layout)
+    expect(geocoded).toBeDefined()
+    const exact = resolveDirectionsEndpoint(
+      { kind: 'address', address: '6:00 & Esplanade', position: geocoded!.position },
+      context,
+    )
+    expect(exact?.position).toEqual(geocoded!.position)
+
+    const contradictory = resolveDirectionsEndpoint(
+      {
+        kind: 'address',
+        address: '6:00 & Esplanade',
+        position: layout.center.geometry.coordinates as [number, number],
+      },
+      context,
+    )
+    expect(contradictory?.position).toEqual(geocoded!.position)
+    expect(contradictory?.position).not.toEqual(layout.center.geometry.coordinates)
+  })
+
+  it('rejects fixed shared endpoints outside the BRC navigation vicinity (#134)', () => {
+    expect(
+      resolveDirectionsEndpoint(
+        { kind: 'fixed', label: 'Remote point', position: [-122.4194, 37.7749] },
+        context,
+      ),
+    ).toBeUndefined()
   })
 
   it('accepts explicit fixed endpoints for reproducible planned routes', () => {

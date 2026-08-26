@@ -26,7 +26,7 @@ interface Props {
   open: boolean; compact: boolean; layout: CityLayout; pois: readonly Poi[]; events: readonly EventItem[];
   places: readonly SavedPlace[]; droppedPin?: { position: [number, number]; address: string };
   from: DirectionsEndpoint; to?: DirectionsEndpoint; mode: DirectionsMode; hasUsableLiveFix: boolean;
-  findingLocation: boolean; preview?: DirectionsPreview;
+  findingLocation: boolean; destinationResolved: boolean; preview?: DirectionsPreview;
   onFromChange: (endpoint: DirectionsEndpoint) => void; onToChange: (endpoint: DirectionsEndpoint | undefined) => void;
   onModeChange: (mode: DirectionsMode) => void; onSwap: () => void; onStart: () => void; onShare: () => void;
   onShareImage: () => void; onClose: () => void;
@@ -93,7 +93,7 @@ function routeSemantics(kind: PlayaRoute['kind']): string {
   return 'Straight-line bearing guidance — verify a walkable path around occupied blocks.'
 }
 
-export function DirectionsPanel({ open, compact, layout, pois, events, places, droppedPin, from, to, mode, hasUsableLiveFix, findingLocation, preview, onFromChange, onToChange, onModeChange, onSwap, onStart, onShare, onShareImage, onClose }: Props) {
+export function DirectionsPanel({ open, compact, layout, pois, events, places, droppedPin, from, to, mode, hasUsableLiveFix, findingLocation, destinationResolved, preview, onFromChange, onToChange, onModeChange, onSwap, onStart, onShare, onShareImage, onClose }: Props) {
   const options = useMemo(() => baseOptions(pois, events, places, droppedPin, hasUsableLiveFix, layout), [pois, events, places, droppedPin, hasUsableLiveFix, layout])
   const fromLabel = directionsEndpointLabel(from, pois)
   const canStart = Boolean(to && preview) && (from.kind !== 'live' || hasUsableLiveFix)
@@ -108,8 +108,9 @@ export function DirectionsPanel({ open, compact, layout, pois, events, places, d
     {from.kind === 'live' && <Paper variant="outlined" sx={{ px: 1.25, py: 1 }}><Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><MyLocationIcon fontSize="small" color={hasUsableLiveFix ? 'primary' : 'disabled'} /><Typography variant="body2" color="text.secondary">{hasUsableLiveFix ? `${fromLabel} follows your live GPS position.` : findingLocation ? 'Finding your location… You can choose a destination while GPS starts.' : 'Your location is unavailable here. Choose The Man or another fixed start.'}</Typography></Stack></Paper>}
     <ToggleButtonGroup exclusive fullWidth size="small" value={mode} onChange={(_, value: DirectionsMode | null) => value && onModeChange(value)} aria-label="Travel mode"><ToggleButton value="walk"><DirectionsWalkIcon fontSize="small" /> Walk</ToggleButton><ToggleButton value="bike"><DirectionsBikeIcon fontSize="small" /> Bike</ToggleButton></ToggleButtonGroup>
     {preview && eta !== undefined && <Paper variant="outlined" data-testid="directions-summary" sx={{ p: 1.5 }}><Stack spacing={0.75}><Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', justifyContent: 'space-between' }}><Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{formatDistance(preview.travel)}</Typography><Typography variant="h6" color="primary.main">{formatMinutes(eta)}</Typography></Stack><Typography variant="body2" sx={{ fontWeight: 600 }}>{mode === 'walk' ? 'Walk' : 'Bike'} · head toward {preview.heading}</Typography><Typography variant="caption" color="text.secondary">{routeSemantics(preview.route.kind)}</Typography><Divider /><Typography variant="caption" color="text.secondary">Start: {preview.fromLabel}</Typography><Typography variant="caption" color="text.secondary">{preview.route.kind === 'direct' ? `Continue toward ${preview.heading} using bearing guidance.` : preview.route.kind === 'hybrid' ? 'Use surveyed streets around occupied blocks, then continue across open playa.' : 'Use the surveyed radial and annular streets around occupied blocks.'}</Typography><Typography variant="caption" color="text.secondary">Arrive: {preview.toDetail ?? preview.toLabel}</Typography></Stack></Paper>}
-    {!preview && to && from.kind !== 'live' && <Typography variant="caption" color="warning.main">One of these endpoints cannot be resolved against the current map data.</Typography>}
-    <Stack direction="row" spacing={1}><Button startIcon={<LinkIcon />} variant="outlined" fullWidth disabled={!to} onClick={onShare}>Share link</Button><Button startIcon={<ImageIcon />} variant="outlined" fullWidth disabled={!preview} onClick={onShareImage}>Route card</Button></Stack>
+    {to && !destinationResolved && <Typography variant="caption" color="warning.main">Destination is no longer in the current map or cannot be resolved.</Typography>}
+    {!preview && to && destinationResolved && from.kind !== 'live' && <Typography variant="caption" color="warning.main">The start location cannot be resolved against the current map data.</Typography>}
+    <Stack direction="row" spacing={1}><Button startIcon={<LinkIcon />} variant="outlined" fullWidth disabled={!to || !destinationResolved} onClick={onShare}>Share link</Button><Button startIcon={<ImageIcon />} variant="outlined" fullWidth disabled={!preview} onClick={onShareImage}>Route card</Button></Stack>
     <Button variant="contained" fullWidth disabled={!canStart} onClick={onStart}>Start navigation</Button>
   </Stack>
   return compact ? <Drawer anchor="bottom" open={open} onClose={onClose} ModalProps={{ disableRestoreFocus: true }} slotProps={{ paper: { sx: { borderTopLeftRadius: 16, borderTopRightRadius: 16 } } }}>{content}</Drawer> : <Drawer anchor="right" open={open} onClose={onClose}>{content}</Drawer>

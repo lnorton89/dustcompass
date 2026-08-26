@@ -89,7 +89,7 @@ describe('DirectionsPanel', () => {
     expect((screen.getByRole('combobox', { name: 'From' }) as HTMLInputElement).value).toBe('The Airship')
   })
 
-  it('offers an event whose other_location is a conservatively geocoded playa address (#136)', () => {
+  it('offers an event whose other_location is a conservatively geocoded playa address (#136)', async () => {
     const event: EventItem = {
       uid: 'event-other-location',
       title: 'Open Playa Meetup',
@@ -101,10 +101,7 @@ describe('DirectionsPanel', () => {
     render(<DirectionsPanel {...baseProps} events={[event]} />)
     const to = screen.getByRole('combobox', { name: 'To' })
     fireEvent.change(to, { target: { value: event.title } })
-    // Use the Autocomplete's explicit popup control rather than relying on a
-    // mouseDown implementation detail of MUI's input element.
-    fireEvent.click(screen.getAllByRole('button', { name: 'Open' })[1])
-    expect(screen.getByRole('option', { name: /Open Playa Meetup/i })).toBeDefined()
+    expect(await screen.findByRole('option', { name: /Open Playa Meetup/i })).toBeDefined()
   })
 
   it('refreshes visible endpoint labels when From and To are swapped programmatically', () => {

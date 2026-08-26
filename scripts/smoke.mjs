@@ -782,19 +782,24 @@ assert(
   await mobile.close()
 }
 
-// That URL, opened cold, must restore the same place.
+// #153: active navigation keeps the complete point-to-point intent in the
+// address bar. Opening that URL cold should restore the route itself, not force
+// a single-destination zoom threshold that stopped being the product semantics.
+const activeRouteUrl = page.url()
+assert(new URL(activeRouteUrl).searchParams.get('dir') === '1', 'active navigation keeps a versioned Directions URL (#153)')
 const shared = await context.newPage()
-await shared.goto(page.url(), { waitUntil: 'load' })
+await shared.goto(activeRouteUrl, { waitUntil: 'load' })
 await shared.waitForFunction(() => document.documentElement.dataset.mapReady === 'true', null, {
   timeout: 30000,
 })
 await shared.waitForTimeout(2500)
 const restored = await shared.evaluate(() => ({
-  zoom: window.__map.getZoom(),
   marked: document.querySelectorAll('.maplibregl-marker').length,
+  routeSegments: window.__map.queryRenderedFeatures({ layers: ['route-line'] }).length,
 }))
-assert(restored.marked > 0, `shared link restores the marker (${restored.marked})`)
-assert(restored.zoom > 15, `shared link restores the zoom (${restored.zoom.toFixed(1)})`)
+assert(restored.marked > 0, `active route link restores endpoint markers (${restored.marked})`)
+assert(restored.routeSegments > 0, `active route link restores route geometry (${restored.routeSegments} segment)` )
+assert((await shared.getByTestId('directions-summary').count()) === 1, 'active route URL restores the complete Directions intent (#153)')
 await shared.close()
 
 // A shared listing link goes to a page of its own so it previews as that place.
@@ -1031,6 +1036,7 @@ await shared.close()
           ? Math.max(...points.map(([lng, lat]) => Math.hypot(lng - man[0], lat - man[1])))
           : null,
         readout: document.body.innerText,
+        routeFrom: new URL(window.location.href).searchParams.get('from'),
       }
     }, man)
     await ctx.close()
@@ -1046,20 +1052,20 @@ await shared.close()
   // A degree is about 111km here, so the whole city and the road in fit inside a
   // third of one. San Francisco is four degrees away and unmissable.
   const near = await reachFrom('near fix', { latitude: 40.7772, longitude: -119.1893 })
-  const far = await reachFrom('distant fix', { latitude: 37.7749, longitude: -122.4194 }, false)
+  const far = await reachFrom('distant fix', { latitude: 37.7749, longitude: -122.4194 })
   assert(near.reach != null && near.reach < 0.35, `a fix in the city routes from the fix (${near.reach?.toFixed(3) ?? 'no route'}°)`)
   assert(/toward \d/.test(near.readout), 'a fix in the city gives a bearing to walk')
-  // A live-origin route is deliberately withheld until there is a usable
-  // on-playa fix. The navigation readout may fall back to the Man for context,
-  // but drawing that fallback as if it were the user's path would be misleading.
+  // #138: an unusable/off-playa GPS fix now becomes an explicit fixed Man
+  // origin. The visible line, readout, and serialized route must all agree.
   assert(
-    far.points === 0 && far.reach == null,
-    `a distant fix does not draw a fake route from the Man (${far.points} points)`,
+    far.reach != null && far.reach < 0.35,
+    `a distant fix falls back to a local Man-origin route (${far.reach?.toFixed(3) ?? 'no route'}°)`,
   )
   assert(
     /from the Man/i.test(far.readout),
     'a distant fix says the distance is measured from the Man',
   )
+  assert(far.routeFrom === 'man', `the fallback route serializes From = The Man (#138) (got ${far.routeFrom})`)
 }
 
 /**

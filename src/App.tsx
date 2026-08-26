@@ -1046,6 +1046,7 @@ export default function App() {
         originLabel: 'The Man',
         liveOrigin: false,
         retryableOrigin: true,
+        routeFrom: { kind: 'man' },
       } : current)
       releaseLocation('navigation')
       const routed = routeBetween(data.layout, manPosition, heading.position)
@@ -1067,6 +1068,7 @@ export default function App() {
         originLabel: 'Your location',
         liveOrigin: true,
         retryableOrigin: true,
+        routeFrom: { kind: 'live' },
       } : current)
       setNavigationRetrying(false)
       const routed = routeBetween(data.layout, usableFix, heading.position)

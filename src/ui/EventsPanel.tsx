@@ -36,7 +36,7 @@ import { formatDistance, travelBetween } from '../brc/travel'
 import type { Position } from '../brc/geo'
 import type { CityLayout } from '../brc/layout'
 import type { LocationStatus } from '../data/useGeolocation'
-import type { SavedEvent } from '../data/useSavedEvents'
+import { savedEventMatches, type SavedEvent } from '../data/useSavedEvents'
 
 interface Props {
   open: boolean
@@ -190,7 +190,7 @@ export function EventsPanel({
     const live: LiveEvent[] = []
     for (const saved of savedEvents) {
       const event = byUid.get(saved.uid)
-      if (!event) continue
+      if (!event || !savedEventMatches(saved, event)) continue
       const relevant = relevantOccurrence(event, now)
       if (!relevant) continue
       live.push({
@@ -213,11 +213,13 @@ export function EventsPanel({
    */
   const missingSavedEvents = useMemo(() => {
     if (window !== 'saved') return []
-    const presentUids = new Set(events.map((event) => event.uid))
+    const byUid = new Map(events.map((event) => [event.uid, event] as const))
     const term = query.trim().toLowerCase()
-    return savedEvents.filter(
-      (saved) => !presentUids.has(saved.uid) && (!term || saved.title.toLowerCase().includes(term)),
-    )
+    return savedEvents.filter((saved) => {
+      const current = byUid.get(saved.uid)
+      const missingOrReused = !current || !savedEventMatches(saved, current)
+      return missingOrReused && (!term || saved.title.toLowerCase().includes(term))
+    })
   }, [window, events, savedEvents, query])
 
   const matching = useMemo(() => {

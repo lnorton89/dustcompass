@@ -19,36 +19,42 @@ export function useWakeLock(active: boolean): WakeLockState {
   useEffect(() => {
     if (state === 'unsupported' || !active) return
     let cancelled = false
+    let acquiring = false
 
     const acquire = async () => {
+      // `lock.current` is populated only after request() resolves. Without a
+      // separate in-flight guard, a visibility event can start request B while
+      // request A is pending and orphan A when B later overwrites the ref (#166).
+      if (cancelled || acquiring || lock.current) return
+      acquiring = true
       try {
         const sentinel = await navigator.wakeLock.request('screen')
         if (cancelled) {
-          // `active` already went false, or this effect re-ran, while the
-          // request was in flight — release immediately rather than leaving
-          // a lock nothing here still references.
+          void sentinel.release()
+          return
+        }
+        // Defensive: if the platform somehow resolved another sentinel while
+        // this request was pending, never replace it without releasing this one.
+        if (lock.current) {
           void sentinel.release()
           return
         }
         lock.current = sentinel
         setState('active')
         sentinel.addEventListener('release', () => {
-          lock.current = null
+          if (lock.current === sentinel) lock.current = null
           if (!cancelled) setState('inactive')
         })
       } catch {
-        // Rejected — battery saver, a hidden tab, no user activation yet.
-        // Navigation keeps working exactly as it did before this existed.
-        setState('inactive')
+        if (!cancelled) setState('inactive')
+      } finally {
+        acquiring = false
       }
     }
     void acquire()
 
-    // The OS/browser revokes the lock the moment the tab is hidden, with no
-    // "still wants it" signal beyond that revocation — so this reacquires
-    // whenever the tab becomes visible again while navigation is still active.
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && !lock.current) void acquire()
+      if (document.visibilityState === 'visible') void acquire()
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
 
@@ -57,7 +63,7 @@ export function useWakeLock(active: boolean): WakeLockState {
       document.removeEventListener('visibilitychange', onVisibilityChange)
       const sentinel = lock.current
       lock.current = null
-      setState('inactive')
+      queueMicrotask(() => setState('inactive'))
       if (sentinel) void sentinel.release()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `state` is only read to bail out on 'unsupported'; including it would tear the lock down every time this effect itself flips it to 'active'.

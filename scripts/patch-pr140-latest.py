@@ -41,7 +41,7 @@ marker="  const navigation = useMemo(() => {\n"; effect="""  useEffect(() => {
       return () => cancelAnimationFrame(id)
     }
     if (latest.position[0] === heading.position[0] && latest.position[1] === heading.position[1] && latest.name === heading.name && latest.address === heading.address) return
-    const id = requestAnimationFrame(() => { arrived.current = false; setHeading((current) => current?.uid === latest.uid ? { ...current, name: latest.name, position: latest.position, address: latest.address, approximate: latest.accuracyClass === 'derived' } : current) })
+    const id = requestAnimationFrame(() => { setHeading((current) => current?.uid === latest.uid ? { ...current, name: latest.name, position: latest.position, address: latest.address, approximate: latest.accuracyClass === 'derived' } : current) })
     return () => cancelAnimationFrame(id)
   }, [data, heading?.address, heading?.name, heading?.position, heading?.uid, releaseLocation])
 

@@ -40,6 +40,7 @@ describe('directions endpoint runtime resolution', () => {
       label: 'The Man',
       position: [-119.2035, 40.7864],
       dynamic: false,
+      accuracy: 'exact',
     })
   })
 
@@ -55,16 +56,31 @@ describe('directions endpoint runtime resolution', () => {
       label: 'Your location',
       position: [-119.201, 40.782],
       dynamic: true,
+      accuracy: 'exact',
     })
   })
 
-  it('resolves POIs by stable UID rather than copying stale coordinates into route intent', () => {
+  it('resolves POIs by stable UID and preserves published-best-effort provenance (#137)', () => {
     expect(resolveDirectionsEndpoint({ kind: 'poi', uid: camp.uid }, context)).toMatchObject({
       label: camp.name,
       detail: camp.address,
       position: camp.position,
+      accuracy: 'published',
     })
     expect(resolveDirectionsEndpoint({ kind: 'poi', uid: 'missing' }, context)).toBeUndefined()
+  })
+
+  it('distinguishes derived listing locations from surveyed/exact endpoints (#137)', () => {
+    const derived: Poi = {
+      ...camp,
+      uid: 'camp-derived',
+      name: 'Address-derived Camp',
+      positionSource: 'address',
+      accuracyClass: 'derived',
+    }
+    expect(resolveDirectionsEndpoint({ kind: 'poi', uid: derived.uid }, { layout, pois: [derived] })).toMatchObject({
+      accuracy: 'approximate',
+    })
   })
 
   it('accepts explicit fixed endpoints for reproducible planned routes', () => {
@@ -78,6 +94,7 @@ describe('directions endpoint runtime resolution', () => {
       label: 'Meet here',
       position: [-119.2, 40.78],
       dynamic: false,
+      accuracy: 'exact',
     })
   })
 
@@ -88,7 +105,7 @@ describe('directions endpoint runtime resolution', () => {
         { kind: 'poi', uid: camp.uid },
         context,
       ),
-    ).toMatchObject({ from: { label: 'The Man' }, to: { label: 'Test Camp' } })
+    ).toMatchObject({ from: { label: 'The Man' }, to: { label: 'Test Camp', accuracy: 'published' } })
 
     expect(
       resolveDirectionsRoute(

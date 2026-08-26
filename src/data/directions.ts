@@ -103,7 +103,11 @@ export function readDirectionsResult(search = typeof window === 'undefined' ? ''
   const from = decodeEndpoint(params.get('from'))
   const to = decodeEndpoint(params.get('to'))
   const mode = params.get('mode')
-  if (!from || !to || (mode !== 'walk' && mode !== 'bike')) return { status: 'invalid' }
+  // Active navigation currently has one moving reference point: the reader as
+  // the origin. Accepting `live` as a destination in preview and then freezing
+  // it at Start changes the route's meaning, so version 1 explicitly rejects
+  // that unsupported semantic instead of silently degrading it (#154).
+  if (!from || !to || to.kind === 'live' || (mode !== 'walk' && mode !== 'bike')) return { status: 'invalid' }
   return { status: 'resolved', intent: { version: 1, from, to, mode } }
 }
 

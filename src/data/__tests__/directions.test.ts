@@ -8,6 +8,8 @@ import {
   type DirectionsIntent,
 } from '../directions'
 
+// Shared route parsing is a trust boundary: rejected annual/schema links must
+// remain distinguishable from an ordinary root-map load (#151).
 describe('directions share links', () => {
   it('round-trips dynamic live-location routes without leaking a coordinate', () => {
     const intent: DirectionsIntent = { version: 1, from: { kind: 'live' }, to: { kind: 'poi', uid: 'camp-123' }, mode: 'walk' }

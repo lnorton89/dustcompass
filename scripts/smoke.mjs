@@ -724,12 +724,10 @@ assert(
   'saved-spot destination is named on the map',
 )
 
-// #14: the orientation control has to track the map's actual bearing, not
-// just whichever toggle last requested a rotation — a gesture or MapLibre's
-// own compass control can change it independently of that toggle. Driven at
-// a phone-width viewport, since the visible "12:00 up"/"North up" label only
-// renders in the compact bottom bar; the desktop toolbar shows the same
-// state as a hover tooltip, which isn't practical to assert here.
+// #14/#141: the orientation control has to track both the map's actual bearing
+// and the action it will perform next. A gesture or MapLibre's own compass can
+// change bearing independently of React, so current-state text and accessible
+// action text are asserted together at a phone-width viewport.
 {
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 } })
   const orient = await mobile.newPage()
@@ -745,10 +743,14 @@ assert(
   await orient.waitForFunction(() => window.__map, null, { timeout: 30000 })
   await orient.waitForTimeout(3000)
 
-  const orientButton = orient.getByRole('button', { name: 'Orient the map so 12:00 points up' })
+  const orientButton = orient.getByRole('button', {
+    name: /Switch map to North up|Switch map to 12:00 up|Orient map to 12:00 up/,
+  })
   const orientLabel = () => orientButton.innerText()
+  const orientAction = () => orientButton.getAttribute('aria-label')
 
   assert((await orientLabel()).includes('12:00 up'), 'orientation control starts city-up on a fresh load')
+  assert((await orientAction()) === 'Switch map to North up', 'city-up control advertises switching to North up (#141)')
 
   // Rotate the map directly through MapLibre, bypassing every React state
   // setter — this is exactly what the built-in compass control and a
@@ -759,13 +761,15 @@ assert(
     (await orientLabel()).includes('North up'),
     'rotating to north outside React updates the control to North up',
   )
+  assert((await orientAction()) === 'Switch map to 12:00 up', 'north-up control advertises switching to 12:00 up (#141)')
 
   await orient.evaluate(() => window.__map.setBearing(200))
   await orient.waitForTimeout(300)
   assert(
-    !(await orientLabel()).includes('12:00 up') && !(await orientLabel()).includes('North up'),
-    'a manual rotation to neither canonical bearing leaves neither orientation selected',
+    (await orientLabel()).includes('Free rotation'),
+    'a manual rotation to neither canonical bearing reports Free rotation',
   )
+  assert((await orientAction()) === 'Orient map to 12:00 up', 'free-rotation control advertises restoring 12:00 up (#141)')
 
   await orientButton.click()
   await orient.waitForTimeout(700)
@@ -773,6 +777,7 @@ assert(
     (await orientLabel()).includes('12:00 up'),
     'tapping the orientation control still snaps to city-up from a free rotation',
   )
+  assert((await orientAction()) === 'Switch map to North up', 'restored city-up control advertises its next action (#141)')
 
   await mobile.close()
 }

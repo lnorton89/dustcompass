@@ -5,11 +5,6 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useCompassHeading } from '../useCompassHeading'
 
-/**
- * jsdom implements no Device Orientation API at all, so every scenario here
- * stands up its own `DeviceOrientationEvent` global (or deliberately leaves
- * it absent) rather than relying on anything jsdom provides.
- */
 function dispatchOrientation(
   name: 'deviceorientation' | 'deviceorientationabsolute',
   props: { alpha?: number; absolute?: boolean; webkitCompassHeading?: number; webkitCompassAccuracy?: number },
@@ -28,8 +23,6 @@ describe('useCompassHeading (#63)', () => {
     const { result } = renderHook(() => useCompassHeading(true))
     expect(result.current.support).toBe('unsupported')
     expect(result.current.heading).toBeUndefined()
-
-    // Calling it anyway (e.g. a stray click) must be a safe no-op, never a throw.
     await act(async () => {
       await result.current.requestPermission()
     })
@@ -39,33 +32,27 @@ describe('useCompassHeading (#63)', () => {
   it('starts at idle (no permission gate) on a platform like Android, and does not listen until requestPermission is called', () => {
     class NoGateDeviceOrientationEvent {}
     vi.stubGlobal('DeviceOrientationEvent', NoGateDeviceOrientationEvent)
-
     const { result } = renderHook(() => useCompassHeading(true))
     expect(result.current.support).toBe('idle')
-
     act(() => {
       dispatchOrientation('deviceorientation', { alpha: 90, absolute: true })
     })
-    // No listener attached yet — the tap-gated affordance is uniform across
-    // platforms even where the browser itself requires no prompt.
     expect(result.current.heading).toBeUndefined()
   })
 
   it('activates and starts receiving heading once requestPermission is called on a no-gate platform', async () => {
     class NoGateDeviceOrientationEvent {}
     vi.stubGlobal('DeviceOrientationEvent', NoGateDeviceOrientationEvent)
-
     const { result } = renderHook(() => useCompassHeading(true))
     await act(async () => {
       await result.current.requestPermission()
     })
     expect(result.current.support).toBe('active')
-
     act(() => {
       dispatchOrientation('deviceorientation', { alpha: 90, absolute: true })
     })
-    expect(result.current.heading).toBeCloseTo(270) // (360 - 90) % 360
-    expect(result.current.accuracy).toBeUndefined() // no standard accuracy field
+    expect(result.current.heading).toBeCloseTo(270)
+    expect(result.current.accuracy).toBeUndefined()
   })
 
   it('starts at needs-permission on an iOS-Safari-like platform', () => {
@@ -73,7 +60,6 @@ describe('useCompassHeading (#63)', () => {
       static requestPermission = vi.fn().mockResolvedValue('granted')
     }
     vi.stubGlobal('DeviceOrientationEvent', GatedDeviceOrientationEvent)
-
     const { result } = renderHook(() => useCompassHeading(true))
     expect(result.current.support).toBe('needs-permission')
   })
@@ -83,7 +69,6 @@ describe('useCompassHeading (#63)', () => {
       static requestPermission = vi.fn().mockResolvedValue('denied')
     }
     vi.stubGlobal('DeviceOrientationEvent', GatedDeviceOrientationEvent)
-
     const { result } = renderHook(() => useCompassHeading(true))
     await act(async () => {
       await result.current.requestPermission()
@@ -98,10 +83,8 @@ describe('useCompassHeading (#63)', () => {
       static requestPermission = requestPermission
     }
     vi.stubGlobal('DeviceOrientationEvent', GatedDeviceOrientationEvent)
-
     const { result } = renderHook(() => useCompassHeading(true))
     await act(async () => result.current.requestPermission())
-
     expect(requestPermission).toHaveBeenCalledWith(true)
   })
 
@@ -110,9 +93,7 @@ describe('useCompassHeading (#63)', () => {
     vi.stubGlobal('DeviceOrientationEvent', NoGateDeviceOrientationEvent)
     const { result } = renderHook(() => useCompassHeading(true))
     await act(async () => result.current.requestPermission())
-
     act(() => dispatchOrientation('deviceorientation', { alpha: 90, absolute: false }))
-
     expect(result.current.heading).toBeUndefined()
   })
 
@@ -121,7 +102,6 @@ describe('useCompassHeading (#63)', () => {
       static requestPermission = vi.fn().mockRejectedValue(new Error('not a user gesture'))
     }
     vi.stubGlobal('DeviceOrientationEvent', GatedDeviceOrientationEvent)
-
     const { result } = renderHook(() => useCompassHeading(true))
     await act(async () => {
       await result.current.requestPermission()
@@ -134,12 +114,10 @@ describe('useCompassHeading (#63)', () => {
       static requestPermission = vi.fn().mockResolvedValue('granted')
     }
     vi.stubGlobal('DeviceOrientationEvent', GatedDeviceOrientationEvent)
-
     const { result } = renderHook(() => useCompassHeading(true))
     await act(async () => {
       await result.current.requestPermission()
     })
-
     act(() => {
       dispatchOrientation('deviceorientation', { alpha: 12, webkitCompassHeading: 271.4, webkitCompassAccuracy: 5 })
     })
@@ -152,12 +130,10 @@ describe('useCompassHeading (#63)', () => {
       static requestPermission = vi.fn().mockResolvedValue('granted')
     }
     vi.stubGlobal('DeviceOrientationEvent', GatedDeviceOrientationEvent)
-
     const { result } = renderHook(() => useCompassHeading(true))
     await act(async () => {
       await result.current.requestPermission()
     })
-
     act(() => {
       dispatchOrientation('deviceorientation', { webkitCompassHeading: 90, webkitCompassAccuracy: -1 })
     })
@@ -168,26 +144,21 @@ describe('useCompassHeading (#63)', () => {
   it('prefers deviceorientationabsolute when the platform exposes it', async () => {
     class NoGateDeviceOrientationEvent {}
     vi.stubGlobal('DeviceOrientationEvent', NoGateDeviceOrientationEvent)
-    // Feature-detected via `'ondeviceorientationabsolute' in window`.
     Object.defineProperty(window, 'ondeviceorientationabsolute', { value: null, configurable: true })
-
     const { result } = renderHook(() => useCompassHeading(true))
     await act(async () => {
       await result.current.requestPermission()
     })
-
     act(() => {
       dispatchOrientation('deviceorientationabsolute', { alpha: 45, absolute: true })
     })
     expect(result.current.heading).toBeCloseTo(315)
-
     Reflect.deleteProperty(window, 'ondeviceorientationabsolute')
   })
 
-  it('stops listening once `active` goes false (navigation ended) without throwing', async () => {
+  it('stops listening and invalidates the previous navigation sample when `active` goes false (#165)', async () => {
     class NoGateDeviceOrientationEvent {}
     vi.stubGlobal('DeviceOrientationEvent', NoGateDeviceOrientationEvent)
-
     const { result, rerender } = renderHook(({ active }) => useCompassHeading(active), {
       initialProps: { active: true },
     })
@@ -200,11 +171,22 @@ describe('useCompassHeading (#63)', () => {
     expect(result.current.heading).toBeCloseTo(0)
 
     rerender({ active: false })
+    await act(async () => {})
+    expect(result.current.support).toBe('active')
+    expect(result.current.heading).toBeUndefined()
+    expect(result.current.accuracy).toBeUndefined()
+
     act(() => {
       dispatchOrientation('deviceorientation', { alpha: 180, absolute: true })
     })
-    // The listener was removed, so the stale reading from before is what's
-    // left — not a crash, and not a silently-still-live subscription.
-    expect(result.current.heading).toBeCloseTo(0)
+    expect(result.current.heading).toBeUndefined()
+
+    rerender({ active: true })
+    await act(async () => {})
+    expect(result.current.heading).toBeUndefined()
+    act(() => {
+      dispatchOrientation('deviceorientation', { alpha: 90, absolute: true })
+    })
+    expect(result.current.heading).toBeCloseTo(270)
   })
 })

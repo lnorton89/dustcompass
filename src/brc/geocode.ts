@@ -195,7 +195,10 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
   }
 
   // "2:00 B Plaza & B" — the plaza, named alongside the street it sits on.
-  // The street adds nothing the plaza does not already fix, so drop it.
+  // The street adds nothing the plaza does not already fix, so this must have
+  // the same centre-point semantics as the plain named-plaza form. `plaza`
+  // is intentionally omitted: that field is reserved for explicit
+  // "<plaza> @ <clock>" rim positions (#156).
   const plazaOnStreet = /^(.*plaza)\s*&\s*(.+)$/i.exec(raw)
   if (plazaOnStreet && findPlaza(layout, plazaOnStreet[1])) {
     const plaza = findPlaza(layout, plazaOnStreet[1])!
@@ -205,7 +208,6 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
         clock: declared.time,
         distanceFeet: resolve(layout, declared.distance),
         street: typeof declared.distance === 'string' ? declared.distance : undefined,
-        plaza: declared.name,
         label: declared.name,
       }
     }
@@ -226,16 +228,23 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
     }
   }
 
-  // "<clock> <feet>" — open playa, the form art listings use.
+  // "<clock> <feet>" — open playa, the form art listings use. A polar
+  // address outside the annual surveyed fence is not a BRC address: accepting
+  // an arbitrary five-digit radius can confidently put a route tens of
+  // kilometres away. Use the survey's own fence radius as the trust boundary
+  // rather than the regex's digit count (#157).
+  //
   // The trailing guard matters: without it the hour of a second clock reads
   // as a distance, and "10:00 & 10:00 B Plaza" pins ten feet from the Man
   // instead of on a plaza a kilometre away.
   const open = new RegExp(String.raw`^(${CLOCK})\s*[,&@]?\s*(\d{1,5})(?![\d:.])\s*(?:'|ft|feet)?(?:\s*,?\s*Open Playa)?\s*$`, 'i').exec(raw)
   if (open) {
     const clock = normaliseClock(open[1])
+    const distanceFeet = Number(open[2])
+    if (distanceFeet <= 0 || distanceFeet > layout.fence_distance) return undefined
     return {
       clock,
-      distanceFeet: Number(open[2]),
+      distanceFeet,
       label: `${clock} & ${open[2]}'`,
     }
   }
@@ -250,10 +259,16 @@ export function parseAddress(input: string, layout: CityLayout): PlayaAddress | 
     // "3:00 Portal & A" is the 3:00 radial meeting A — the portal is a gap in
     // the ring at that clock, not a separate place.
     .map((part) => part.replace(/\s*portal\s*$/i, '').trim())
-  if (parts.length >= 2) {
-    const clockPart = parts.find((p) => new RegExp(`^${CLOCK}$`).test(p.trim()))
+  // This branch describes exactly one clock and one street/landmark. Extra
+  // components are ambiguity, not comments to discard: accepting the first
+  // usable pair from "7:30 & B & 9:00" invents a confident destination the
+  // full input never unambiguously named (#158).
+  if (parts.length === 2) {
+    const clockParts = parts.filter((p) => new RegExp(`^${CLOCK}$`).test(p.trim()))
+    if (clockParts.length !== 1) return undefined
+    const clockPart = clockParts[0]
     const streetPart = parts.find((p) => p !== clockPart)
-    if (clockPart && streetPart) {
+    if (streetPart) {
       const street = findAnnular(layout, streetPart)
       if (street) {
         const clock = normaliseClock(clockPart)

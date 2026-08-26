@@ -31,25 +31,6 @@ interface IOSOrientationEvent extends DeviceOrientationEvent {
   webkitCompassAccuracy?: number
 }
 
-/**
- * Reads the device's physical compass heading — not the MapLibre camera
- * bearing, which is a separate, unrelated rotation the map already handles
- * via its own "12:00 up"/"North up" controls (#63). This is the sensor a
- * needle points with.
- *
- * Mirrors `useWakeLock`'s shape: feature-detection lives in `useState`'s
- * lazy initializer, the listener is added/removed by an effect gated on
- * `active`, and it never throws — an unsupported browser or a denied prompt
- * degrades to "no needle", not a broken screen.
- *
- * iOS Safari gates orientation events behind a permission prompt that must
- * be triggered by a tap (`DeviceOrientationEvent.requestPermission`).
- * Android and everything else has no such gate — events just start firing
- * once a listener exists — so `support` starts at `'idle'` there instead of
- * `'needs-permission'`, but the listener still only attaches once
- * `requestPermission()` has been called at least once, so the same
- * "tap the compass on" affordance works uniformly on every platform.
- */
 export function useCompassHeading(active: boolean): CompassHeading {
   const [support, setSupport] = useState<CompassSupport>(() => {
     if (typeof window === 'undefined' || typeof DeviceOrientationEvent === 'undefined') {
@@ -66,31 +47,34 @@ export function useCompassHeading(active: boolean): CompassHeading {
     const ctor = DeviceOrientationEvent as unknown as RequestPermissionCtor
     if (typeof ctor.requestPermission === 'function') {
       try {
-        // The current Device Orientation permission API accepts `true` to
-        // request absolute (magnetometer-backed) orientation. Older Safari
-        // implementations ignore the extra argument and still return their
-        // iOS-specific webkitCompassHeading below.
         const result = await ctor.requestPermission(true)
         setSupport(result === 'granted' ? 'active' : 'denied')
       } catch {
-        // Denied, or asked outside a user gesture — either way, degrade to
-        // the existing text/route navigation rather than a broken control.
         setSupport('denied')
       }
       return
     }
-    // No permission gate on this platform — "turning the compass on" just
-    // means the listener effect below is now allowed to attach.
     setSupport('active')
   }, [support])
+
+  // A compass sample is valid only for the navigation/listening session that
+  // produced it. Keep permission state, but invalidate sensor data as soon as
+  // navigation stops so a later route cannot paint the old needle before a
+  // fresh orientation event arrives (#165). Queueing avoids a synchronous
+  // setState cascade inside the effect body while still clearing before paint.
+  useEffect(() => {
+    if (active) return
+    queueMicrotask(() => {
+      setHeading(undefined)
+      setAccuracy(undefined)
+    })
+  }, [active])
 
   useEffect(() => {
     if (support !== 'active' || !active) return
     if (typeof window === 'undefined' || typeof DeviceOrientationEvent === 'undefined') return
     let cancelled = false
 
-    // Plain `deviceorientation` is not guaranteed to be earth-relative on
-    // every platform — `deviceorientationabsolute` is, where it exists.
     const eventName = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation'
 
     const onOrientation = (event: DeviceOrientationEvent) => {
@@ -101,8 +85,6 @@ export function useCompassHeading(active: boolean): CompassHeading {
         setAccuracy(typeof ios.webkitCompassAccuracy === 'number' && ios.webkitCompassAccuracy >= 0 ? ios.webkitCompassAccuracy : undefined)
         return
       }
-      // Plain deviceorientation may be relative to an arbitrary frame. It is
-      // not a compass unless the sample explicitly says it is Earth-relative.
       if (event.alpha != null && (eventName === 'deviceorientationabsolute' || event.absolute === true)) {
         setHeading((360 - event.alpha) % 360)
         setAccuracy(undefined)

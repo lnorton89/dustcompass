@@ -72,6 +72,7 @@ function EndpointPicker({ label, value, options, layout, pois, disableLive, clea
   const selected = value ? dynamicOptions.find((option) => option.key === optionKey(value)) ?? dynamicOptions.find((option) => optionKey(option.endpoint) === optionKey(value)) ?? { key: optionKey(value), label: directionsEndpointLabel(value, pois), detail: '', endpoint: value } : null
   return <Autocomplete key={value ? optionKey(value) : 'empty'} options={dynamicOptions} value={selected}
     autoHighlight disableClearable={!clearable}
+    sx={clearable ? { '& .MuiAutocomplete-clearIndicator': { visibility: 'visible' } } : undefined}
     onInputChange={(_, next, reason) => setQuery(reason === 'input' ? next : '')} getOptionLabel={(option) => option.label}
     getOptionDisabled={(option) => disableLive && option.endpoint.kind === 'live'} isOptionEqualToValue={(a, b) => a.key === b.key}
     filterOptions={(items, state) => {

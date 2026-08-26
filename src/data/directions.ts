@@ -17,6 +17,13 @@ export interface DirectionsIntent {
   mode: DirectionsMode
 }
 
+export type DirectionsReadResult =
+  | { status: 'none' }
+  | { status: 'resolved'; intent: DirectionsIntent }
+  | { status: 'wrong-year'; year: string | null }
+  | { status: 'unsupported-version'; version: string | null }
+  | { status: 'invalid' }
+
 const VERSION = '1'
 const roundCoord = (n: number) => Math.round(n * 1e6) / 1e6
 
@@ -36,21 +43,11 @@ function parsePosition(raw: string): Position | undefined {
 
 function encodeEndpoint(endpoint: DirectionsEndpoint): string {
   switch (endpoint.kind) {
-    case 'live':
-      // Deliberately carries no coordinate. A shared "Your location" route
-      // resolves against the recipient's own fresh fix instead of leaking the
-      // sender's precise position into a URL (#132).
-      return 'live'
-    case 'man':
-      return 'man'
-    case 'poi':
-      return `poi:${endpoint.uid}`
-    case 'address':
-      return endpoint.position
-        ? `at:${endpoint.address}|${encodePosition(endpoint.position)}`
-        : `at:${endpoint.address}`
-    case 'fixed':
-      return `fixed:${endpoint.label}|${encodePosition(endpoint.position)}`
+    case 'live': return 'live'
+    case 'man': return 'man'
+    case 'poi': return `poi:${endpoint.uid}`
+    case 'address': return endpoint.position ? `at:${endpoint.address}|${encodePosition(endpoint.position)}` : `at:${endpoint.address}`
+    case 'fixed': return `fixed:${endpoint.label}|${encodePosition(endpoint.position)}`
   }
 }
 
@@ -58,12 +55,10 @@ function decodeEndpoint(raw: string | null): DirectionsEndpoint | undefined {
   if (!raw) return undefined
   if (raw === 'live') return { kind: 'live' }
   if (raw === 'man') return { kind: 'man' }
-
   if (raw.startsWith('poi:')) {
     const uid = raw.slice(4).trim()
     return uid ? { kind: 'poi', uid } : undefined
   }
-
   if (raw.startsWith('at:')) {
     const payload = raw.slice(3)
     const separator = payload.lastIndexOf('|')
@@ -75,7 +70,6 @@ function decodeEndpoint(raw: string | null): DirectionsEndpoint | undefined {
     const position = parsePosition(payload.slice(separator + 1))
     return address && position ? { kind: 'address', address, position } : undefined
   }
-
   if (raw.startsWith('fixed:')) {
     const payload = raw.slice(6)
     const separator = payload.lastIndexOf('|')
@@ -84,16 +78,10 @@ function decodeEndpoint(raw: string | null): DirectionsEndpoint | undefined {
     const position = parsePosition(payload.slice(separator + 1))
     return label && position ? { kind: 'fixed', label, position } : undefined
   }
-
   return undefined
 }
 
-export function directionsUrl(
-  intent: DirectionsIntent,
-  base = typeof window === 'undefined'
-    ? 'https://lnorton89.github.io/dustcompass/'
-    : window.location.href,
-): string {
+export function directionsUrl(intent: DirectionsIntent, base = typeof window === 'undefined' ? 'https://lnorton89.github.io/dustcompass/' : window.location.href): string {
   const url = new URL(base)
   url.search = ''
   url.hash = ''
@@ -105,30 +93,25 @@ export function directionsUrl(
   return url.toString()
 }
 
-export function readDirectionsIntent(
-  search = typeof window === 'undefined' ? '' : window.location.search,
-): DirectionsIntent | undefined {
+export function readDirectionsResult(search = typeof window === 'undefined' ? '' : window.location.search): DirectionsReadResult {
   const params = new URLSearchParams(search)
-  if (params.get('dir') !== VERSION) return undefined
-  // Annual POI identities and street geometry are not portable between BRC
-  // surveys. Refuse a route for another data year instead of silently opening
-  // its names/coordinates against the wrong city plan.
-  if (params.get('year') !== String(DATA_YEAR)) return undefined
-
+  if (!params.has('dir')) return { status: 'none' }
+  const version = params.get('dir')
+  if (version !== VERSION) return { status: 'unsupported-version', version }
+  const year = params.get('year')
+  if (year !== String(DATA_YEAR)) return { status: 'wrong-year', year }
   const from = decodeEndpoint(params.get('from'))
   const to = decodeEndpoint(params.get('to'))
   const mode = params.get('mode')
-  if (!from || !to || (mode !== 'walk' && mode !== 'bike')) return undefined
-
-  return { version: 1, from, to, mode }
+  if (!from || !to || (mode !== 'walk' && mode !== 'bike')) return { status: 'invalid' }
+  return { status: 'resolved', intent: { version: 1, from, to, mode } }
 }
 
-/**
- * Automatic navigation origin for the directions UI. A usable live fix is
- * represented symbolically rather than copied into route state, so it can keep
- * following GPS updates. Every failure/stale/out-of-city path visibly falls
- * back to the Man and remains editable by the caller (#132).
- */
+export function readDirectionsIntent(search = typeof window === 'undefined' ? '' : window.location.search): DirectionsIntent | undefined {
+  const result = readDirectionsResult(search)
+  return result.status === 'resolved' ? result.intent : undefined
+}
+
 export function defaultDirectionsOrigin(hasUsableLiveFix: boolean): DirectionsEndpoint {
   return hasUsableLiveFix ? { kind: 'live' } : { kind: 'man' }
 }

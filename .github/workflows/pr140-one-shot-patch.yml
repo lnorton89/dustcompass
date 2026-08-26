@@ -1,0 +1,63 @@
+name: PR140 one-shot regression patch
+
+on:
+  push:
+    branches:
+      - fix/directions-audit-134-139
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[pr140-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/directions-audit-134-139
+          fetch-depth: 0
+      - name: Apply focused regression fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          app = Path('src/App.tsx')
+          text = app.read_text()
+          old = """        liveOrigin: false,\n        retryableOrigin: true,\n      } : current)"""
+          new = """        liveOrigin: false,\n        retryableOrigin: true,\n        routeFrom: { kind: 'man' },\n      } : current)"""
+          assert text.count(old) == 1, text.count(old)
+          text = text.replace(old, new)
+          old = """        liveOrigin: true,\n        retryableOrigin: true,\n      } : current)"""
+          new = """        liveOrigin: true,\n        retryableOrigin: true,\n        routeFrom: { kind: 'live' },\n      } : current)"""
+          assert text.count(old) == 1, text.count(old)
+          text = text.replace(old, new)
+          app.write_text(text)
+
+          smoke = Path('scripts/smoke.mjs')
+          text = smoke.read_text()
+          old = """// That URL, opened cold, must restore the same place.\nconst shared = await context.newPage()\nawait shared.goto(page.url(), { waitUntil: 'load' })\nawait shared.waitForFunction(() => document.documentElement.dataset.mapReady === 'true', null, {\n  timeout: 30000,\n})\nawait shared.waitForTimeout(2500)\nconst restored = await shared.evaluate(() => ({\n  zoom: window.__map.getZoom(),\n  marked: document.querySelectorAll('.maplibregl-marker').length,\n}))\nassert(restored.marked > 0, `shared link restores the marker (${restored.marked})`)\nassert(restored.zoom > 15, `shared link restores the zoom (${restored.zoom.toFixed(1)})`)\nawait shared.close()"""
+          new = """// #153: active navigation keeps the complete point-to-point intent in the\n// address bar. Opening that URL cold should restore the route itself, not force\n// a single-destination zoom threshold that stopped being the product semantics.\nconst activeRouteUrl = page.url()\nassert(new URL(activeRouteUrl).searchParams.get('dir') === '1', 'active navigation keeps a versioned Directions URL (#153)')\nconst shared = await context.newPage()\nawait shared.goto(activeRouteUrl, { waitUntil: 'load' })\nawait shared.waitForFunction(() => document.documentElement.dataset.mapReady === 'true', null, {\n  timeout: 30000,\n})\nawait shared.waitForTimeout(2500)\nconst restored = await shared.evaluate(() => ({\n  marked: document.querySelectorAll('.maplibregl-marker').length,\n  routeSegments: window.__map.queryRenderedFeatures({ layers: ['route-line'] }).length,\n}))\nassert(restored.marked > 0, `active route link restores endpoint markers (${restored.marked})`)\nassert(restored.routeSegments > 0, `active route link restores route geometry (${restored.routeSegments} segment)` )\nassert((await shared.getByTestId('directions-summary').count()) === 1, 'active route URL restores the complete Directions intent (#153)')\nawait shared.close()"""
+          assert text.count(old) == 1, text.count(old)
+          text = text.replace(old, new)
+
+          old = """      return {\n        points: points.length,\n        reach: points.length\n          ? Math.max(...points.map(([lng, lat]) => Math.hypot(lng - man[0], lat - man[1])))\n          : null,\n        readout: document.body.innerText,\n      }"""
+          new = """      return {\n        points: points.length,\n        reach: points.length\n          ? Math.max(...points.map(([lng, lat]) => Math.hypot(lng - man[0], lat - man[1])))\n          : null,\n        readout: document.body.innerText,\n        routeFrom: new URL(window.location.href).searchParams.get('from'),\n      }"""
+          assert text.count(old) == 1, text.count(old)
+          text = text.replace(old, new)
+
+          old = """  const far = await reachFrom('distant fix', { latitude: 37.7749, longitude: -122.4194 }, false)\n  assert(near.reach != null && near.reach < 0.35, `a fix in the city routes from the fix (${near.reach?.toFixed(3) ?? 'no route'}°)`)\n  assert(/toward \\d/.test(near.readout), 'a fix in the city gives a bearing to walk')\n  // A live-origin route is deliberately withheld until there is a usable\n  // on-playa fix. The navigation readout may fall back to the Man for context,\n  // but drawing that fallback as if it were the user's path would be misleading.\n  assert(\n    far.points === 0 && far.reach == null,\n    `a distant fix does not draw a fake route from the Man (${far.points} points)`,\n  )\n  assert(\n    /from the Man/i.test(far.readout),\n    'a distant fix says the distance is measured from the Man',\n  )"""
+          new = """  const far = await reachFrom('distant fix', { latitude: 37.7749, longitude: -122.4194 })\n  assert(near.reach != null && near.reach < 0.35, `a fix in the city routes from the fix (${near.reach?.toFixed(3) ?? 'no route'}°)`)\n  assert(/toward \\d/.test(near.readout), 'a fix in the city gives a bearing to walk')\n  // #138: an unusable/off-playa GPS fix now becomes an explicit fixed Man\n  // origin. The visible line, readout, and serialized route must all agree.\n  assert(\n    far.reach != null && far.reach < 0.35,\n    `a distant fix falls back to a local Man-origin route (${far.reach?.toFixed(3) ?? 'no route'}°)`,\n  )\n  assert(\n    /from the Man/i.test(far.readout),\n    'a distant fix says the distance is measured from the Man',\n  )\n  assert(far.routeFrom === 'man', `the fallback route serializes From = The Man (#138) (got ${far.routeFrom})`)"""
+          assert text.count(old) == 1, text.count(old)
+          text = text.replace(old, new)
+          smoke.write_text(text)
+      - name: Commit focused patch
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/App.tsx scripts/smoke.mjs
+          git commit -m "Synchronize Man fallback semantics and browser regressions [pr140-patched]"
+          git push origin HEAD:fix/directions-audit-134-139

@@ -1,8 +1,10 @@
 import type { CityLayout } from '../brc/layout'
 import { geocode } from '../brc/geocode'
-import type { Position } from '../brc/geo'
+import { distanceBetween, isNearCity, type Position } from '../brc/geo'
 import type { Poi } from './types'
 import type { DirectionsEndpoint } from './directions'
+
+export type DirectionsAccuracy = 'exact' | 'published' | 'approximate'
 
 export interface ResolvedDirectionsEndpoint {
   endpoint: DirectionsEndpoint
@@ -10,6 +12,7 @@ export interface ResolvedDirectionsEndpoint {
   detail?: string
   position: Position
   dynamic: boolean
+  accuracy: DirectionsAccuracy
 }
 
 export interface DirectionsResolutionContext {
@@ -25,17 +28,36 @@ function manPosition(layout: CityLayout): Position {
 
 export function directionsEndpointLabel(endpoint: DirectionsEndpoint, pois: readonly Poi[]): string {
   switch (endpoint.kind) {
-    case 'live':
-      return 'Your location'
-    case 'man':
-      return 'The Man'
-    case 'poi':
-      return pois.find((poi) => poi.uid === endpoint.uid)?.name ?? 'Unknown listing'
-    case 'address':
-      return endpoint.address
-    case 'fixed':
-      return endpoint.label
+    case 'live': return 'Your location'
+    case 'man': return 'The Man'
+    case 'poi': return pois.find((poi) => poi.uid === endpoint.uid)?.name ?? 'Unknown listing'
+    case 'address': return endpoint.address
+    case 'fixed': return endpoint.label
   }
+}
+
+function poiAccuracy(poi: Poi): DirectionsAccuracy {
+  if (poi.accuracyClass === 'derived') return 'approximate'
+  if (poi.accuracyClass === 'published') return 'published'
+  return 'exact'
+}
+
+/**
+ * A coordinate attached to a human-readable address is only an exact refinement
+ * of that address when it remains in the address's local geocoding cell. This
+ * is the same trust boundary as the legacy deep-link path: contradictory text
+ * and coordinates never get to route confidently to the coordinate (#134).
+ */
+function trustedAddressPosition(endpoint: Extract<DirectionsEndpoint, { kind: 'address' }>, layout: CityLayout): Position | undefined {
+  const canonical = geocode(endpoint.address, layout)
+  if (!canonical) return undefined
+  if (!endpoint.position) return canonical.position
+  if (!isNearCity(layout, endpoint.position)) return canonical.position
+  // Address suggestions are street/intersection points. Preserve an exact
+  // dropped/refined coordinate only while it is still plausibly the same place.
+  return distanceBetween(endpoint.position, canonical.position) <= 45
+    ? endpoint.position
+    : canonical.position
 }
 
 export function resolveDirectionsEndpoint(
@@ -45,20 +67,10 @@ export function resolveDirectionsEndpoint(
   switch (endpoint.kind) {
     case 'live': {
       if (!context.livePosition) return undefined
-      return {
-        endpoint,
-        label: 'Your location',
-        position: context.livePosition,
-        dynamic: true,
-      }
+      return { endpoint, label: 'Your location', position: context.livePosition, dynamic: true, accuracy: 'exact' }
     }
     case 'man':
-      return {
-        endpoint,
-        label: 'The Man',
-        position: manPosition(context.layout),
-        dynamic: false,
-      }
+      return { endpoint, label: 'The Man', position: manPosition(context.layout), dynamic: false, accuracy: 'exact' }
     case 'poi': {
       const poi = context.pois.find((candidate) => candidate.uid === endpoint.uid)
       if (!poi) return undefined
@@ -68,35 +80,22 @@ export function resolveDirectionsEndpoint(
         detail: poi.address,
         position: poi.position,
         dynamic: false,
+        accuracy: poiAccuracy(poi),
       }
     }
     case 'address': {
-      const geocoded = endpoint.position
-        ? { position: endpoint.position, label: endpoint.address }
-        : geocode(endpoint.address, context.layout)
-      if (!geocoded) return undefined
-      return {
-        endpoint,
-        label: endpoint.address,
-        position: geocoded.position,
-        dynamic: false,
-      }
+      const position = trustedAddressPosition(endpoint, context.layout)
+      if (!position) return undefined
+      return { endpoint, label: endpoint.address, position, dynamic: false, accuracy: 'exact' }
     }
     case 'fixed':
-      return {
-        endpoint,
-        label: endpoint.label,
-        position: endpoint.position,
-        dynamic: false,
-      }
+      // Directions are deliberately BRC-local. A globally valid coordinate is
+      // not enough to make an arbitrary serialized point a safe route endpoint.
+      if (!isNearCity(context.layout, endpoint.position)) return undefined
+      return { endpoint, label: endpoint.label, position: endpoint.position, dynamic: false, accuracy: 'exact' }
   }
 }
 
-/**
- * Resolve a route while preserving the explicit `Your location` semantics in
- * the intent. If the caller has no usable live fix yet, only that endpoint is
- * unresolved; fixed/manual routes remain fully usable for planning offline.
- */
 export function resolveDirectionsRoute(
   from: DirectionsEndpoint,
   to: DirectionsEndpoint,

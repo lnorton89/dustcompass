@@ -12,12 +12,24 @@ export type WakeLockState = 'unsupported' | 'inactive' | 'active'
  */
 export function useWakeLock(active: boolean): WakeLockState {
   const lock = useRef<WakeLockSentinel | null>(null)
+  const lifecycle = useRef(0)
   const [state, setState] = useState<WakeLockState>(() =>
     typeof navigator === 'undefined' || !('wakeLock' in navigator) ? 'unsupported' : 'inactive',
   )
 
   useEffect(() => {
-    if (state === 'unsupported' || !active) return
+    const generation = ++lifecycle.current
+    if (state === 'unsupported') return
+    if (!active) {
+      // Effects must not synchronously cascade state during render commit, but
+      // a queued reset still needs lifecycle ownership: a rapid stop -> start
+      // must not let the old stop overwrite a newly acquired lock's state.
+      queueMicrotask(() => {
+        if (lifecycle.current === generation) setState('inactive')
+      })
+      return
+    }
+
     let cancelled = false
     let acquiring = false
 
@@ -29,7 +41,7 @@ export function useWakeLock(active: boolean): WakeLockState {
       acquiring = true
       try {
         const sentinel = await navigator.wakeLock.request('screen')
-        if (cancelled) {
+        if (cancelled || lifecycle.current !== generation) {
           void sentinel.release()
           return
         }
@@ -43,10 +55,10 @@ export function useWakeLock(active: boolean): WakeLockState {
         setState('active')
         sentinel.addEventListener('release', () => {
           if (lock.current === sentinel) lock.current = null
-          if (!cancelled) setState('inactive')
+          if (!cancelled && lifecycle.current === generation) setState('inactive')
         })
       } catch {
-        if (!cancelled) setState('inactive')
+        if (!cancelled && lifecycle.current === generation) setState('inactive')
       } finally {
         acquiring = false
       }
@@ -63,11 +75,10 @@ export function useWakeLock(active: boolean): WakeLockState {
       document.removeEventListener('visibilitychange', onVisibilityChange)
       const sentinel = lock.current
       lock.current = null
-      queueMicrotask(() => setState('inactive'))
       if (sentinel) void sentinel.release()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `state` is only read to bail out on 'unsupported'; including it would tear the lock down every time this effect itself flips it to 'active'.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `state` is only read to bail out on the immutable initial 'unsupported' capability; including it would tear the lock down whenever this effect reports 'active'.
   }, [active])
 
-  return state
+  return active ? state : state === 'unsupported' ? 'unsupported' : 'inactive'
 }

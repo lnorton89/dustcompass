@@ -49,6 +49,12 @@ describe('directions share links', () => {
     expect(readDirectionsResult('?dir=1&from=live&to=man&mode=walk')).toEqual({ status: 'wrong-year', year: null })
   })
 
+  it('rejects live destinations instead of freezing a GPS coordinate at Start', () => {
+    const year = encodeURIComponent(String(DATA_YEAR))
+    expect(readDirectionsResult(`?dir=1&year=${year}&from=man&to=live&mode=walk`)).toEqual({ status: 'invalid' })
+    expect(readDirectionsIntent(`?dir=1&year=${year}&from=man&to=live&mode=walk`)).toBeUndefined()
+  })
+
   it('keeps the compatibility helper returning undefined for rejected links', () => {
     const year = encodeURIComponent(String(DATA_YEAR))
     expect(readDirectionsIntent(`?dir=2&year=${year}&from=live&to=man&mode=walk`)).toBeUndefined()

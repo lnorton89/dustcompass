@@ -41,6 +41,8 @@ interface EdgeSnap {
 // city route.
 const STREET_SNAP_LIMIT_METERS = 140
 const ANNULAR_STEP_MINUTES = 2
+/** Coordinates shared/rounded within this distance are the same route point. */
+const SAME_POINT_EPSILON_METERS = 1
 
 function radius(layout: CityLayout, value: RadiusRef): number {
   return typeof value === 'number' ? value : resolveRadius(layout, value)
@@ -432,6 +434,13 @@ function boundaryForOpenPoint(layout: CityLayout, position: Position): Position 
  *   explicitly direct bearing instead of fabricating a walkable road.
  */
 export function routeBetween(layout: CityLayout, from: Position, to: Position): PlayaRoute {
+  // Identical and sub-meter rounded/shared points are already arrived. Sending
+  // them through street snapping can manufacture an access leg out to a road
+  // and back, reporting distance for a trip with no displacement (#147).
+  if (distanceBetween(from, to) <= SAME_POINT_EPSILON_METERS) {
+    return { kind: 'direct', coordinates: [from, to], meters: 0 }
+  }
+
   const fromCity = isStreetCityPoint(layout, from)
   const toCity = isStreetCityPoint(layout, to)
 

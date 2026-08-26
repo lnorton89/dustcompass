@@ -139,7 +139,9 @@ it('refuses newer deployment bytes when repairing an older active precache (#159
   const shellKey = `${ORIGIN}/`
   const installedShell = await cache.match(shellKey)
   expect(installedShell).toBeDefined()
-  expect(await installedShell.text()).toBe(`A:${shellKey}`)
+  // install() fetches the root-relative precache key; Cache Storage itself is
+  // what normalizes that key to the worker origin.
+  expect(await installedShell.text()).toBe('A:/')
 
   // Deployment B replaces the stable Pages URLs while worker/cache A remains
   // active. Storage pressure then removes one A asset.

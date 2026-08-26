@@ -28,14 +28,20 @@ export interface SavedPlaceResult {
   persisted: boolean
 }
 
-const MAX_NAME_LENGTH = 200
+export const MAX_SAVED_PLACE_NAME_LENGTH = 200
+
+export function normalizeSavedPlaceName(name: string): string | undefined {
+  const trimmed = name.trim()
+  if (!trimmed) return undefined
+  return trimmed.slice(0, MAX_SAVED_PLACE_NAME_LENGTH)
+}
 
 function isValidPlace(candidate: Partial<SavedPlace>): candidate is SavedPlace {
   if (typeof candidate.id !== 'string' || candidate.id.trim().length === 0) return false
   if (
     typeof candidate.name !== 'string' ||
     candidate.name.trim().length === 0 ||
-    candidate.name.length > MAX_NAME_LENGTH
+    candidate.name.length > MAX_SAVED_PLACE_NAME_LENGTH
   ) return false
   if (typeof candidate.address !== 'string') return false
   if (typeof candidate.savedAt !== 'number' || !Number.isFinite(candidate.savedAt)) return false
@@ -91,9 +97,12 @@ export function useSavedPlaces() {
   }, [])
 
   const save = useCallback((name: string, position: Position, address: string): SavedPlaceResult => {
+    // Storage writes must satisfy the same parser that will read them on the
+    // next launch. UI input is capped too, but this keeps non-UI callers safe.
+    const normalizedName = normalizeSavedPlaceName(name) ?? 'Saved place'
     const place: SavedPlace = {
       id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-      name,
+      name: normalizedName,
       position,
       address,
       savedAt: Date.now(),
@@ -113,7 +122,9 @@ export function useSavedPlaces() {
   }, [commit])
 
   const rename = useCallback((id: string, name: string): boolean => {
-    return commit(placesRef.current.map((place) => (place.id === id ? { ...place, name } : place)))
+    const normalizedName = normalizeSavedPlaceName(name)
+    if (!normalizedName) return false
+    return commit(placesRef.current.map((place) => (place.id === id ? { ...place, name: normalizedName } : place)))
   }, [commit])
 
   return { places, save, remove, restore, rename }

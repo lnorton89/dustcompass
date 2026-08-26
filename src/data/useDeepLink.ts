@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CityLayout } from '../brc/layout'
-import { geocode, reverseGeocode } from '../brc/geocode'
+import { reverseGeocode } from '../brc/geocode'
 import type { Position } from '../brc/geo'
 import { BASE_PATH } from '../config'
 import { trustedAddressPosition } from './locationTrust'

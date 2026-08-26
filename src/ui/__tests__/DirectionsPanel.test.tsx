@@ -36,6 +36,7 @@ const baseProps = {
   mode: 'walk' as const,
   hasUsableLiveFix: false,
   findingLocation: false,
+  destinationResolved: true,
   onFromChange: vi.fn(),
   onToChange: vi.fn(),
   onModeChange: vi.fn(),

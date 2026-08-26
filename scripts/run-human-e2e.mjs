@@ -11,11 +11,11 @@ child.stderr.on('data', (chunk) => { output += chunk })
 
 const code = await new Promise((resolve) => child.on('close', resolve))
 const audioJourney = 'official art audio survives offline reload and does not leak across art UIDs'
-const skippedAudio = /OBSERVATION: (Art-audio journey is armed but skipped|No located art fixture .* official audio track)/.test(output)
+// human-e2e-live now has first-class SKIP reporting (#139). Match that output
+// directly; looking for the old OBSERVATION text makes this guard permanently
+// false and silently disables the post-embargo coverage gate.
+const skippedAudio = output.includes(`SKIP: ${audioJourney}:`)
 
-if (skippedAudio) {
-  output = output.replace(`PASS: ${audioJourney}`, `SKIP: ${audioJourney}`)
-}
 process.stdout.write(output)
 
 if (code !== 0) process.exit(code ?? 1)

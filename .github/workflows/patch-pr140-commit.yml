@@ -1,0 +1,59 @@
+name: Commit PR 140 integration
+
+on:
+  push:
+    branches: [fix/directions-audit-134-139]
+
+permissions:
+  contents: write
+
+jobs:
+  commit:
+    if: ${{ !contains(github.event.head_commit.message, '[patch-pr140-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/directions-audit-134-139
+          fetch-depth: 0
+
+      - name: Apply integration patches from validated source workflow
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+
+          source = Path('.github/workflows/patch-pr140.yml').read_text().splitlines()
+
+          def run_block(step_name: str, filename: str):
+              marker = f'      - name: {step_name}'
+              start = source.index(marker)
+              run_line = next(i for i in range(start + 1, len(source)) if source[i].startswith('        run: |'))
+              lines = []
+              for line in source[run_line + 1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  lines.append(line[10:] if line.startswith('          ') else line)
+              script = Path(filename)
+              script.write_text('\n'.join(lines) + '\n')
+              subprocess.run(['python', str(script)], check=True)
+
+          run_block('Patch App integration', '/tmp/patch-app.py')
+          run_block('Patch human E2E result semantics and regressions', '/tmp/patch-human.py')
+
+      - name: Remove all one-shot workflows
+        run: git rm .github/workflows/patch-pr140.yml .github/workflows/patch-pr140-final.yml .github/workflows/patch-pr140-commit.yml
+
+      - name: Validate type and lint gates
+        run: |
+          npm ci
+          npm run typecheck
+          npm run lint
+
+      - name: Commit integrated fixes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Integrate Directions audit fixes [patch-pr140-done]"
+          git push origin HEAD:fix/directions-audit-134-139

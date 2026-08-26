@@ -1,0 +1,129 @@
+name: PR140 provenance gap patch
+
+on:
+  push:
+    branches:
+      - fix/directions-audit-134-139
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[pr140-provenance-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/directions-audit-134-139
+          fetch-depth: 0
+      - name: Apply provenance and route-card coverage fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          app = Path('src/App.tsx')
+          text = app.read_text()
+          text = text.replace(
+            "import type { EventItem, Poi, PoiKind, UnplacedListing } from './data/types'",
+            "import type { EventItem, Poi, PoiKind, PositionAccuracy, UnplacedListing } from './data/types'",
+          )
+          old = """    approximate?: boolean\n    /** Present when heading to a listed camp/art piece, so the URL can name it. */"""
+          new = """    approximate?: boolean\n    /** Keep published best-effort POI provenance visible during navigation/share (#137). */\n    destinationAccuracy?: PositionAccuracy\n    /** Present when heading to a listed camp/art piece, so the URL can name it. */"""
+          assert text.count(old) == 1, ('heading accuracy field', text.count(old))
+          text = text.replace(old, new)
+
+          old = """setHeading((current) => current?.uid === latest.uid ? { ...current, name: latest.name, position: latest.position, address: latest.address, approximate: latest.accuracyClass === 'derived' } : current)"""
+          new = """setHeading((current) => current?.uid === latest.uid ? { ...current, name: latest.name, position: latest.position, address: latest.address, approximate: latest.accuracyClass === 'derived', destinationAccuracy: latest.accuracyClass } : current)"""
+          assert text.count(old) == 1, ('refresh provenance', text.count(old))
+          text = text.replace(old, new)
+
+          old = """      approximate: route.to.accuracy === 'approximate',\n      uid: route.to.endpoint.kind === 'poi' ? route.to.endpoint.uid : undefined,"""
+          new = """      approximate: route.to.accuracy === 'approximate',\n      destinationAccuracy: route.to.accuracy === 'published' ? 'published' : route.to.accuracy === 'approximate' ? 'derived' : 'surveyed',\n      uid: route.to.endpoint.kind === 'poi' ? route.to.endpoint.uid : undefined,"""
+          assert text.count(old) == 1, ('start provenance', text.count(old))
+          text = text.replace(old, new)
+
+          old = """        approximate: directionsPreview.resolved.to.accuracy === 'approximate',\n        layout: data.layout,"""
+          new = """        approximate: directionsPreview.resolved.to.accuracy === 'approximate',\n        published: directionsPreview.resolved.to.accuracy === 'published',\n        layout: data.layout,"""
+          assert text.count(old) == 1, ('route card provenance', text.count(old))
+          text = text.replace(old, new)
+
+          old = """      positionSource?: 'gps' | 'address'\n      uid?: string"""
+          new = """      positionSource?: 'gps' | 'address'\n      accuracyClass?: PositionAccuracy\n      uid?: string"""
+          assert text.count(old) == 1, ('navigate target provenance type', text.count(old))
+          text = text.replace(old, new)
+
+          old = """        approximate: target.positionSource === 'address',\n        uid: target.uid,"""
+          new = """        approximate: target.accuracyClass === 'derived' || (!target.accuracyClass && target.positionSource === 'address'),\n        destinationAccuracy: target.accuracyClass,\n        uid: target.uid,"""
+          assert text.count(old) == 1, ('navigate target provenance', text.count(old))
+          text = text.replace(old, new)
+
+          old = """                  approximate={heading.approximate}\n                  screenAwake={wakeLock === 'active'}"""
+          new = """                  approximate={heading.approximate}\n                  published={heading.destinationAccuracy === 'published'}\n                  screenAwake={wakeLock === 'active'}"""
+          assert text.count(old) == 1, ('navbar provenance prop', text.count(old))
+          text = text.replace(old, new)
+          app.write_text(text)
+
+          nav = Path('src/ui/NavBar.tsx')
+          text = nav.read_text()
+          old = """  approximate?: boolean\n  screenAwake?: boolean"""
+          new = """  approximate?: boolean\n  published?: boolean\n  screenAwake?: boolean"""
+          assert text.count(old) == 1, ('navbar prop type', text.count(old))
+          text = text.replace(old, new)
+          old = """  approximate,\n  screenAwake,"""
+          new = """  approximate,\n  published,\n  screenAwake,"""
+          assert text.count(old) == 1, ('navbar destructure', text.count(old))
+          text = text.replace(old, new)
+          marker = """        {liveOrigin && located && accuracy != null && ("""
+          insertion = """        {published && (\n          <Typography variant=\"caption\" color=\"text.secondary\" sx={{ display: 'block', lineHeight: 1.2, mt: 0.25 }}>\n            Officially published location — not surveyed. Camps and art can move after publication.\n          </Typography>\n        )}\n        {liveOrigin && located && accuracy != null && ("""
+          assert text.count(marker) == 1, ('navbar published marker', text.count(marker))
+          text = text.replace(marker, insertion)
+          nav.write_text(text)
+
+          route = Path('src/ui/routeCard.ts')
+          text = route.read_text()
+          old = """  approximate?: boolean\n  layout: CityLayout"""
+          new = """  approximate?: boolean\n  published?: boolean\n  layout: CityLayout"""
+          assert text.count(old) == 1, ('route card input provenance', text.count(old))
+          text = text.replace(old, new)
+
+          old = """function drawCity(ctx: CanvasRenderingContext2D, city: CityLayout, route: PlayaRoute) {\n  const { project } = projection(route)\n  ctx.strokeStyle = 'rgba(69, 59, 48, 0.42)'\n  ctx.lineWidth = 2\n  for (const street of city.cStreets) {\n    for (const [from, to] of street.segments) {\n      drawPolyline(ctx, arc(city, street.distance, from, to, 2), project)\n    }\n  }\n  for (const radial of city.tStreets) {\n    for (const ref of radial.refs) {\n      for (const [inner, outer] of radial.segments) {\n        drawPolyline(ctx, [\n          polarToPosition(city, ref, resolveRadius(city, inner)),\n          polarToPosition(city, ref, resolveRadius(city, outer)),\n        ], project)\n      }\n    }\n  }\n  const man = project(city.center.geometry.coordinates as Position)"""
+          new = """export function routeCardCityGeometry(city: CityLayout, route: PlayaRoute) {\n  const { project } = projection(route)\n  return {\n    annulars: city.cStreets.flatMap((street) => street.segments.map(([from, to]) => ({\n      name: street.name,\n      points: arc(city, street.distance, from, to, 2).map(project),\n    }))),\n    radials: city.tStreets.flatMap((radial) => radial.refs.flatMap((ref) => radial.segments.map(([inner, outer]) => ({\n      ref,\n      points: [\n        polarToPosition(city, ref, resolveRadius(city, inner)),\n        polarToPosition(city, ref, resolveRadius(city, outer)),\n      ].map(project),\n    })))),\n    man: project(city.center.geometry.coordinates as Position),\n  }\n}\n\nfunction drawCity(ctx: CanvasRenderingContext2D, city: CityLayout, route: PlayaRoute) {\n  const geometry = routeCardCityGeometry(city, route)\n  const { project } = projection(route)\n  ctx.strokeStyle = 'rgba(69, 59, 48, 0.42)'\n  ctx.lineWidth = 2\n  for (const street of geometry.annulars) {\n    const positions = street.points\n    if (positions.length < 2) continue\n    ctx.beginPath()\n    ctx.moveTo(positions[0].x, positions[0].y)\n    for (const point of positions.slice(1)) ctx.lineTo(point.x, point.y)\n    ctx.stroke()\n  }\n  for (const radial of geometry.radials) {\n    const positions = radial.points\n    if (positions.length < 2) continue\n    ctx.beginPath()\n    ctx.moveTo(positions[0].x, positions[0].y)\n    for (const point of positions.slice(1)) ctx.lineTo(point.x, point.y)\n    ctx.stroke()\n  }\n  const man = geometry.man"""
+          assert text.count(old) == 1, ('route geometry helper', text.count(old))
+          text = text.replace(old, new)
+
+          old = """  if (input.approximate) {\n    ctx.fillStyle = '#d5a84e'\n    ctx.font = '600 15px system-ui, sans-serif'\n    wrapText(ctx, 'Destination is an approximate address area.', layout.summary.x + 28, y + 12, layout.summary.width - 56, 20, 2)\n  }"""
+          new = """  if (input.approximate) {\n    ctx.fillStyle = '#d5a84e'\n    ctx.font = '600 15px system-ui, sans-serif'\n    wrapText(ctx, 'Destination is an approximate address area.', layout.summary.x + 28, y + 12, layout.summary.width - 56, 20, 2)\n  } else if (input.published) {\n    ctx.fillStyle = '#b9ad9a'\n    ctx.font = '600 15px system-ui, sans-serif'\n    wrapText(ctx, 'Officially published location — not surveyed; camps and art can move.', layout.summary.x + 28, y + 12, layout.summary.width - 56, 20, 2)\n  }"""
+          assert text.count(old) == 1, ('route card warning', text.count(old))
+          text = text.replace(old, new)
+          route.write_text(text)
+
+          test = Path('src/ui/__tests__/routeCard.test.ts')
+          text = test.read_text()
+          text = text.replace(
+            "import { ROUTE_CARD_HEIGHT, ROUTE_CARD_WIDTH, routeCardLayout } from '../routeCard'",
+            "import { ROUTE_CARD_HEIGHT, ROUTE_CARD_WIDTH, routeCardCityGeometry, routeCardLayout } from '../routeCard'",
+          )
+          text = text.replace(
+            "import type { PlayaRoute } from '../../brc/routing'",
+            "import type { PlayaRoute } from '../../brc/routing'\nimport type { CityLayout } from '../../brc/layout'",
+          )
+          addition = """\n  it('projects actual surveyed annular/radial geometry and the Man into the route crop (#135)', () => {\n    const city: CityLayout = {\n      center: { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [-119.2, 40.78] } },\n      bearing: 45, fence_distance: 6000, road_width: 40,\n      cStreets: [{ ref: 'esplanade', name: 'Esplanade', distance: 2500, segments: [['2:00', '10:00']] }],\n      tStreets: [{ refs: ['6:00'], segments: [[0, 'esplanade']] }],\n      plazas: [], portals: [],\n    }\n    const geometry = routeCardCityGeometry(city, route)\n    expect(geometry.annulars).toHaveLength(1)\n    expect(geometry.annulars[0].name).toBe('Esplanade')\n    expect(geometry.annulars[0].points.length).toBeGreaterThan(2)\n    expect(geometry.radials).toHaveLength(1)\n    expect(geometry.radials[0].ref).toBe('6:00')\n    expect(geometry.radials[0].points).toHaveLength(2)\n    expect(Number.isFinite(geometry.man.x)).toBe(true)\n    expect(Number.isFinite(geometry.man.y)).toBe(true)\n    expect(geometry.annulars[0].points).not.toEqual(geometry.radials[0].points)\n  })\n"""
+          marker = """  it('keeps map and text summary in separate non-overlapping regions', () => {"""
+          assert text.count(marker) == 1, ('route test marker', text.count(marker))
+          text = text.replace(marker, addition + "\n" + marker)
+          test.write_text(text)
+
+          navtest = Path('src/ui/__tests__/NavBar.test.tsx')
+          text = navtest.read_text()
+          addition = """\ndescribe('NavBar destination provenance (#137)', () => {\n  it('keeps an officially published-but-unsurveyed warning visible during active navigation', () => {\n    render(\n      <ThemeProvider theme={playaTheme('dark')}>\n        <NavBar\n          name=\"Published Camp\" travel={travel} heading=\"6:00\" located={false} status=\"idle\"\n          published liveOrigin={false} onRetryLocation={vi.fn()} onClear={vi.fn()}\n        />\n      </ThemeProvider>,\n    )\n    expect(screen.getByText(/Officially published location — not surveyed/i)).toBeDefined()\n  })\n})\n"""
+          navtest.write_text(text + addition)
+
+      - name: Commit patch and remove helper workflow
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/pr140-provenance-gap-patch.yml
+          git add src/App.tsx src/ui/NavBar.tsx src/ui/routeCard.ts src/ui/__tests__/routeCard.test.ts src/ui/__tests__/NavBar.test.tsx
+          git commit -m "Preserve destination provenance and verify route-card map geometry [pr140-provenance-patched]"
+          git push origin HEAD:fix/directions-audit-134-139

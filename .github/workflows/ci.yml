@@ -1,30 +1,95 @@
 name: CI
+
+# Pull requests get one CI run from the pull_request event. Push CI is limited
+# to master so feature-branch pushes do not create a second `CI / test` check
+# for the same SHA. Duplicate push + pull_request checks can leave a cancelled
+# push check attached to a PR head and block a protected merge even when the
+# pull_request check is green.
 on:
+  push:
+    branches: [master]
   pull_request:
-permissions:
-  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  integrate:
+  test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: fix/directions-audit-134-139
-          fetch-depth: 2
-      - run: python scripts/patch-pr140-latest.py
+
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
+
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint -- --max-warnings=0
-      - name: Commit validated integration
+
+      - name: Fetch city geometry
+        run: npm run fetch-data -- 2026
+
+      - name: Fetch 2026 listings
+        env:
+          BURNING_MAN_API_KEY: ${{ secrets.BURNING_MAN_API_KEY }}
+        run: npm run fetch-api -- 2026
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - uses: actions/cache@v6
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*.[jt]s', 'src/**/*.[jt]sx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-
+
+      - name: Build
+        env:
+          NEXT_PUBLIC_BASE_PATH: /dustcompass
+          NEXT_PUBLIC_DATA_YEAR: '2026'
+        run: npm run build
+
+      - name: Start preview server
+        id: start-server
+        env:
+          NEXT_PUBLIC_BASE_PATH: /dustcompass
         run: |
-          git show HEAD^:.github/workflows/ci.yml > .github/workflows/ci.yml
-          rm -f .github/workflows/patch-pr140-latest.yml scripts/patch-pr140-latest.py
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m 'Fix latest Directions regressions (#150-#153)'
-          git push origin HEAD:fix/directions-audit-134-139
+          node scripts/serve-export.mjs &
+          npx wait-on -t 60000 http://127.0.0.1:4173/dustcompass/
+
+      - name: Smoke tests
+        if: ${{ !cancelled() && steps.start-server.outcome == 'success' }}
+        run: npm run test:smoke http://127.0.0.1:4173/dustcompass/
+
+      - name: Accessibility tests
+        if: ${{ !cancelled() && steps.start-server.outcome == 'success' }}
+        run: npm run test:a11y http://127.0.0.1:4173/dustcompass/
+
+      - name: UI invariant tests
+        if: ${{ !cancelled() && steps.start-server.outcome == 'success' }}
+        run: npm run test:ui http://127.0.0.1:4173/dustcompass/
+
+      - name: Offline tests
+        if: ${{ !cancelled() && steps.start-server.outcome == 'success' }}
+        run: npm run test:offline http://127.0.0.1:4173/dustcompass/
+
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots
+          path: '*.png'
+          if-no-files-found: ignore

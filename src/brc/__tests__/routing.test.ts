@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CityLayout } from '../layout'
-import { distanceBetween, polarToPosition } from '../geo'
+import { destination, distanceBetween, polarToPosition } from '../geo'
 import { buildStreetGraph, routeBetween } from '../routing'
 
 const layout: CityLayout = {
@@ -68,6 +68,19 @@ describe('offline surveyed street routing', () => {
     expect(route.coordinates.length).toBeGreaterThan(2)
   })
 
+  it('returns zero distance for identical and sub-meter endpoints before street snapping', () => {
+    const from = polarToPosition(layout, '4:00', 1300)
+    const identical = routeBetween(layout, from, from)
+    expect(identical.kind).toBe('direct')
+    expect(identical.meters).toBe(0)
+    expect(identical.coordinates).toEqual([from, from])
+
+    const lessThanOneMeterAway = destination(from, 0.5, 90)
+    const roundedSamePlace = routeBetween(layout, from, lessThanOneMeterAway)
+    expect(roundedSamePlace.kind).toBe('direct')
+    expect(roundedSamePlace.meters).toBe(0)
+  })
+
   it('keeps open-playa travel as direct bearing guidance', () => {
     const from = polarToPosition(layout, '3:00', 300)
     const to = polarToPosition(layout, '6:00', 700)
@@ -79,10 +92,6 @@ describe('offline surveyed street routing', () => {
   })
 
   it('falls back to explicit direct guidance when a city point cannot safely snap to any surveyed street', () => {
-    // Halfway between B and C is ~152 m from either annular in this deliberately
-    // sparse synthetic plan, beyond the 140 m frontage snap ceiling; 6:00 is
-    // also halfway between the only two radials, so there is no valid street
-    // access to invent.
     const from = polarToPosition(sparseLayout, '6:00', 2500)
     const to = polarToPosition(sparseLayout, '5:00', 2000)
     const route = routeBetween(sparseLayout, from, to)

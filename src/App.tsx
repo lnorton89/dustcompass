@@ -944,7 +944,6 @@ export default function App() {
     const latest = data.pois.find((poi) => poi.uid === heading.uid)
     if (!latest) {
       destinationRefreshPending.current = true
-      arrived.current = false
       const id = requestAnimationFrame(() => {
         setProbe('This navigation destination is no longer in the current map.')
         setHeading(undefined)
@@ -960,13 +959,12 @@ export default function App() {
     // #152: reset the one-shot arrival latch as soon as the authoritative POI
     // moves, and suppress arrival until heading.position has caught up.
     destinationRefreshPending.current = true
-    arrived.current = false
     const id = requestAnimationFrame(() => {
       setHeading((current) => current?.uid === latest.uid ? { ...current, name: latest.name, position: latest.position, address: latest.address, approximate: latest.accuracyClass === 'derived', destinationAccuracy: latest.accuracyClass } : current)
       destinationRefreshPending.current = false
     })
     return () => cancelAnimationFrame(id)
-  }, [data, heading?.address, heading?.name, heading?.position, heading?.uid, releaseLocation])
+  }, [data, heading?.address, heading?.destinationAccuracy, heading?.name, heading?.position, heading?.uid, releaseLocation])
 
   const navigation = useMemo(() => {
     if (!heading || !origin || !data) return undefined
@@ -1002,9 +1000,11 @@ export default function App() {
    * distance counting down, and it is the buzz that carries the news to someone
    * whose phone is in a pocket.
    */
-  const arrived = useRef(false)
+  const arrived = useRef<string>()
   useEffect(() => {
-    if (!navigation || arrived.current || destinationRefreshPending.current) return
+    if (!navigation || !heading || destinationRefreshPending.current) return
+    const arrivalKey = `${heading.position[0]},${heading.position[1]}`
+    if (arrived.current === arrivalKey) return
     // `origin` falls back to the Man's own coordinates until a real,
     // in-city GPS fix exists, and `navigation.travel` is computed from
     // `origin` — not from the raw fix. Gating on `here` (any fix at all,
@@ -1029,7 +1029,7 @@ export default function App() {
         location.accuracy,
       )
     ) return
-    arrived.current = true
+    arrived.current = arrivalKey
     haptic('arrive')
   }, [navigation, heading, usableFix, location.accuracy])
 
@@ -1160,7 +1160,7 @@ export default function App() {
       routeFrom: directionsFrom,
       routeTo: directionsTo,
     })
-    arrived.current = false
+    arrived.current = undefined
     setSelected(undefined)
     setPin(undefined)
     // Add navigation ownership before closing Directions. The derived Directions
@@ -1258,7 +1258,7 @@ export default function App() {
         routeFrom: routeOrigin,
         routeTo: target.uid ? { kind: 'poi', uid: target.uid } : target.address ? { kind: 'address', address: target.address, position: target.position } : { kind: 'fixed', label: target.name, position: target.position },
       })
-      arrived.current = false
+      arrived.current = undefined
       setSelected(undefined)
       // An earlier dropped pin is unrelated to this destination — leaving it
       // behind meant it could out-rank the new heading in the URL-mirroring

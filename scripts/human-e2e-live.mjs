@@ -11,6 +11,9 @@ import { chromium } from 'playwright'
 const BASE_URL = process.env.HUMAN_E2E_URL ?? 'https://lnorton89.github.io/dustcompass/'
 const failures = []
 const observations = []
+const skips = []
+class JourneySkip extends Error {}
+const skip = (message) => { throw new JourneySkip(message) }
 const sleep = (ms = 500) => new Promise((resolve) => setTimeout(resolve, ms))
 const assert = (condition, message) => { if (!condition) throw new Error(message) }
 
@@ -23,6 +26,12 @@ async function journey(page, name, fn) {
     await fn()
     console.log(`PASS: ${name}`)
   } catch (error) {
+    if (error instanceof JourneySkip) {
+      const message = `${name}: ${error.message}`
+      skips.push(message)
+      console.log(`SKIP: ${message}`)
+      return
+    }
     const message = `${name}: ${error?.message ?? error}`
     failures.push(message)
     console.error(`HUMAN_E2E_FAILURE: ${message}`)
@@ -175,8 +184,9 @@ const browser = await chromium.launch({
     await page.getByRole('button', { name: 'Switch to dark mode' }).click()
     await page.getByRole('button', { name: 'Switch to light mode' }).waitFor()
 
-    const orient = page.getByRole('button', { name: 'Orient the map so 12:00 points up' })
+    const orient = page.getByRole('button', { name: 'Switch map to North up' })
     await orient.click()
+    await page.getByRole('button', { name: 'Switch map to 12:00 up' }).waitFor()
     await sleep(900)
     const storedCityUp = await page.evaluate(() => localStorage.getItem('dust-compass:city-up'))
     assert(storedCityUp === 'false', `orientation preference was not stored as north-up: ${storedCityUp}`)
@@ -188,7 +198,7 @@ const browser = await chromium.launch({
 
     await page.reload({ waitUntil: 'load' })
     await waitForMap(page)
-    const orientAfter = page.getByRole('button', { name: 'Orient the map so 12:00 points up' })
+    const orientAfter = page.getByRole('button', { name: 'Switch map to 12:00 up' })
     assert((await orientAfter.getAttribute('aria-pressed')) === 'false', 'north-up orientation did not survive reload')
     await page.getByRole('button', { name: /Filters and saved spots/i }).click()
     assert(await page.getByLabel('Bigger text and labels').isChecked(), 'bigger-text preference did not survive reload')
@@ -368,8 +378,7 @@ const browser = await chromium.launch({
     })
 
     if (arts.length === 0) {
-      observe('Art-audio journey is armed but skipped because the deployed dataset still has no located art before the embargo release.')
-      return
+      skip('deployed dataset has no located art yet; audio lifecycle was not exercised')
     }
 
     let audioArt
@@ -391,8 +400,7 @@ const browser = await chromium.launch({
     }
 
     if (!audioArt) {
-      observe('No located art fixture among the sampled published records had an official audio track; audio journey remains executable when one is present.')
-      return
+      skip('no sampled located art had an official audio track; audio lifecycle was not exercised')
     }
 
     await page.getByRole('button', { name: 'Download for offline' }).click()
@@ -431,6 +439,10 @@ const browser = await chromium.launch({
     const from = page.getByRole('combobox', { name: 'From' })
     const to = page.getByRole('combobox', { name: 'To' })
     assert((await from.inputValue()).length > 0, 'Directions opened without a visible start')
+    assert((await from.locator('xpath=..').getByLabel('Clear').count()) === 0, 'From exposes a clear action that cannot produce a valid origin')
+    await to.fill('Esplanade & 7:30')
+    await page.keyboard.press('Enter')
+    assert(/7:30.*Esplanade|Esplanade.*7:30/.test(await to.inputValue()), 'canonicalized address could not be selected with Enter')
     await to.fill(fixture.name)
     await page.getByRole('option').filter({ hasText: fixture.name }).first().click()
     const summary = page.getByTestId('directions-summary')
@@ -504,6 +516,8 @@ await browser.close()
 
 console.log('\n--- HUMAN E2E OBSERVATIONS ---')
 for (const item of observations) console.log(`- ${item}`)
+console.log('--- HUMAN E2E SKIPS ---')
+for (const item of skips) console.log(`- ${item}`)
 console.log('--- HUMAN E2E FAILURES ---')
 for (const item of failures) console.log(`- ${item}`)
 if (failures.length) process.exit(1)

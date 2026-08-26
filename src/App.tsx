@@ -354,6 +354,11 @@ export default function App() {
   // that lands somewhere else — claiming one anyway is exactly the bug this
   // exists to fix.
   const orientationLabel = cityUp ? '12:00 up' : northUp ? 'North up' : 'Free rotation'
+  const orientationActionLabel = cityUp
+    ? 'Switch map to North up'
+    : northUp
+      ? 'Switch map to 12:00 up'
+      : 'Orient map to 12:00 up'
   /**
    * "I cannot read this" is a real complaint out there and it has nothing to do
    * with eyesight: full sun, a screen under a week of dust, and reading glasses
@@ -466,10 +471,11 @@ export default function App() {
   const releaseEventsLocation = useCallback(() => releaseLocation('events'), [releaseLocation])
   // A terminal denial clears the owner set. Navigation remains logically active,
   // so Retry must re-establish its claim instead of bypassing owner accounting.
-  const retryNavigationLocation = useCallback(
-    () => acquireLocation('navigation'),
-    [acquireLocation],
-  )
+  const [navigationRetrying, setNavigationRetrying] = useState(false)
+  const retryNavigationLocation = useCallback(() => {
+    setNavigationRetrying(true)
+    acquireLocation('navigation')
+  }, [acquireLocation])
   const [eventsOpen, setEventsOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   // The large source/non-affiliation disclosure is useful once and costly on a
@@ -585,6 +591,8 @@ export default function App() {
     origin?: Position
     originLabel?: string
     liveOrigin?: boolean
+    /** A failed one-tap GPS origin may deliberately be retried from the fixed Man fallback. */
+    retryableOrigin?: boolean
     mode?: DirectionsMode
   }>()
   const [initialDirections] = useState(() => readDirectionsIntent())
@@ -598,6 +606,15 @@ export default function App() {
   const [directionsMode, setDirectionsMode] = useState<DirectionsMode>(
     () => initialDirections?.mode ?? 'walk',
   )
+  // Directions owns the shared GPS watch whenever either endpoint is live.
+  // Deriving this from the complete route state prevents swaps/restored links
+  // from accidentally releasing a watch that the opposite endpoint still needs (#145).
+  const directionsNeedsLocation = directionsOpen &&
+    (directionsFrom.kind === 'live' || directionsTo?.kind === 'live')
+  useEffect(() => {
+    if (directionsNeedsLocation) acquireLocation('directions')
+    else releaseLocation('directions')
+  }, [acquireLocation, directionsNeedsLocation, releaseLocation])
 
   // "On now" has to stay true as time passes, or the panel quietly lies.
   useEffect(() => {
@@ -804,43 +821,29 @@ export default function App() {
    */
   const usableFix = here && data && isNearCity(data.layout, here) ? here : undefined
   const openDirections = useCallback(() => {
-    if (usableFix) {
+    if (usableFix || location.status === 'idle' || location.status === 'locating') {
       setDirectionsFrom({ kind: 'live' })
-    } else if (location.status === 'idle' || location.status === 'locating') {
-      setDirectionsFrom({ kind: 'live' })
-      acquireLocation('directions')
     } else {
       setDirectionsFrom({ kind: 'man' })
-      releaseLocation('directions')
     }
     setDirectionsOpen(true)
-  }, [acquireLocation, location.status, releaseLocation, usableFix])
+  }, [location.status, usableFix])
 
   const closeDirections = useCallback(() => {
     setDirectionsOpen(false)
-    releaseLocation('directions')
-  }, [releaseLocation])
+  }, [])
 
   const changeDirectionsFrom = useCallback((endpoint: DirectionsEndpoint) => {
     setDirectionsFrom(endpoint)
-    if (endpoint.kind === 'live') acquireLocation('directions')
-    else releaseLocation('directions')
-  }, [acquireLocation, releaseLocation])
+  }, [])
 
   useEffect(() => {
     if (!directionsOpen || directionsFrom.kind !== 'live' || usableFix) return
-    if (location.status === 'idle') {
-      acquireLocation('directions')
-      return
-    }
     const outsideCity = location.status === 'tracking' && Boolean(here)
-    if (location.status === 'denied' || location.status === 'unavailable' || outsideCity) {
-      queueMicrotask(() => {
-        setDirectionsFrom({ kind: 'man' })
-        releaseLocation('directions')
-      })
-    }
-  }, [acquireLocation, directionsFrom.kind, directionsOpen, here, location.status, releaseLocation, usableFix])
+    if (!locationWatchHasFailed(location.status) && !outsideCity) return
+    const id = requestAnimationFrame(() => setDirectionsFrom({ kind: 'man' }))
+    return () => cancelAnimationFrame(id)
+  }, [directionsFrom.kind, directionsOpen, here, location.status, usableFix])
   /**
    * What the map owes the reader about art, if anything.
    *
@@ -1001,6 +1004,64 @@ export default function App() {
 
   const framedNavigationFor = useRef<string | undefined>(undefined)
 
+  // A one-tap live route becomes a real fixed Man route when the current
+  // GPS attempt fails. Geometry, editable intent, label and camera all
+  // transition together instead of silently calculating from the Man while
+  // the route still claims `Your location` (#138/#143).
+  useEffect(() => {
+    if (!heading?.liveOrigin || usableFix || !data || !manPosition) return
+    const outsideCity = location.status === 'tracking' && Boolean(here)
+    if (!locationWatchHasFailed(location.status) && !outsideCity) return
+    const id = requestAnimationFrame(() => {
+      setDirectionsFrom({ kind: 'man' })
+      setNavigationRetrying(false)
+      setHeading((current) => current?.liveOrigin ? {
+        ...current,
+        origin: manPosition,
+        originLabel: 'The Man',
+        liveOrigin: false,
+        retryableOrigin: true,
+      } : current)
+      releaseLocation('navigation')
+      const routed = routeBetween(data.layout, manPosition, heading.position)
+      mapRef.current?.fitBounds(boundsOfPositions(routed.coordinates), {
+        padding: navigationPadding(), duration: 0, maxZoom: 16.5,
+      })
+      framedNavigationFor.current = `${heading.position[0]},${heading.position[1]}`
+    })
+    return () => cancelAnimationFrame(id)
+  }, [data, heading, here, location.status, manPosition, navigationPadding, releaseLocation, usableFix])
+
+  useEffect(() => {
+    if (!navigationRetrying || !heading || !usableFix || !data) return
+    const id = requestAnimationFrame(() => {
+      setDirectionsFrom({ kind: 'live' })
+      setHeading((current) => current ? {
+        ...current,
+        origin: undefined,
+        originLabel: 'Your location',
+        liveOrigin: true,
+        retryableOrigin: true,
+      } : current)
+      setNavigationRetrying(false)
+      const routed = routeBetween(data.layout, usableFix, heading.position)
+      mapRef.current?.fitBounds(boundsOfPositions(routed.coordinates), {
+        padding: navigationPadding(), duration: 0, maxZoom: 16.5,
+      })
+      framedNavigationFor.current = `${heading.position[0]},${heading.position[1]}`
+    })
+    return () => cancelAnimationFrame(id)
+  }, [data, heading, navigationPadding, navigationRetrying, usableFix])
+
+  useEffect(() => {
+    if (!navigationRetrying || !locationWatchHasFailed(location.status)) return
+    const id = requestAnimationFrame(() => {
+      setNavigationRetrying(false)
+      releaseLocation('navigation')
+    })
+    return () => cancelAnimationFrame(id)
+  }, [location.status, navigationRetrying, releaseLocation])
+
   const startDirections = useCallback(() => {
     if (!data || !directionsTo) return
     const route = resolveDirectionsRoute(directionsFrom, directionsTo, {
@@ -1021,18 +1082,22 @@ export default function App() {
       name: route.to.label,
       position: route.to.position,
       address: route.to.detail,
-      approximate: route.to.endpoint.kind === 'address',
+      approximate: route.to.accuracy === 'approximate',
       uid: route.to.endpoint.kind === 'poi' ? route.to.endpoint.uid : undefined,
       origin: route.from.dynamic ? undefined : route.from.position,
       originLabel: route.from.label,
       liveOrigin: route.from.dynamic,
+      retryableOrigin: route.from.dynamic,
       mode: directionsMode,
     })
     arrived.current = false
     setSelected(undefined)
     setPin(undefined)
+    // Add navigation ownership before closing Directions. The derived Directions
+    // owner then releases without ever dropping the only GPS owner (#142).
+    if (route.from.dynamic) acquireLocation('navigation')
+    else releaseLocation('navigation')
     setDirectionsOpen(false)
-    releaseLocation('directions')
     const routed = routeBetween(data.layout, route.from.position, route.to.position)
     mapRef.current?.fitBounds(boundsOfPositions(routed.coordinates), {
       padding: navigationPadding(),
@@ -1040,8 +1105,6 @@ export default function App() {
       maxZoom: 16.5,
     })
     framedNavigationFor.current = `${route.to.position[0]},${route.to.position[1]}`
-    if (route.from.dynamic) acquireLocation('navigation')
-    else releaseLocation('navigation')
   }, [
     acquireLocation,
     data,
@@ -1064,7 +1127,7 @@ export default function App() {
   }, [directionsFrom, directionsMode, directionsTo])
 
   const shareDirectionsImage = useCallback(async () => {
-    if (!directionsPreview) return
+    if (!directionsPreview || !data) return
     try {
       const result = await shareRouteCard({
         fromLabel: directionsPreview.resolved.from.label,
@@ -1073,22 +1136,22 @@ export default function App() {
         route: directionsPreview.route,
         mode: directionsMode,
         heading: directionsPreview.heading,
-        approximate: directionsPreview.resolved.to.endpoint.kind === 'address',
+        approximate: directionsPreview.resolved.to.accuracy === 'approximate',
+        layout: data.layout,
       })
+      if (result === 'cancelled') return
       setProbe(result === 'shared' ? 'Route card shared' : result === 'copied' ? 'Route card copied' : 'Route card downloaded')
     } catch {
       setProbe('Could not create the route card')
     }
-  }, [directionsMode, directionsPreview])
+  }, [data, directionsMode, directionsPreview])
 
   const swapDirections = useCallback(() => {
     if (!directionsTo) return
     const previousFrom = directionsFrom
     setDirectionsFrom(directionsTo)
     setDirectionsTo(previousFrom)
-    if (directionsTo.kind === 'live') acquireLocation('directions')
-    else releaseLocation('directions')
-  }, [acquireLocation, directionsFrom, directionsTo, releaseLocation])
+  }, [directionsFrom, directionsTo])
 
   const navigateTo = useCallback(
     (target: {
@@ -1117,6 +1180,7 @@ export default function App() {
         approximate: target.positionSource === 'address',
         uid: target.uid,
         liveOrigin: routeOrigin.kind === 'live',
+        retryableOrigin: true,
         mode: directionsMode,
       })
       arrived.current = false
@@ -1148,6 +1212,14 @@ export default function App() {
           maxZoom: 16.5,
         })
         framedNavigationFor.current = `${target.position[0]},${target.position[1]}`
+      } else if (routeOrigin.kind === 'man' && data && manPosition) {
+        const routed = routeBetween(data.layout, manPosition, target.position)
+        mapRef.current?.fitBounds(boundsOfPositions(routed.coordinates), {
+          padding: navigationPadding(),
+          duration: 900,
+          maxZoom: 16.5,
+        })
+        framedNavigationFor.current = `${target.position[0]},${target.position[1]}`
       } else {
         mapRef.current?.flyTo({
           center: target.position,
@@ -1160,7 +1232,7 @@ export default function App() {
       if (routeOrigin.kind === 'live') acquireLocation('navigation')
       else releaseLocation('navigation')
     },
-    [acquireLocation, directionsMode, location.status, navigationPadding, releaseLocation, usableFix],
+    [acquireLocation, data, directionsMode, location.status, manPosition, navigationPadding, releaseLocation, usableFix],
   )
 
   useEffect(() => {
@@ -1208,8 +1280,7 @@ export default function App() {
 
   const editCurrentRoute = useCallback(() => {
     setDirectionsOpen(true)
-    if (directionsFrom.kind === 'live') acquireLocation('directions')
-  }, [acquireLocation, directionsFrom.kind])
+  }, [])
 
   const flyTo = useCallback(
     (position: Position, poi?: Poi) => {
@@ -1513,7 +1584,7 @@ export default function App() {
                     />
                     <ControlButton
                       icon={<ExploreIcon />}
-                      title="Orient the map so 12:00 points up"
+                      title={orientationActionLabel}
                       tooltip={orientationLabel}
                       selected={cityUp}
                       pressed={cityUp}
@@ -1649,13 +1720,9 @@ export default function App() {
                 // actually draws it (not `here` directly): a fix nowhere near
                 // the city still resolves to the Man, same as the distance
                 // readout, rather than a route line running off the map.
-                route={
-                  heading
-                    ? (heading.liveOrigin && !usableFix ? undefined : navigation?.route)
-                    : directionsOpen ? directionsPreview?.route : undefined
-                }
-                routeStart={!heading && directionsOpen ? directionsPreview?.resolved.from.position : undefined}
-                routeEnd={!heading && directionsOpen ? directionsPreview?.resolved.to.position : undefined}
+                route={directionsOpen ? directionsPreview?.route : heading ? navigation?.route : undefined}
+                routeStart={directionsOpen ? directionsPreview?.resolved.from.position : undefined}
+                routeEnd={directionsOpen ? directionsPreview?.resolved.to.position : undefined}
                 selected={selected}
                 destination={heading}
               />
@@ -1740,6 +1807,7 @@ export default function App() {
                   palette={palette}
                   located={Boolean(heading.liveOrigin && usableFix)}
                   liveOrigin={Boolean(heading.liveOrigin)}
+                  retryableOrigin={Boolean(heading.retryableOrigin)}
                   fromLabel={originLabel}
                   mode={heading.mode ?? directionsMode}
                   routeKind={navigation.route.kind}
@@ -1971,7 +2039,7 @@ export default function App() {
               {
                 key: 'orient',
                 label: orientationLabel,
-                title: 'Orient the map so 12:00 points up',
+                title: orientationActionLabel,
                 icon: <ExploreIcon />,
                 selected: cityUp,
                 pressed: cityUp,

@@ -101,7 +101,9 @@ describe('DirectionsPanel', () => {
     render(<DirectionsPanel {...baseProps} events={[event]} />)
     const to = screen.getByRole('combobox', { name: 'To' })
     fireEvent.change(to, { target: { value: event.title } })
-    fireEvent.mouseDown(to)
+    // Use the Autocomplete's explicit popup control rather than relying on a
+    // mouseDown implementation detail of MUI's input element.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open' })[1])
     expect(screen.getByRole('option', { name: /Open Playa Meetup/i })).toBeDefined()
   })
 

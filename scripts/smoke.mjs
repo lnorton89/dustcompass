@@ -353,7 +353,10 @@ assert(
 )
 await page.getByLabel('Add to favourites').click()
 await page.waitForTimeout(300)
-const stored = await page.evaluate(() => localStorage.getItem('playa-map.favorites.v1'))
+const stored = await page.evaluate(
+  (year) => localStorage.getItem(`playa-map.favorites.v1.${year}`),
+  DATA_YEAR,
+)
 assert(Boolean(stored) && stored !== '[]', `favourite persisted (${stored})`)
 
 // Walk and bike estimates should both be present in the drawer.

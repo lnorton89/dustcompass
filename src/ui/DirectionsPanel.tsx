@@ -79,7 +79,13 @@ function EndpointPicker({ label, value, options, layout, pois, disableLive, clea
   return <Autocomplete options={dynamicOptions} value={selected} inputValue={inputValue}
     autoHighlight disableClearable={!clearable}
     sx={clearable ? { '& .MuiAutocomplete-clearIndicator': { visibility: 'visible' } } : undefined}
-    onInputChange={(_, next) => setInputValue(next)} getOptionLabel={(option) => option.label}
+    onInputChange={(_, next, reason) => {
+      // `reset` is MUI synchronizing the text back to the still-selected value.
+      // During a human re-edit that is exactly the stale snap-back from #169.
+      // A real endpoint change remounts this picker via its callsite key, so
+      // selection/programmatic synchronization does not depend on reset events.
+      if (reason === 'input' || reason === 'clear') setInputValue(next)
+    }} getOptionLabel={(option) => option.label}
     getOptionDisabled={(option) => disableLive && option.endpoint.kind === 'live'} isOptionEqualToValue={(a, b) => a.key === b.key}
     filterOptions={(items, state) => {
       const raw = state.inputValue.trim()

@@ -36,6 +36,7 @@ const baseProps = {
   mode: 'walk' as const,
   hasUsableLiveFix: false,
   findingLocation: false,
+  destinationResolved: true,
   onFromChange: vi.fn(),
   onToChange: vi.fn(),
   onModeChange: vi.fn(),
@@ -102,6 +103,51 @@ describe('DirectionsPanel', () => {
     const to = screen.getByRole('combobox', { name: 'To' })
     fireEvent.change(to, { target: { value: event.title } })
     expect(await screen.findByRole('option', { name: /Open Playa Meetup/i })).toBeDefined()
+  })
+
+  it('keeps immediate replacement text under user control after selecting an address (#169)', async () => {
+    const camp: Poi = {
+      uid: 'camp-airship',
+      kind: 'camp',
+      name: 'The Airship',
+      address: '4:30 & D',
+      position: [-119.19, 40.785],
+      positionSource: 'address',
+      accuracyClass: 'derived',
+    }
+    const onToChange = vi.fn()
+    const address = {
+      kind: 'address' as const,
+      address: 'Esplanade & 7:30',
+      position: [-119.2, 40.78] as [number, number],
+    }
+    const { rerender } = render(
+      <DirectionsPanel
+        {...baseProps}
+        pois={[camp]}
+        to={address}
+        onToChange={onToChange}
+      />,
+    )
+
+    const to = screen.getByRole('combobox', { name: 'To' }) as HTMLInputElement
+    expect(to.value).toBe('Esplanade & 7:30')
+
+    fireEvent.change(to, { target: { value: 'The Airship' } })
+    expect(to.value).toBe('The Airship')
+    const option = await screen.findByRole('option', { name: /The Airship/i })
+    fireEvent.click(option)
+    expect(onToChange).toHaveBeenCalledWith({ kind: 'poi', uid: camp.uid })
+
+    rerender(
+      <DirectionsPanel
+        {...baseProps}
+        pois={[camp]}
+        to={{ kind: 'poi', uid: camp.uid }}
+        onToChange={onToChange}
+      />,
+    )
+    expect((screen.getByRole('combobox', { name: 'To' }) as HTMLInputElement).value).toBe('The Airship')
   })
 
   it('refreshes visible endpoint labels when From and To are swapped programmatically', () => {

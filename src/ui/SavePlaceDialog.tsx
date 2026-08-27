@@ -10,6 +10,7 @@ import {
   Typography,
   Chip,
 } from '@mui/material'
+import { MAX_SAVED_PLACE_NAME_LENGTH } from '../data/useSavedPlaces'
 
 interface Props {
   open: boolean
@@ -59,6 +60,8 @@ export function SavePlaceDialog({ open, address, onSave, onClose }: Props) {
           value={name}
           onChange={(event) => setName(event.target.value)}
           onKeyDown={(event) => event.key === 'Enter' && commit()}
+          slotProps={{ htmlInput: { maxLength: MAX_SAVED_PLACE_NAME_LENGTH } }}
+          helperText={`${name.length}/${MAX_SAVED_PLACE_NAME_LENGTH}`}
           sx={{ mt: 1 }}
         />
         <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mt: 2 }}>

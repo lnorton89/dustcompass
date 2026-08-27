@@ -8,14 +8,17 @@ export interface SavedEvent {
   uid: string
   title: string
   savedAt: number
+  /** Stable upstream numeric identity used to detect uid reuse after refresh. */
+  eventId?: number
 }
-
-const MAX_TITLE_LENGTH = 300
 
 function isValidSavedEvent(candidate: Partial<SavedEvent>): candidate is SavedEvent {
   if (typeof candidate.uid !== 'string' || candidate.uid.trim().length === 0) return false
-  if (typeof candidate.title !== 'string' || candidate.title.trim().length === 0 || candidate.title.length > MAX_TITLE_LENGTH) return false
-  return typeof candidate.savedAt === 'number' && Number.isFinite(candidate.savedAt)
+  // Titles are display metadata, not storage identity. Do not impose a
+  // persistence-only length limit that upstream data does not share (#162).
+  if (typeof candidate.title !== 'string' || candidate.title.trim().length === 0) return false
+  if (typeof candidate.savedAt !== 'number' || !Number.isFinite(candidate.savedAt)) return false
+  return candidate.eventId === undefined || (typeof candidate.eventId === 'number' && Number.isFinite(candidate.eventId))
 }
 
 export function parseSavedEvents(raw: string | null): SavedEvent[] {
@@ -31,6 +34,17 @@ export function parseSavedEvents(raw: string | null): SavedEvent[] {
     seenUids.add(candidate.uid)
     return true
   })
+}
+
+/**
+ * Reconcile a persisted bookmark with live data without letting a reused uid
+ * silently transfer user intent to another event (#164). New saves carry the
+ * stable numeric event_id. Legacy saves fall back to exact title continuity;
+ * ambiguity degrades to the existing stale row rather than guessing.
+ */
+export function savedEventMatches(saved: SavedEvent, event: EventItem): boolean {
+  if (saved.uid !== event.uid) return false
+  return saved.eventId !== undefined ? saved.eventId === event.event_id : saved.title === event.title
 }
 
 function read(): SavedEvent[] {
@@ -61,7 +75,7 @@ export function useSavedEvents() {
   const save = useCallback((event: EventItem): boolean => {
     const next = savedEventsRef.current.some((item) => item.uid === event.uid)
       ? savedEventsRef.current
-      : [{ uid: event.uid, title: event.title, savedAt: Date.now() }, ...savedEventsRef.current]
+      : [{ uid: event.uid, title: event.title, eventId: event.event_id, savedAt: Date.now() }, ...savedEventsRef.current]
     return commit(next)
   }, [commit])
 

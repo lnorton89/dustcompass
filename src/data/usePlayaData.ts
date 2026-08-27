@@ -9,14 +9,6 @@ import { applyEmbargo, embargoState, embargoWindowForYear, type EmbargoState } f
 import type { EventRange } from './events'
 import { DATA_YEAR, assetUrl } from '../config'
 
-/**
- * A dataset whose fetch failed and fell back to empty. `toilets`/`services`/
- * `dates` are safety- or schedule-relevant — silently showing a normal-
- * looking map with zero toilets, or a schedule with no event window because
- * `dates_info.json` never loaded, is worse than saying so. `outlines` is
- * cosmetic camp-block geometry and is not tracked: it can fail without the
- * user needing to know.
- */
 export type PartialDataWarning = 'toilets' | 'services' | 'dates'
 
 export interface PlayaData {
@@ -26,16 +18,12 @@ export interface PlayaData {
   camps: CampItem[]
   events: EventItem[]
   pois: Poi[]
-  /** Listings with no location to show — see `UnplacedListing`. */
   unplaced: UnplacedListing[]
-  /** The event week these listings describe, used to anchor "what's on now". */
   range?: EventRange
   services: GeoJSON.FeatureCollection<GeoJSON.Point>
   toilets: GeoJSON.FeatureCollection<GeoJSON.Point>
-  /** Surveyed camp block footprints, drawn at high zoom. */
   campOutlines: GeoJSON.FeatureCollection
   embargo: EmbargoState
-  /** Safety/schedule-relevant datasets that failed to load this attempt. */
   partialDataWarnings: PartialDataWarning[]
 }
 
@@ -59,16 +47,15 @@ export function usePlayaData() {
     setAttempt((current) => current + 1)
   }, [])
 
-  // The pre-embargo dataset from the most recent successful fetch, kept
-  // around so a release-boundary transition can be recomputed locally —
-  // `art`/`camps`/`pois`/`unplaced` all derive from this plus the current
-  // time — without going back to the network. `civic` (services/toilets/
-  // landmarks) isn't embargoed and doesn't change across a transition, so
-  // it's cached alongside rather than recomputed.
   const rawRef = useRef<
     { layout: CityLayout; art: ArtItem[]; camps: CampItem[]; civic: Poi[] } | undefined
   >(undefined)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Every load gets a monotonically increasing generation. A later retry or
+  // DATA_REFRESHED message immediately makes every earlier completion stale,
+  // regardless of network completion order (#167).
+  const loadGenerationRef = useRef(0)
+  const mountedRef = useRef(true)
 
   const clearScheduledTransition = useCallback(() => {
     if (timerRef.current !== undefined) {
@@ -77,16 +64,15 @@ export function usePlayaData() {
     }
   }, [])
 
-  /**
-   * Recompute embargo/art/camps/pois/unplaced from the cached pre-embargo
-   * dataset and arm a timer for whichever configured release boundary (camp
-   * release, then gates-open) hasn't happened yet — nothing is scheduled once
-   * both are released. Called once after a successful fetch and again,
-   * recursively, from the fired timer itself, so a session left open across
-   * both boundaries picks each one up without a reload. `cancelled` is the
-   * same guard `load()` uses for its own fetch, so a superseding load or an
-   * unmount stops this chain too.
-   */
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      loadGenerationRef.current += 1
+      clearScheduledTransition()
+    }
+  }, [clearScheduledTransition])
+
   const scheduleEmbargoTransition = useCallback(
     (cancelled: { current: boolean }) => {
       const embargoWindow = embargoWindowForYear(DATA_YEAR)
@@ -94,7 +80,7 @@ export function usePlayaData() {
       function armNextBoundary() {
         clearScheduledTransition()
         const raw = rawRef.current
-        if (!raw || cancelled.current) return
+        if (!raw || cancelled.current || !mountedRef.current) return
         const current = embargoState(embargoWindow)
         const nextBoundary = !current.campsReleased
           ? embargoWindow.campRelease
@@ -104,7 +90,7 @@ export function usePlayaData() {
         if (!nextBoundary) return
 
         timerRef.current = setTimeout(() => {
-          if (cancelled.current) return
+          if (cancelled.current || !mountedRef.current) return
           if (Date.now() < nextBoundary.getTime()) {
             armNextBoundary()
             return
@@ -132,22 +118,14 @@ export function usePlayaData() {
     [clearScheduledTransition],
   )
 
-  /**
-   * Shared by the initial/retry load and the silent background refresh
-   * below. `clear` decides whether to blank the screen back to the loading
-   * spinner first — appropriate for an explicit retry after a failure, wrong
-   * for a background refresh, which should keep showing the still-good data
-   * already on screen until (and unless) the new fetch actually succeeds.
-   */
   const load = useCallback(() => {
+    const generation = ++loadGenerationRef.current
     const cancelled = { current: false }
-    // A new load — retry or background refresh — makes whatever boundary
-    // was pending from the previous load's dataset moot; it'll be re-armed
-    // below once this load's fetch succeeds.
+    const isCurrent = () =>
+      mountedRef.current && !cancelled.current && generation === loadGenerationRef.current
+
     clearScheduledTransition()
     const base = assetUrl(`data/${DATA_YEAR}`)
-    // Populated by `optional()` below as each safety/schedule-relevant fetch
-    // settles; read once every promise in the Promise.all has resolved.
     const partialDataWarnings: PartialDataWarning[] = []
     const optional = <T,>(warning: PartialDataWarning, promise: Promise<T>, fallback: T): Promise<T> =>
       promise.catch((cause) => {
@@ -168,11 +146,10 @@ export function usePlayaData() {
         loadJson<{ rangeInfo?: EventRange }>(`${base}/dates_info.json`),
         {},
       ),
-      // Cosmetic geometry only — no warning tracked for this one.
       loadJson<GeoJSON.FeatureCollection>(`${base}/city_blocks.geojson`).catch(() => empty()),
     ])
       .then(([layout, rawArt, rawCamps, events, serviceSpecs, rawToilets, dates, outlines]) => {
-        if (cancelled.current) return
+        if (!isCurrent()) return
         const embargo = embargoState(embargoWindowForYear(DATA_YEAR))
         const art = applyEmbargo(rawArt, embargo.artReleased)
         const camps = applyEmbargo(rawCamps, embargo.campsReleased)
@@ -180,11 +157,9 @@ export function usePlayaData() {
         const listed = toPois(layout, art, camps, embargo)
         const services = buildServices(serviceSpecs)
         const toilets = toiletPoints(rawToilets)
-        // The survey's places share the index with the listings so that a tap
-        // on a ranger station resolves the same way a tap on a camp does.
-        // They are not embargoed: the city's own infrastructure is published
-        // with the survey, and only participants' locations are held back.
         const civic = civicPois(layout, services, toilets, city.landmarks)
+        // Commit raw and visible state under the same generation check. An old
+        // response can no longer overwrite either after a newer load wins.
         rawRef.current = { layout, art: rawArt, camps: rawCamps, civic }
         setData({
           layout,
@@ -205,26 +180,20 @@ export function usePlayaData() {
         scheduleEmbargoTransition(cancelled)
       })
       .catch((cause: unknown) => {
-        if (!cancelled.current) {
+        if (isCurrent()) {
           setError(cause instanceof Error ? cause : new Error(String(cause)))
         }
       })
 
     return () => {
       cancelled.current = true
-      clearScheduledTransition()
+      // A stale load's cleanup must not clear the timer armed by a newer one.
+      if (generation === loadGenerationRef.current) clearScheduledTransition()
     }
   }, [clearScheduledTransition, scheduleEmbargoTransition])
 
   useEffect(() => load(), [attempt, load])
 
-  // The service worker refreshes camp/event/listing data in the background
-  // and, once a complete revision has fetched cleanly, tells every open tab
-  // about it — otherwise a scheduled data update stayed invisible for the
-  // rest of whatever session was already open, even though the cache behind
-  // it had already moved on. Re-running the fetch now picks it up, since it
-  // is served from the (now-updated) cache rather than the network — without
-  // blanking the screen back to the loading state in the meantime.
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
     const onMessage = (event: MessageEvent) => {
@@ -237,19 +206,8 @@ export function usePlayaData() {
   return { data, error, retry }
 }
 
-/**
- * Resolve every camp and art piece to a position. Published GPS wins; anything
- * without it falls back to geocoding its address string, which is how records
- * behave before the survey team publishes coordinates.
- */
-/**
- * How many art records it takes before "none of them has a location" means the
- * data is old rather than empty. Burning Man publishes hundreds; a handful
- * would not tell us anything either way.
- */
 const STALE_THRESHOLD = 20
 
-/** Exported for the tests: this is where the embargo decides what is reachable. */
 export function toPois(
   layout: CityLayout,
   art: ArtItem[],
@@ -276,19 +234,11 @@ export function toPois(
         address: item.location_string,
         position,
         positionSource: hasGps(item.location) ? 'gps' : 'address',
-        // Published API GPS is best-effort, not surveyed — Burning Man's own
-        // documentation says a camp/art piece can still move after
-        // Placement finishes publishing coordinates (#61). Only the GIS
-        // survey's own civic points (see civic.ts) earn 'surveyed'.
         accuracyClass: hasGps(item.location) ? 'published' : 'derived',
         thumbnail: item.images?.[0]?.thumbnail_url,
       })
       return
     }
-    // Everything that cannot be placed used to be dropped here, silently, and
-    // with it went every art piece in the catalogue for the week before Gates.
-    // The listing is not the embargoed part; the location is, and there is
-    // none of it on this record to leak.
     unplaced.push({
       uid: item.uid,
       kind,
@@ -303,18 +253,6 @@ export function toPois(
   for (const item of art) sort(item, 'art', item.artist, embargo.artReleased)
   for (const item of camps) sort(item, 'camp', item.hometown, embargo.campsReleased)
 
-  /*
-   * Gates open on the clock, but the locations arrive over the network — and
-   * the people this app is for are the ones with no network. A phone that
-   * cached the city before Gates holds art records with every location stripped
-   * out, and the moment the embargo lifts it would have called all 329 of them
-   * "no location published", which is the opposite of what happened: they were
-   * published, and this copy is older than they are.
-   *
-   * Not one of hundreds having a location is not a catalogue with nothing in
-   * it, it is a snapshot from before. Said plainly, it also tells the reader
-   * the one thing that would fix it — a minute of signal.
-   */
   markStaleSnapshot('camp', camps, embargo.campsReleased, pois, unplaced)
   markStaleSnapshot('art', art, embargo.artReleased, pois, unplaced)
 
@@ -351,7 +289,6 @@ function resolve(
   return undefined
 }
 
-/** Events joined to the camp or art piece that hosts them. */
 export function useEventsByHost(data: PlayaData | undefined) {
   return useMemo(() => {
     const byHost = new Map<string, EventItem[]>()

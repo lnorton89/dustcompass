@@ -88,7 +88,7 @@ import {
   type DirectionsReadResult,
   type DirectionsMode,
 } from './data/directions'
-import { resolveDirectionsRoute } from './data/directionsRuntime'
+import { resolveDirectionsEndpoint, resolveDirectionsRoute } from './data/directionsRuntime'
 import { shareRouteCard } from './ui/routeCard'
 
 type Filter = PoiKind | 'toilets' | 'services' | 'favorites'
@@ -914,6 +914,15 @@ export default function App() {
   // a standalone answer to "where am I".
   const liveAddressLabel = usableFix && data ? reverseGeocode(usableFix, data.layout).label : undefined
 
+  const directionsDestinationResolved = useMemo(() => {
+    if (!data || !directionsTo) return false
+    return Boolean(resolveDirectionsEndpoint(directionsTo, {
+      layout: data.layout,
+      pois: data.pois,
+      livePosition: usableFix,
+    }))
+  }, [data, directionsTo, usableFix])
+
   const directionsPreview = useMemo(() => {
     if (!data || !directionsTo) return undefined
     const resolved = resolveDirectionsRoute(directionsFrom, directionsTo, {
@@ -1187,14 +1196,17 @@ export default function App() {
   ])
 
   const shareDirections = useCallback(async () => {
-    if (!directionsTo) return
+    if (!directionsTo || !directionsDestinationResolved) {
+      if (directionsTo) setProbe('This destination is no longer available to share')
+      return
+    }
     const result = await shareLink(
       directionsUrl({ version: 1, from: directionsFrom, to: directionsTo, mode: directionsMode }),
       'Dust Compass directions',
     )
     if (result === 'copied') setProbe('Route link copied')
     else if (result === 'unavailable') setProbe('Could not copy the route link')
-  }, [directionsFrom, directionsMode, directionsTo])
+  }, [directionsDestinationResolved, directionsFrom, directionsMode, directionsTo])
 
   const shareDirectionsImage = useCallback(async () => {
     if (!directionsPreview || !data) return
@@ -2328,6 +2340,7 @@ export default function App() {
           mode={directionsMode}
           hasUsableLiveFix={Boolean(usableFix)}
           findingLocation={location.status === 'locating'}
+          destinationResolved={directionsDestinationResolved}
           preview={directionsPreview ? {
             fromLabel: directionsPreview.resolved.from.label,
             toLabel: directionsPreview.resolved.to.label,
